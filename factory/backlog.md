@@ -1,16 +1,37 @@
 # Backlog
 
-`/factory next` runs the first unchecked line. `/factory approve` ticks it. § numbers point into docs/.
+`/factory next` runs the first unchecked line. `/factory approve` ticks it. § numbers point into docs/
+(the table at the top of docs/MVP.md says which file holds which section). Derived from the MVP scope
+in §9, in dependency order.
 
-- [ ] 001-setup: uv project and package layout; `fctl serve` on 127.0.0.1:4545; data dir `FCTL_HOME` (default `~/.claude-factories`); full `schema.sql` from §5.1 applied at startup in WAL mode; base Jinja layout with vendored htmx and highlight.js; local-safety middleware (§4.5: Host check, `X-Requested-By: fctl` on mutating requests); pytest + TestClient wired to a temp `FCTL_HOME`.
-- [ ] 002-projects: workspaces; `GET /api/workspaces`, `POST /api/projects/connect`, `GET /api/projects?path=` (§6.1); `fctl connect` collecting git info and resolving the main repo from inside a worktree (§3.1); workspace page (§8 item 2).
-- [ ] 003-tasks-board: task endpoints in §6.2 except run/run-next/stop/log; stage → status mapping and `events` rows (§5.2); manual moves clear stage and are refused during a run; project board (§8.1) with native drag and drop; `fctl task add`.
-- [ ] 004-submit: `fctl submit --new` and `fctl submit <id>` with the temp-index capture (§7.4); `POST /api/tasks/{id}/rounds` and task create with `submit`; per-file split and +/− counts into `round_files`; 413 over 5 MB; `fctl diff`; `GET /api/tasks/{id}/context` and `fctl show`.
-- [ ] 005-review-page: review page (§8 item 5, §8.2, §8.3): header, round selector, Conversation tab with timeline, Files changed with a server-rendered diff table and highlight.js, inline comments, Approve, Request changes (standalone tasks: no run).
-- [ ] 006-agent-api: `fctl spec`, `stage`, `verdict`, `comment`, `decide`, `round` and their endpoints (§6.3, §7.2).
-- [ ] 007-task-detail: task page (§8 item 4) without run controls: spec, rounds with reviewer chips, approver decision, status history.
-- [ ] 008-factory-templates: Create factory (§3.2, §6.1): SKILL.md and the 7 agent templates from §7.3, rendered per project; skip or overwrite; factory state none / uncommitted / ready.
-- [ ] 009-run-manager: run, run-next, stop, and log endpoints (§6.2); worktree creation and `.git/info/exclude`; auth check, env stripping, and the spawn command (§4.3, §4.4); one run at a time; Stop by process group; startup cleanup; Request changes spawns a rework run; run controls, run log, and takeover command on the task page; `Claude: Pro ✓` header.
-- [ ] 010-cli-and-skills: `fctl setup` writing `~/.claude/skills/factory-connect` and `factory-submit` (§7.1); `fctl run`, `fctl rework`, `fctl approve` (§7.2).
-- [ ] 011-code-page: project code page (§8 item 6): `git ls-files` tree, README landing, highlighted file viewer, path containment (§4.5).
-- [ ] 012-dashboard: dashboard (§8 item 1).
+## Foundation
+- [ ] 001-setup: uv project and package layout, console script `fctl` (§3.0); `fctl serve [--port 4545]` on 127.0.0.1 (§7.2); data dir `FCTL_HOME` (default `~/.claude-factories`); full `schema.sql` from §5.1 applied at startup in WAL mode; base Jinja layout with vendored htmx and highlight.js; local-safety middleware (§4.5: Host check, `X-Requested-By: fctl` on mutating requests); `fctl` HTTP client in the stdlib-only CLI module that sends the header; `.gitignore`; pytest + TestClient wired to a temp `FCTL_HOME` and a fake `claude` on PATH.
+- [ ] 002-projects: `GET /api/workspaces`, `POST /api/projects/connect`, `GET /api/projects?path=` (§6.1); `fctl connect --workspace W [--test-cmd C]` collecting path, name, remote, and default branch, rerun updates, unknown workspace created, and the main repo resolved from inside a worktree via `--git-common-dir` (§3.1, §7.4 step 1); factory state none / uncommitted / ready from `git cat-file -e <default_branch>:.claude/skills/factory/SKILL.md` (§3.2 step 4); workspace page with project rows, `+ Workspace`, and moving a project to another workspace (§8 item 2).
+
+## Tasks
+- [ ] 003-tasks-api: `GET /api/projects/{id}/tasks`, `POST /api/projects/{id}/tasks`, `GET /api/tasks/{id}`, `PATCH /api/tasks/{id}` for `spec_md`, `stage`, and `status`+`position` (§6.2); stage → status mapping with an `events` row on every change (§5.2, §7.5); a manual move clears stage and is refused with 409 while a run is active; new tasks go to the bottom of Backlog (§3.3); `fctl task add "title"` (§7.2).
+- [ ] 004-board: project board page (§8 item 3, §8.1): four columns with counts, cards with stage, chips per round, +/−, "waiting on you" and red escalated bar; native HTML5 drag and drop between columns and to reorder Backlog (PATCH); `+ New task` form with title and markdown description (§3.3); header with Code link, factory state, and a disabled Run next; htmx poll every 3 s; empty states.
+
+## Rounds and agent API
+- [ ] 005-submit: `POST /api/tasks/{id}/rounds` and task create with `submit` (§6.2, §6.3); round `trigger` initial / agent / human and `base_sha`; per-file split into `round_files` with change type, rename `old_path`, binary flag, and +/− counts; 413 over 5 MB; `fctl submit --new --title T` and `fctl submit <id>` with the temp-index capture of tracked and untracked files (§7.4); standalone submit lands in review · human_review (§5.2); `GET /api/tasks/{id}/rounds/{n|latest}/diff` and `fctl diff <id> [--round N]`.
+- [ ] 006-agent-api: `PUT …/rounds/latest/verdicts/{reviewer}` (re-post overwrites), `POST /api/tasks/{id}/comments`, `POST /api/tasks/{id}/decision` (§6.3); `GET /api/tasks/{id}/context?round=|?feedback=1` as markdown (§6.2, §4.3); `fctl show [--round N | --feedback]`, `spec`, `stage`, `verdict`, `comment`, `decide`, `round` with stdin heredocs and the `round 2: security=PASS … (3/4)` output (§7.2).
+
+## Review
+- [ ] 007-review-conversation: review page `/tasks/{id}/review` (§8 item 5, §8.2): header with status · stage, branch, round selector (default latest), files and +/−; Conversation tab with description, spec summary, rounds with verdict chips and expandable bodies, approver decision, timeline as the union of events, rounds, verdicts, decisions, and comments (§5.1); conversation comment box; "no agent review" for standalone tasks (§7.4).
+- [ ] 008-review-files: Files changed tab (§8.3): file tree with +/− per file, server-rendered unified diff table with one row per line and anchors `path:side:line`, highlight.js; click a line number to post an inline comment; agent and my inline comments shown in place (§3.5, MVP assumption 12).
+- [ ] 009-review-actions: `POST /api/tasks/{id}/approve` (done, `commit_hint`) and `POST /api/tasks/{id}/request-changes` (CHANGES_REQUESTED decision, stage rework; standalone tasks only record feedback, `run_id` null) (§3.6, §3.7, §6.3); Approve and Request changes buttons enabled only in review, summary required for Request changes, commit commands shown after Approve (§8 item 5); `fctl approve <id>` and `fctl rework <id> "note"` (§7.2).
+- [ ] 010-task-detail: task page `/tasks/{id}` (§8 item 4) without run controls: header, rendered spec, rounds with collapsible build notes, 4 chips that open the verdict, +/−, approver decision, status history from `events`, link to Review.
+
+## Factory and runs
+- [ ] 011-factory-templates: Create factory (§3.2, §6.1 `POST /api/projects/{id}/factory`): SKILL.md and the 7 agent templates from §7.3, adapted from this repo's `.claude/` to fctl, rendered with the project's name, test command, and default branch; skip existing files unless overwrite; written and skipped lists plus the commit hint; Create factory button and result on the board.
+- [ ] 012-run-spawn: `POST /api/tasks/{id}/run` and `POST /api/projects/{id}/run-next` (§6.2); 409 unless the factory is committed on the default branch; worktree `.claude/worktrees/<id>-<slug>` on `factory/<id>-<slug>` and `.claude/worktrees/` in `.git/info/exclude` (§10 assumption 4); env stripping and the `claude auth status` check, 409 `not on subscription auth` (§4.3); the spawn command with the allow and deny lists and the project's test command, in its own process group, stdout to `runs/<run-id>.jsonl` (§4.4); one run at a time, 409 `run #N active`; on exit, record the exit code and read the `result` event (§4.1). The prompt string lives in one constant (§10 open question 1).
+- [ ] 013-run-control: `POST /api/runs/{id}/stop` sending SIGTERM to the process group; stopping `fctl serve` stops every run; at startup a run still marked running becomes `failed: app restarted` (§4.4); `GET /api/runs/{id}/log?after=` turning stream-json into lines (§6.2); Retry re-runs from the current stage (§3.4); Request changes on a factory task spawns a rework run (§3.6).
+- [ ] 014-run-ui: Run, Run next, Stop, and Retry buttons; "stalled · <stage>" cards with Retry (§8.1); task page run status, run log tail polling every 3 s, and the takeover command `cd <worktree> && claude --resume <session-id>` (§8 item 4, §4.4); every page header shows `Claude: Pro ✓` or a red `API key — runs disabled` from `claude auth status` (§8, §4.3).
+- [ ] 015-cli-and-skills: `fctl setup` writing `~/.claude/skills/factory-connect` and `factory-submit` (§7.1, §3.1, §3.8); `fctl run <id>`, `fctl run next`, and `fctl task add "…" --run` (§7.2).
+
+After 015 the app can run factories itself: connect this repo with `/factory-connect`, click Create
+factory, and retire factory/ along with the file-based loop. The jobs below can then run in the app.
+
+## Browse and overview
+- [ ] 016-code-page: project code page `/projects/{id}/code` (§8 item 6): `git ls-files` tree of the main checkout, README landing rendered with raw HTML off, highlighted file viewer with line numbers, "not shown" for binary files and files over 1 MB, current branch in the header, path containment (§4.5).
+- [ ] 017-dashboard: dashboard `/` (§8 item 1): tiles for tasks per status, waiting on me, escalated, running now, done this week, and runs this week, each linking to a filtered list; open tasks per workspace → project by status; rounds per task for tasks done in the last 30 days (average, max, list).
