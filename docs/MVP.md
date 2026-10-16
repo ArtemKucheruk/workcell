@@ -1,0 +1,370 @@
+# Claude Factories — MVP design
+
+Status: draft · Working name: Claude Factories · CLI name: `fctl`
+
+Built on the loop in [`FACTORY.md`](../FACTORY.md). The loop, the agents, and the rules stay
+the same except where this document lists a change (see §4.3).
+
+| File | Sections |
+|---|---|
+| `MVP.md` (this file) | 1 Overview · 2 Concepts · 3 User flows · 4 Architecture · 9 Scope vs Later · 10 Open questions |
+| [`data-model-and-api.md`](data-model-and-api.md) | 5 Data model · 6 API |
+| [`claude-code.md`](claude-code.md) | 7 Claude Code integration (commands, templates, submit example, status updates) |
+| [`ui.md`](ui.md) | 8 UI (screens, board and review wireframes) |
+
+---
+
+## 1. Overview
+
+### Problem
+The factory in FACTORY.md works, but all of its state sits in `board.json` and markdown
+files inside each repo. Every repo has its own dashboard. Reviewing means reading markdown
+files and running `git diff` in a terminal, and the factory merges to main on its own.
+With several projects there is no single place that shows what is queued, what is running,
+and what is waiting on me.
+
+### Goals
+- One local app tracks the features I want to ship, per project, with projects grouped
+  into workspaces.
+- The app runs the factory loop. A **Run** button spawns headless Claude Code, and the
+  app's API and database are the only place factory state lives.
+- Every change gets a GitHub-style review in the app. Claude never commits; I commit and
+  push myself.
+- Installing the factory into a repo takes one click.
+- Runs use my Claude Pro subscription through my claude.ai login. They never bill per token
+  through the API.
+
+### Non-goals (MVP)
+- Multiple users, auth, cloud hosting.
+- Claude committing, pushing, merging, or opening GitHub PRs.
+- Any GitHub API integration.
+- Editing code in the browser.
+- Editing the loop from the UI. To change the loop, edit `.claude/skills/factory/SKILL.md`.
+
+---
+
+## 2. Concepts & glossary
+
+| Term | Meaning |
+|---|---|
+| **Workspace** | A named group of projects, e.g. `work` or `personal`. |
+| **Project** | One local git repo, identified by its main checkout path. It is registered by running `/factory-connect` inside the repo. |
+| **Task** | One feature or fix in a project. Its **status** is the kanban column: `backlog → in_progress → review → done`. |
+| **Stage** | The factory sub-step inside a status: `spec`, `build`, `agent_review`, `approval`, `rework` (all in_progress), and `human_review`, `escalated` (both review). See §5.2. |
+| **Run** | One headless `claude -p "/factory <id>"` process that the app spawns to move a task forward. Only one run is active at a time, across all projects (§4.4). |
+| **Round** | One builder submission plus the four reviewer verdicts on it. A submission is a diff snapshot plus build notes. Rounds are numbered 1, 2, 3… per task and never reset. Each snapshot is the full diff against the base, not an increment. |
+| **Review** | The app's "PR": the review page of a task. It shows every round, the latest snapshot's files and diff with +/− counts, the agent verdicts, the inline comments, the approver's decision, and mine. |
+| **Verdict** | A reviewer agent's `PASS` or `CHANGES` on a round, plus a markdown body. |
+| **Decision** | The approver's `APPROVE`/`ESCALATE`, or my own `APPROVE`/`CHANGES_REQUESTED`. |
+| **Factory** | The `/factory` orchestrator skill plus 7 subagents. The app writes them into `<repo>/.claude/` from its templates. |
+| **Agent** | One subagent file: `spec-writer`, `builder`, `review-security`, `review-ux`, `review-ui`, `review-code`, `approver`. |
+| **Worktree** | A git worktree at `<repo>/.claude/worktrees/<id>-<slug>` on branch `factory/<id>-<slug>`. The builder edits only this directory. |
+| **fctl** | The app's CLI. Agents use it to talk to the API, and I use it to start the server. |
+
+---
+
+## 3. User flows
+
+### 3.0 One-time install
+```
+uv tool install ~/personalProjects/claude-factories   # puts `fctl` on PATH
+fctl setup     # writes ~/.claude/skills/factory-connect and ~/.claude/skills/factory-submit
+fctl serve     # the one command: app on http://127.0.0.1:4545, data in ~/.claude-factories/
+```
+
+### 3.1 Connect a project
+1. In the repo, in my Claude Code session: `/factory-connect personal`
+2. Claude inspects the repo to find the test command, then runs:
+   `fctl connect --workspace personal --test-cmd "pytest -q"`
+3. `fctl` collects the path (`git rev-parse --show-toplevel`), the name (directory name),
+   the remote (`git remote get-url origin`), and the default branch (`origin/HEAD`, falling
+   back to the current branch). It sends `POST /api/projects/connect`.
+4. The output is `Connected api-server (personal) → http://127.0.0.1:4545/projects/3`.
+   Running it again updates the project. An unknown workspace is created on the spot.
+
+### 3.2 Create a factory
+1. Project board → **Create factory**.
+2. The app renders its templates with the project's name, test command, and default branch,
+   and writes 8 files: `.claude/skills/factory/SKILL.md` and `.claude/agents/*.md`.
+   Existing files are skipped and listed, unless I tick *Overwrite*.
+3. The page shows the files it wrote and the command to commit them:
+   `git add .claude/skills/factory .claude/agents && git commit -m "Add factory"`
+4. **Run** stays disabled, with that same hint, until
+   `git cat-file -e main:.claude/skills/factory/SKILL.md` succeeds. Worktrees are created
+   from `main`, so the factory has to be committed there before a run can see it.
+
+### 3.3 Add a feature
+Board → **+ New task** → title and description (markdown) → the card lands at the bottom of
+Backlog as `#12`. CLI alternative: `fctl task add "Rate-limit login endpoint"`.
+I can reorder Backlog by dragging. **Run next** always takes the top card.
+
+### 3.4 Run the factory
+I click **Run** on #12, or **Run next**. What follows:
+
+| # | Who | What happens | Status · stage |
+|---|---|---|---|
+| 1 | app | Creates the worktree `.claude/worktrees/12-rate-limit-login` on `factory/12-rate-limit-login` from `main`, then spawns `claude -p "/factory 12"` in it (§4.4) | backlog → **in_progress** · — |
+| 2 | orchestrator | `fctl stage 12 spec`, spawns spec-writer → `fctl spec 12` | in_progress · spec |
+| 3 | orchestrator | `fctl stage 12 build`, spawns `builder-12` → edits the worktree, runs `pytest -q`, `fctl submit 12` → round 1 | in_progress · build |
+| 4 | orchestrator | `fctl stage 12 agent_review`, spawns 4 reviewers in one message → each runs `fctl verdict 12 <reviewer> …`. The chips fill in live. | in_progress · agent_review |
+| 5 | orchestrator | WAIT FOR ALL (4/4 verdicts). If any is CHANGES and this run has had fewer than 2 rounds: `fctl stage 12 build`, SendMessage `builder-12` → round 2 → back to step 4 | in_progress · build ↔ agent_review |
+| 6 | orchestrator | All PASS, or round cap reached → `fctl stage 12 approval`, spawns approver → `fctl decide 12 APPROVE\|ESCALATE` | in_progress · approval |
+| 7 | orchestrator | APPROVE → `fctl stage 12 human_review`. ESCALATE → `fctl stage 12 escalated` (red "needs you"). The orchestrator then stops. | **review** · human_review / escalated |
+| 8 | app | The process exits. The app records the exit code on the run. | unchanged |
+
+If a run dies before step 7, the card shows **stalled · build** (for example) with
+**Retry**. That includes a run that hit the Pro usage limit: I Retry once the limit resets.
+Retry spawns `/factory 12` again, and the orchestrator picks up from the task's current
+stage.
+
+### 3.5 Review in the app
+I open the card and go to **Review**. The **Conversation** tab shows the description, the
+spec summary, each round's verdicts, and the timeline. **Files changed** shows the file tree
+with +/− per file and a unified diff. Clicking a line number adds an inline comment, and
+reviewer agents' inline comments show up in the same place.
+
+### 3.6 Request changes
+1. I add inline comments and a summary, then click **Request changes** (CLI alternative:
+   `fctl rework 12 "note"`).
+2. The app records my `CHANGES_REQUESTED` decision, sets status · stage to in_progress · rework,
+   and spawns `/factory 12` in the same worktree.
+3. The orchestrator sees `rework` and spawns a fresh `builder-12`. That builder reads
+   `fctl show 12 --feedback`, which has my summary and inline comments, and submits round 3
+   (trigger `human`). Agent review and the approver then run as in §3.4 steps 4–7, and the
+   task returns to Review.
+
+### 3.7 Approve and commit
+1. **Approve** records my `APPROVE` decision and moves the task to done.
+2. The page then shows the commands. The app never runs them.
+   ```
+   cd .claude/worktrees/12-rate-limit-login
+   git add -A && git commit -m "Rate-limit login endpoint"
+   git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
+   git worktree remove .claude/worktrees/12-rate-limit-login
+   ```
+
+### 3.8 Submit without the factory
+Any Claude Code session, in any connected repo: `/factory-submit` creates a task straight in
+Review from the current working tree. The full example is in §7.4.
+
+---
+
+## 4. Architecture
+
+### 4.1 Components
+
+```
+     Browser                         My Claude Code terminal
+        │ HTML + htmx (poll 3s)            │ /factory-connect, /factory-submit → fctl
+        ▼                                  ▼
+┌──────────────────────── fctl serve  (127.0.0.1:4545, one process) ───────────────────────┐
+│  HTML pages   JSON API   run manager   template writer   git reader (tree, file, worktree) │
+└────┬──────────────▲──────────┬────────────────┬──────────────────────┬────────────────────┘
+     │ sqlite3      │ fctl     │ spawn / stop   │ write once           │ git subprocess
+     ▼              │ (HTTP)   ▼                ▼                      ▼
+ ~/.claude-     ┌───┴──────────────────────────────┐  <repo>/.claude/     <repo> main checkout
+ factories/     │ claude -p "/factory 12"          │  skills/factory/     + .claude/worktrees/*
+ factory.db     │ cwd = .claude/worktrees/12-…     │  agents/*.md
+ runs/*.jsonl ◄─┤ orchestrator → spec-writer,      │
+  (stdout log)  │ builder-12, 4 reviewers, approver│── edits files ──► worktree only
+                └──────────────────────────────────┘
+```
+
+- **Browser ↔ app.** The pages are rendered on the server. htmx swaps in fragments, and the
+  board, task, and run-log fragments poll every 3 s.
+- **App → Claude Code.** The app spawns a subprocess. stdout (`stream-json`) goes to
+  `runs/<run-id>.jsonl`, and on exit the app reads the final `result` event for status,
+  and `session_id`.
+- **Agents → app.** Agents run `fctl …` through Bash, which makes a JSON HTTP call to
+  127.0.0.1. Agents never touch the database or any file outside the worktree.
+- **App → DB.** stdlib `sqlite3`, WAL mode. The app is the only process that writes.
+- **App → git.** The app shells out to `git` to add worktrees, list files, show files, and
+  check whether the factory is committed.
+
+### 4.2 Stack
+Python 3.12 with FastAPI and uvicorn. Storage is stdlib `sqlite3`, with no ORM and one
+`schema.sql` that runs at startup. Pages use Jinja2 templates and htmx. markdown-it-py
+renders markdown with raw HTML turned off, and highlight.js (vendored) highlights code.
+The package is built with uv and has 4 runtime dependencies.
+
+Why this stack: the app is mostly subprocess, git, SQLite, and text handling, which is
+boring and well supported in Python. Pages are rendered on the server, so there is no
+frontend build and no Node toolchain to maintain. FastAPI validates requests and serves
+`/docs` for free, which helps when writing agent prompts. SQLite fits one user and one
+writer process, and it is one file to back up. The `fctl` CLI ships in the same package but
+imports only the stdlib, so agents' calls start fast.
+
+### 4.3 Decisions
+
+**Runs are spawned by the app (option b).** The app owns the whole lifecycle: Run, Retry,
+Stop, and rework on Request changes. Running `/factory` from my own terminal is on the Later
+list.
+
+**Runs bill against my Pro subscription, not the API.** A run is my own `claude` CLI,
+logged in through claude.ai, running on my machine. It uses the same Pro limits as my
+interactive sessions.
+- The app removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and every `CLAUDE_CODE_USE_*`
+  provider variable from the run's environment. With any of them set, `claude -p` would
+  quietly bill per token or route to Bedrock or Vertex.
+- Before every run, the app runs `claude auth status` with the same environment and working
+  directory. If the result is not `"authMethod": "claude.ai"`, the run is refused with
+  `409 not on subscription auth`. The app header shows the reported plan,
+  `subscriptionType: "pro"`.
+- Runs never use `--bare`, which accepts only API keys, or the Agent SDK, which needs an API
+  key. Headless `claude -p` is the only way a run starts.
+- There is no dollar budget, because the Pro usage limits are the budget. That is why only
+  one run is active at a time (§4.4).
+
+**Agents call the app through the `fctl` CLI.**
+- Not curl. Escaping markdown and multi-KB diffs as JSON inside Bash is fragile, and every
+  prompt would have to repeat URLs and headers. Capturing a diff that includes untracked
+  files takes several git steps, and those belong in one tested place, not in seven prompts.
+- Not MCP. It would need a server and its registration for every session, and tool
+  permissions for headless runs. It is also harder to try out by hand.
+- `fctl` works from any subagent that has Bash. One allowlist covers it in headless runs.
+  Markdown goes in on stdin heredocs. I can run the exact same commands in a shell.
+
+**Spec, build, and review content lives in the DB only.**
+- It is a single source of truth, and the UI needs it in the DB anyway.
+- Markdown files on disk would land in the worktree and show up in the very diff under review.
+- Agents still "get context from files, not the conversation". `fctl show 12` prints the
+  same markdown the job folders used to hold.
+
+**The builder works in a worktree.** Several tasks can run in parallel, and my main checkout
+is never touched. The branch is created but gets no commits.
+
+**Changes vs FACTORY.md**
+- There is no merge to main. Approver APPROVE moves the task to review · human_review, and
+  only my Approve moves it to done.
+- Claude makes no commits. git write commands are denied in runs (§4.4).
+- `board.json`, `dashboard.html`, and `jobs/*` are replaced by the DB and the API. Stages
+  are set only by the orchestrator through `fctl stage`, the same way the orchestrator was
+  the only writer of `board.json`.
+- `/factory approve` used to merge. Now it only marks the task done.
+- `/factory <feature>`, `next`, and `rework` become app actions (§7.2). The skill has a
+  single entry point, `/factory <id>`, which continues from the task's current stage.
+
+### 4.4 How a run is spawned
+```
+cd /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN FCTL_URL=http://127.0.0.1:4545 \
+claude -p "/factory 12" \
+  --session-id 6f1c2e0a-…  --output-format stream-json --verbose --forward-subagent-text \
+  --permission-mode acceptEdits --permission-prompts none \
+  --allowedTools "Bash(fctl show *)" "Bash(fctl diff *)" "Bash(fctl spec *)" "Bash(fctl submit *)" \
+                 "Bash(fctl verdict *)" "Bash(fctl comment *)" "Bash(fctl decide *)" \
+                 "Bash(fctl stage *)" "Bash(fctl round *)" "Bash(git status *)" "Bash(git diff *)" \
+                 "Bash(pytest *)" \
+  --disallowedTools "Bash(git commit *)" "Bash(git push *)" "Bash(git merge *)" \
+                    "Bash(git rebase *)" "Bash(git reset *)" "Bash(git checkout *)" \
+  < /dev/null  > ~/.claude-factories/runs/41.jsonl 2>&1
+```
+- `env -u` stands for the app removing these variables from the run's environment. The app
+  removes every `CLAUDE_CODE_USE_*` variable as well (§4.3).
+- Only one run is active at a time, across all projects. While a run is going, starting
+  another is refused with `409 run #41 active`. Pro limits are shared with my own sessions,
+  and parallel opus runs would use them up quickly.
+- The working directory is the worktree, so `acceptEdits` covers only that tree.
+  `--permission-prompts none` denies anything not on the allowlist instead of hanging on a
+  prompt.
+- The test command comes from `projects.test_cmd`. Extra commands a project needs go in its
+  own `.claude/settings.json` `permissions.allow`. Denials show up in the run log.
+- Agents can't call `fctl approve`, `run`, or `rework`, so a run can't approve its own work
+  or start other runs.
+- The process runs in its own process group. **Stop** sends SIGTERM to that group. Stopping
+  `fctl serve` stops every run, and at startup any run still marked `running` becomes
+  `failed: app restarted`.
+- The task page shows a takeover command:
+  `cd <worktree> && claude --resume <session-id>`.
+
+### 4.5 Local safety
+Single user and no auth still need these, because the API can start processes that edit code.
+- The server binds `127.0.0.1` only.
+- Every mutating request must carry `X-Requested-By: fctl`, and the `Host` must be
+  `127.0.0.1` or `localhost`. That blocks CSRF from web pages and DNS rebinding. `fctl` and
+  htmx both send the header.
+- Markdown (READMEs, agent output) is rendered with raw HTML off. The code viewer escapes
+  everything.
+- The code page resolves paths inside the project root only: no `..`, and no symlinks that
+  point outside it.
+- The server rejects patches over 5 MB with `413`.
+
+---
+
+## 9. MVP scope vs Later
+
+**MVP**
+- `fctl serve`, `fctl setup`, and the CLI in §7.2.
+- Workspaces, projects, and `/factory-connect`.
+- Create factory (templates → `.claude/`).
+- Tasks, the board with drag and drop, Run / Run next / Stop / Retry, and run logs.
+- Subscription-only runs with the auth check (§4.3), one run at a time.
+- Headless runs in worktrees, rework on Request changes, and takeover by
+  `claude --resume`.
+- Review page: rounds, verdict chips, unified diff, inline comments, Approve, Request changes.
+- `/factory-submit` for changes made without the factory.
+- Dashboard, project code page with README landing.
+- The local safety measures in §4.5.
+
+**Later**
+- Running `/factory <id>` from my own terminal against the same API (option a). Needs a
+  `fctl worktree <id>` helper.
+- On rework, resuming the previous session (`--resume`) so the builder keeps its memory.
+- `claude --bg` with `claude attach` to watch or join a live run.
+- Split diff view, interdiff ("changes since round N"), suggestion blocks, resolving comment
+  threads.
+- A run queue, and parallel runs if I move to Max or to an API key. With an API key, add
+  `--max-budget-usd` budgets and per-run cost from the `result` event's `total_cost_usd`.
+- Detecting the usage-limit error so the card shows the reset time.
+- Switching agents to sonnet if opus uses up Pro limits too fast.
+- A warning on Approve if the worktree changed since the latest snapshot.
+- A worktree cleanup button that checks the branch is committed first, push / open a GitHub
+  PR from the app, and commit from the app.
+- SSE instead of polling, and desktop notifications when a review is waiting.
+- Factory template upgrades with a 3-way merge, a configurable reviewer set, and editing the
+  loop in the UI.
+- `fctl export` of a task to markdown, search, labels, and priorities.
+- Branch and worktree browsing on the code page.
+
+---
+
+## 10. Open questions & assumptions
+
+### Assumptions
+1. FACTORY.md is the "factory example" this app runs. Its loop, agents, and rules carry over
+   except for §4.3.
+2. "max 2 rounds" means at most 2 agent review rounds per run. If round 2 still has CHANGES,
+   the approver runs and must ESCALATE. A rework run gets its own 2.
+3. The factory files must be committed on `default_branch` before the first Run, because
+   worktrees branch from it. The app shows the command and never commits.
+4. Worktrees live in `<repo>/.claude/worktrees/<id>-<slug>` (Claude Code's own convention).
+   The app adds `.claude/worktrees/` to `.git/info/exclude`, so the main checkout stays clean
+   and no tracked file changes.
+5. Each round's snapshot is the full diff against `HEAD`, which is the base, because Claude
+   never commits.
+6. Rework starts a fresh session. The builder gets its context from the app, not from
+   memory.
+7. Runs use my Claude Pro subscription through my normal Claude Code login, checked as
+   `authMethod: claude.ai`, `subscriptionType: pro` (§4.3). They share usage limits with my
+   interactive sessions.
+8. One run is active at a time, across all projects. Stopping the app stops
+   all runs.
+9. Task ids are global integers, the reviewer set is fixed (security, ux, ui, code), and the
+   port is 4545.
+10. Approve means done, whether or not I have committed yet.
+11. The app runs on macOS or Linux. `git`, `claude`, and `uv` are on PATH.
+12. Reviewer agents may leave inline comments, and they render like mine.
+13. Polling every 3 s is fast enough. There are no websockets in the MVP.
+14. The agents keep FACTORY.md's models: opus for spec-writer, builder, security, and
+    approver; sonnet for ux, ui, and code. Changing that later means editing one `model:`
+    line per agent file.
+15. A run that hits the Pro usage limit fails like any other run: the card shows "stalled",
+    and I Retry once the limit resets. Detecting the limit itself is on the Later list.
+
+### Open questions
+1. Does `claude -p "/factory 12"` reliably invoke a project skill in print mode? If not, the
+   prompt becomes "Use the factory skill on task 12". This needs verifying with the
+   installed CLI before implementation. The flags themselves are checked against
+   `claude --help`.
+2. Should Approve be blocked until the worktree branch has a commit? It's not blocked in
+   this design, to keep "commit myself" fully manual.
