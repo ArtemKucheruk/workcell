@@ -14,7 +14,7 @@ DEFAULT_URL = "http://127.0.0.1:4545"
 # The app's values, repeated here for argparse `choices`: this module must not import app.py.
 REVIEWERS = ("security", "ux", "ui", "code")
 STAGES = ("spec", "build", "agent_review", "approval", "rework", "human_review", "escalated")
-DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; my APPROVE and CHANGES_REQUESTED come in 009
+DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; mine go through `fctl approve` and `fctl rework`
 
 
 def _fail(message: str):
@@ -194,6 +194,18 @@ def decide(args):
     print(f"Decision #{r['id']} on #{args.id}: {args.decision}")
 
 
+def approve(args):
+    """docs/claude-code.md §7.2: my Approve; prints the commands to commit it myself (Q11)."""
+    r = api("POST", f"/api/tasks/{args.id}/approve", {"body_md": ""})
+    print(f"#{args.id}: {r['status']}\n{r['commit_hint']}")
+
+
+def rework(args):
+    """§7.2: my Request changes with its note."""
+    r = api("POST", f"/api/tasks/{args.id}/request-changes", {"body_md": args.note})
+    print(f"#{args.id}: {r['status']} · {r['stage']}")
+
+
 def round_status(args):
     """docs/claude-code.md §7.2: the latest round's verdicts, for the orchestrator's WAIT FOR ALL."""
     rounds = api("GET", f"/api/tasks/{args.id}")["rounds"]
@@ -270,5 +282,12 @@ def main(argv=None):
     p = commands.add_parser("round", help="print the latest round's verdicts, e.g. (3/4)")
     p.add_argument("id", type=int, help="the task")
     p.set_defaults(func=round_status)
+    p = commands.add_parser("approve", help="approve a task in review: done, then print the commit commands")
+    p.add_argument("id", type=int, help="the task")
+    p.set_defaults(func=approve)
+    p = commands.add_parser("rework", help="request changes on a task in review: in_progress · rework")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("note", help='what should change, e.g. "Make the limit configurable"')
+    p.set_defaults(func=rework)
     args = parser.parse_args(argv)
     args.func(args)

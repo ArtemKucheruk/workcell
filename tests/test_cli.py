@@ -724,3 +724,36 @@ def test_agent_usage_errors(server, monkeypatch, capsys, argv):  # 006 AC39
     assert e.value.code == 2
     assert capsys.readouterr().err.startswith(f"usage: fctl {argv[0]}")
     assert server.requests == []
+
+
+# --- My review actions (009): approve, rework ----------------------------------------
+
+
+def test_approve(server, capsys):  # 009 AC24
+    server.reply = reply({"status": "done", "commit_hint": "cd /x\ngit add -A && git commit -m 'T'"})
+    cli.main(["approve", "12"])
+    assert requests(server) == [("POST", "/api/tasks/12/approve", {"body_md": ""})]
+    assert capsys.readouterr().out == "#12: done\ncd /x\ngit add -A && git commit -m 'T'\n"
+
+
+def test_rework(server, capsys):  # 009 AC25
+    server.reply = reply({"status": "in_progress", "stage": "rework", "run_id": None}, 202)
+    cli.main(["rework", "12", "Make the limit configurable"])
+    assert requests(server) == [("POST", "/api/tasks/12/request-changes", {"body_md": "Make the limit configurable"})]
+    assert capsys.readouterr().out == "#12: in_progress · rework\n"
+
+
+def test_rework_needs_note(server, capsys):  # 009 AC26
+    with pytest.raises(SystemExit) as e:
+        cli.main(["rework", "12"])
+    assert e.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: fctl rework")
+    assert server.requests == []
+
+
+def test_approve_refused(server, capsys):  # 009 AC26
+    server.reply = reply({"detail": "#12 is not in review"}, 409)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["approve", "12"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: 409 #12 is not in review\n"

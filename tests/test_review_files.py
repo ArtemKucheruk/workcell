@@ -139,7 +139,7 @@ def test_tab_bodies(client, sample):  # AC2
     html = files_tab(client, sample)
     for name in ("description", "rounds", "approver", "timeline"):
         assert section(html, name) is None
-    assert "<textarea" not in html
+    assert "<textarea" not in html.split("</header>", 1)[1]  # 009's Summary box sits in the header
     for query in ("", "?tab=conversation", "?tab=xyz"):
         html = page(client, sample, query)
         assert section(html, "timeline") is not None
@@ -345,7 +345,7 @@ def test_inline_form(client, sample):  # AC17
     "path=app/auth.py&side=both&line=42", "path=nope.py&side=new&line=42", "path=app/auth.py",
 ])
 def test_no_form_for_bad_target(client, sample, target):  # AC18
-    html = files_tab(client, sample, f"?round=1&tab=files&{target}")
+    html = files_tab(client, sample, f"?round=1&tab=files&{target}").split("</header>", 1)[1]  # past 009's forms
     assert "hx-post" not in html and "<textarea" not in html
 
 

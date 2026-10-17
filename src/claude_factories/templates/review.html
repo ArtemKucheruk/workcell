@@ -4,7 +4,7 @@
 {% set labels = {"backlog": "Backlog", "in_progress": "In progress", "review": "Review", "done": "Done"} %}
 {% set short = {"security": "sec", "ux": "ux", "ui": "ui", "code": "code"} %}
 {% set symbol = {"PASS": "✓", "CHANGES": "✗", "pending": "·"} %}
-<header>
+<header><div class="review-header">
   <p><a href="/projects/{{ task.project_id }}">{{ task.project }}</a></p>
   <h1>#{{ task.id }} {{ task.title }}</h1>
   <div class="review-meta">
@@ -24,8 +24,30 @@
     {% endif %}
     {% if selected %}<span id="files" class="diff">{{ selected.files }} file{{ "" if selected.files == 1 else "s" }} changed +{{ selected.additions }} −{{ selected.deletions }}</span>{% endif %}
   </div>
-</header>
+  {# 009 Q2, Q3, Q12: enabled only in review with a round to decide on. Both forms are display: contents
+     (base.html), so their buttons sit on the title row (§8.2) and the Summary under the meta line. #}
+  {% set off = "" if task.status == "review" and rounds else " disabled" %}
+  <form hx-post="/tasks/{{ task.id }}/request-changes">
+    <div class="summary">
+      <label for="summary">Summary</label>
+      <textarea name="body_md" required id="summary" rows="2" placeholder="What should change? Required for Request changes."{{ off }}></textarea>
+      <p class="form-error" role="alert"></p>
+    </div>
+    <button class="request-changes"{{ off }}>Request changes</button>
+  </form>
+  <form hx-post="/tasks/{{ task.id }}/approve">
+    <button class="approve"{{ off }}>Approve</button>
+    <p class="form-error" role="alert"></p>
+  </form>
+</div></header>
 <main>
+{% if commit_hint %}
+<section id="commit">
+  <h3>Commit it yourself</h3>
+  <p class="muted">Done. The app never runs git; run these in a terminal.</p>
+  <pre>{{ commit_hint }}</pre>
+</section>
+{% endif %}
 {% set round_q = "round=" ~ selected.n if selected else "" %}
 <nav class="tabs" aria-label="Review tabs">
   <a href="/tasks/{{ task.id }}/review{% if selected %}?{{ round_q }}{% endif %}"{% if tab != "files" %} aria-current="page"{% endif %}>Conversation</a>
