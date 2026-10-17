@@ -41,6 +41,34 @@
     #timeline time { color: GrayText; font-variant-numeric: tabular-nums; margin-right: .5rem; }
     #timeline li > :not(time) { margin: .25rem 0 0 1rem; }
     .comment-box { display: grid; gap: .5rem; max-width: 48rem; }
+    .form-error { margin: 0; font-weight: bold; color: light-dark(#cf222e, #f85149); }  /* the escalated red */
+    /* Files changed (docs/ui.md §8.3) */
+    .tabs { display: flex; gap: 1rem; border-bottom: 1px solid GrayText; margin-block: 1rem; }
+    .tabs a { padding: .25rem .5rem; text-decoration: none; }
+    .tabs a[aria-current="page"] { font-weight: bold; border-bottom: 2px solid currentColor; }
+    .files-layout { display: grid; grid-template-columns: minmax(10rem, 16rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+    @media (max-width: 48rem) { .files-layout { grid-template-columns: minmax(0, 1fr); } }
+    #file-tree { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+    #file-tree ul { list-style: none; margin: 0; padding-left: 1rem; }
+    #file-tree > ul { padding-left: 0; }
+    .file-header { display: flex; flex-wrap: wrap; gap: .5rem; font-size: 1rem; margin: 1rem 0 .25rem; }
+    .file-header .diff { margin-left: auto; }
+    .diff-scroll { overflow-x: auto; border: 1px solid GrayText; border-radius: 6px; }
+    .diff-table { margin: 0; min-width: 100%; font-family: ui-monospace, monospace; font-size: .85rem; }
+    .diff-table td { padding: 0 .5rem; border: 0; white-space: pre; vertical-align: top; }
+    .diff-table td.num, .diff-table td.sign { width: 1%; user-select: none; }
+    .diff-table td.num a { color: GrayText; text-decoration: none; }
+    .diff-table td.num a:hover, .diff-table td.num a:focus { text-decoration: underline; }
+    .diff-table tr.hunk td, .diff-table tr.note td { color: GrayText; }
+    /* Q9: GitHub's diff backgrounds, the only new hard-coded colors */
+    .diff-table tr.add { background: light-dark(#e6ffec, #2ea04326); }
+    .diff-table tr.del { background: light-dark(#ffebe9, #f851491a); }
+    .diff-table tr.comments td, .diff-table tr.comment-form td {
+      white-space: normal; font-family: system-ui, sans-serif; padding: .5rem; border-block: 1px solid GrayText; }
+    .diff-table .comment, .diff-table .comment-box { position: sticky; left: .5rem; max-width: min(48rem, 80vw); }
+    .comment + .comment { margin-top: .5rem; }
+    .comment > p { margin: .25rem 0 0; }
+    code.hljs { background: transparent; padding: 0; }
   </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>
