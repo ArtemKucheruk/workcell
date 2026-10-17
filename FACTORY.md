@@ -54,7 +54,7 @@ writes its job's entry in factory/board.json. To run a second job alongside, I r
         ▼             ▼             ▼             ▼         │
   ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐   │
   │  security │ │     ux    │ │ ui design │ │    code   │   │
-  │    opus   │ │   sonnet  │ │   sonnet  │ │   sonnet  │   │
+  │    opus   │ │   haiku   │ │   haiku   │ │   sonnet  │   │
   └─────┬─────┘ └─────┬─────┘ └─────┬─────┘ └─────┬─────┘   │
         └─────────────┴──────┬──────┴─────────────┘         │
                              ▼                              │
@@ -130,8 +130,8 @@ factory/
 | spec-writer | opus | Read, Grep, Glob, Write | the feature or backlog line, docs/, code on main (the job's fresh worktree) | `spec.md` |
 | builder | opus | Read, Edit, Write, Grep, Glob, Bash | `spec.md`, the last round's reviews, `feedback-N.md` | code in its worktree, `round-N/build.md` |
 | review-security | opus | Read, Grep, Glob, Bash, Write | spec, build.md, diff.patch, worktree | `round-N/review-security.md` |
-| review-ux | sonnet | same | same | `round-N/review-ux.md` |
-| review-ui | sonnet | same | same | `round-N/review-ui.md` |
+| review-ux | haiku | same | same | `round-N/review-ux.md` |
+| review-ui | haiku | same | same | `round-N/review-ui.md` |
 | review-code | sonnet | same | same, plus it runs the tests in the worktree | `round-N/review-code.md` |
 | approver | opus | Read, Grep, Glob, Write | the whole job folder | `decision.md` |
 
@@ -151,6 +151,8 @@ What each one does:
   "nothing user-facing".
 - **ui** reviews pages against docs §8 and its wireframes, including empty and error states
   and light/dark. If the job has no UI, it writes `VERDICT: PASS` with "no UI in this job".
+  If the diff touches no `templates/` or `static/` file, the orchestrator skips it and
+  writes that PASS file itself.
 - **code** checks the stack and conventions above, that every acceptance criterion has a
   passing test, and that there are no unrequested abstractions or dependencies.
 - **approver** writes APPROVE or ESCALATE. It escalates if CHANGES remain after round 2,
@@ -201,12 +203,13 @@ factory/board.json
   "Generated with Claude Code" line.
 - After every builder round, the orchestrator snapshots the worktree, including untracked
   files, without touching the index, against the job's base on main (so rework rounds
-  still show the whole job, not just what changed since the last commit):
+  still show the whole job, not just what changed since the last commit). Vendored
+  `*.min.*` files and `uv.lock` stay out, since every reviewer reads the patch:
       t=$(mktemp -d); wt=.claude/worktrees/<job-id>
       base=$(git -C $wt merge-base HEAD origin/main)
       GIT_INDEX_FILE=$t/index git -C $wt read-tree HEAD
       GIT_INDEX_FILE=$t/index git -C $wt add -A
-      GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base > factory/jobs/<job-id>/round-<n>/diff.patch
+      GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' > factory/jobs/<job-id>/round-<n>/diff.patch
       rm -rf $t
 - WAIT FOR ALL: a review round is done only when every reviewer's file exists in the
   round folder. Never resume the builder mid-round.
