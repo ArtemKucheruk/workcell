@@ -15,6 +15,20 @@
     th, td { padding: .35rem .75rem; text-align: left; border-bottom: 1px solid GrayText; }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
     .muted { color: GrayText; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: start; }
+    .toolbar form { display: grid; gap: .5rem; margin-top: .5rem; }
+    #board-error { font-weight: bold; }
+    #board { display: grid; grid-template-columns: repeat(4, minmax(11rem, 1fr)); gap: 1rem; align-items: start; overflow-x: auto; }
+    .column { border: 1px solid GrayText; border-radius: 6px; padding: .5rem; min-height: 8rem; }
+    .column h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    .column ol { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+    .card { border: 1px solid GrayText; border-radius: 6px; padding: .5rem; cursor: grab; }
+    .card p { margin: .25rem 0 0; }
+    .card.dragging { opacity: .5; }
+    .chips, .diff { font-variant-numeric: tabular-nums; }
+    /* Q3: the only hard-coded color; light-dark keeps contrast in both schemes */
+    .card.escalated { border-left: 4px solid light-dark(#cf222e, #f85149); }
+    .escalated .badge { color: light-dark(#cf222e, #f85149); font-weight: bold; }
   </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>

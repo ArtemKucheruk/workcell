@@ -368,15 +368,34 @@ async def create_workspace(request: Request):
 
 @app.get("/projects/{project_id}", response_class=HTMLResponse)
 def project_page(request: Request, project_id: int):
-    # ponytail: stub (Q11); job 004 adds the board
+    # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
+    # add a /projects/{id}/board fragment route if that shows up in profiling
     project = one_or_404(
-        "SELECT p.id, p.name, p.path, p.workspace_id, w.name AS workspace FROM projects p"
+        "SELECT p.id, p.name, p.path, p.default_branch, p.workspace_id, w.name AS workspace FROM projects p"
         " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
         (project_id,),
     )
-    return templates.TemplateResponse(
-        request, "project.html", {"project": project, "workspaces": workspaces()}
+    tasks = list_tasks(project_id)
+    # Q13: the API doesn't return position; read it after list_tasks so every listed task has one
+    positions = dict(query("SELECT id, position FROM tasks WHERE project_id = ?", (project_id,)))
+    columns = {status: [] for status in COLUMNS}
+    for t in tasks:
+        columns[t["status"]].append(t | {"position": positions[t["id"]]})
+    return templates.TemplateResponse(request, "project.html", {
+        "project": project, "workspaces": workspaces(), "columns": columns,
+        "factory": factory_state(project["path"], project["default_branch"]),
+    })
+
+
+@app.post("/projects/{project_id}/tasks")
+async def add_task_form(request: Request, project_id: int):
+    """Q10: the + New task form; create_task validates, places, and logs the event."""
+    body = TaskBody(
+        title=await form_field(request, "title"),
+        description_md=await form_field(request, "description_md"),
     )
+    create_task(project_id, body)
+    return hx_redirect(f"/projects/{project_id}")
 
 
 @app.post("/projects/{project_id}/workspace")
