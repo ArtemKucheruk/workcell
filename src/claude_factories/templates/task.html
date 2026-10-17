@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}#{{ task.id }} {{ task.title }} · {{ task.project }}{% endblock %}
+{% block content %}
+{# review.html's maps, verbatim: they live inside its content block, so they can't be imported #}
+{% set labels = {"backlog": "Backlog", "in_progress": "In progress", "review": "Review", "done": "Done"} %}
+{% set short = {"security": "sec", "ux": "ux", "ui": "ui", "code": "code"} %}
+{% set symbol = {"PASS": "✓", "CHANGES": "✗", "pending": "·"} %}
+{# Q10 ponytail: polling pauses while any build note or verdict is open, so the page goes stale while I read
+   one; to keep it live, poll anyway and reopen the open <details> and popovers by id on htmx:afterSwap #}
+<div id="live" hx-get="/tasks/{{ task.id }}" hx-trigger="every 3s [!document.querySelector('#live details[open], #live :popover-open')]" hx-select="#live" hx-swap="outerHTML">
+<header>
+  <p><a href="/projects/{{ task.project_id }}">{{ task.project }}</a></p>
+  <h1>#{{ task.id }} {{ task.title }}</h1>
+  <div class="review-meta">
+    <span id="status">{{ labels[task.status] }}
+      {%- if task.stage == "escalated" %} · <strong class="escalated">⚠ NEEDS YOU — escalated</strong>
+      {%- elif task.stage == "human_review" %} · waiting on you
+      {%- elif task.stage %} · {{ task.stage }}{% endif %}</span>
+    {% if task.branch %}<code>{{ task.branch }}</code>{% endif %}
+    <a href="/tasks/{{ task.id }}/review">Review</a>
+  </div>
+</header>
+<main>
+<section id="description">
+  <h3>Description</h3>
+  {% if task.description_md.strip() %}{{ task.description_md | markdown }}{% else %}<p class="muted">No description.</p>{% endif %}
+</section>
+<section id="spec">
+  <h3>Spec</h3>
+  {% if task.spec_md and task.spec_md.strip() %}{{ task.spec_md | markdown }}{% else %}<p class="muted">No spec yet.</p>{% endif %}
+</section>
+<section id="rounds">
+  <h3>Rounds</h3>
+  {% for r in rounds %}
+  {% set verdicts = posted.get(r.n, {}) %}
+  {% set notes = build[r.n] %}
+  <div id="round-{{ r.n }}" class="round">
+    <p class="round-row"><strong>Round {{ r.n }}</strong> <span class="muted">{{ r.trigger }}</span>
+      {% if task.worktree_path is none and not verdicts %}<span class="muted">no agent review</span>
+      {% else %}<span class="chips">{% for who, verdict in r.verdicts.items() %}
+        {%- if who in verdicts and verdicts[who].body_md.strip() %} <button type="button" popovertarget="verdict-{{ r.n }}-{{ who }}" title="{{ who }}: {{ verdict }}">{{ short[who] }} {{ symbol[verdict] }}</button>
+        {%- else %} <span title="{{ who }}: {{ verdict }}">{{ short[who] }} {{ symbol[verdict] }}</span>{% endif %}
+      {%- endfor %}</span>{% endif %}
+      <span class="diff">+{{ r.additions }} −{{ r.deletions }}</span></p>
+    {# Q1: outside the <p>, which a <div> would close early #}
+    {% for who in reviewers if who in verdicts and verdicts[who].body_md.strip() %}
+    <div popover id="verdict-{{ r.n }}-{{ who }}">
+      <p><strong>{{ who }} · {{ verdicts[who].verdict }}</strong></p>
+      {{ verdicts[who].body_md | markdown }}
+    </div>
+    {% endfor %}
+    {% if notes and notes.strip() %}
+    <details><summary>Build notes</summary>{{ notes | markdown }}</details>
+    {% else %}
+    <p class="muted">No build notes.</p>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted">No rounds yet.</p>
+  {% endfor %}
+</section>
+{% if approver %}
+<section id="approver">
+  <p><strong>Approver · {{ approver.decision }}</strong> <span class="muted">round {{ approver.n }}</span></p>
+  {{ approver.body_md | markdown }}
+</section>
+{% endif %}
+<section id="history">
+  <h3>Status history</h3>
+  <ol>
+    {% for e in history %}
+    <li><time datetime="{{ e.created_at }}">{{ e.created_at | local_time }}</time> {{ e.label }}</li>
+    {% endfor %}
+  </ol>
+</section>
+</main>
+</div>
+{% endblock %}
