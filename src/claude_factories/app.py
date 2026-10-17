@@ -1005,6 +1005,73 @@ async def create_factory_form(request: Request, project_id: int):
     return templates.TemplateResponse(request, "factory_result.html", result)
 
 
+# --- Code page (docs/ui.md §8 item 6) ---
+
+MAX_VIEW = 1024 * 1024  # Q5: over this many bytes, a file isn't shown
+
+
+def git_stdout(root: str, *args: str) -> tuple[bytes | None, str | None]:
+    """MVP §4.1, Q10: (git's stdout, None), or (None, the first line of its stderr) if it fails."""
+    try:
+        r = subprocess.run(["git", "-C", root, *args], capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        return None, "git timed out"
+    except (OSError, ValueError) as e:  # no git, a NUL in the path
+        return None, str(e)
+    if r.returncode:
+        return None, next(iter(r.stderr.decode(errors="replace").strip().splitlines()), f"git exited {r.returncode}")
+    return r.stdout, None
+
+
+def read_tracked(root: str, path: str) -> dict:
+    """Q3–Q5, Q9: a tracked file's text and line count, or the note shown instead. Nothing outside the
+    root and nothing but a regular file is ever opened."""
+    real = os.path.realpath(os.path.join(root, path))
+    if not Path(real).is_relative_to(os.path.realpath(root)):
+        return {"note": "Not shown: points outside the project."}
+    if not os.path.isfile(real):  # a directory, a submodule, a FIFO, gone from disk
+        return {"note": "Not shown: not a regular file."}
+    try:
+        if os.stat(real).st_size > MAX_VIEW:
+            return {"note": "File over 1 MB not shown."}
+        with open(real, "rb") as f:
+            data = f.read(MAX_VIEW)
+    except OSError as e:
+        return {"note": f"Not shown: {e.strerror or e}."}
+    if b"\0" in data[:8000]:  # git's binary heuristic
+        return {"note": "Binary file not shown."}
+    if not data:
+        return {"note": "Empty file."}
+    text = data.decode(errors="replace")
+    # Q9: lines end at \n, \r\n, or a lone \r, as HTML breaks them; a final line ending adds none
+    return {"text": text, "lines": len(re.findall(r"\r\n?|\n", text)) + (text[-1] not in "\r\n")}
+
+
+@app.get("/projects/{project_id}/code", response_class=HTMLResponse)
+def code_page(request: Request, project_id: int, path: str = ""):
+    """§8 item 6: the main checkout's `git ls-files` tree beside README.md (no `path`) or one file."""
+    project = one_or_404("SELECT id, name, path FROM projects WHERE id = ?", (project_id,),
+                         f"Project #{project_id} not found")
+    root, context = project["path"], {"project": project, "path": path}
+    listed, error = git_stdout(root, "ls-files", "-z")
+    if error:  # Q10
+        return templates.TemplateResponse(request, "code.html", context | {"error": error})
+    raw = listed.split(b"\0")[:-1]
+    names = [n.decode(errors="replace") for n in raw]
+    tracked = {n for n, b in zip(names, raw) if n.encode() == b}  # Q4: a name that didn't decode is listed, not viewable
+    if path and path not in tracked:  # Q2: before any filesystem call
+        raise HTTPException(404, f"{path} is not a tracked file in {project['name']}")
+    shown = path or ("README.md" if "README.md" in tracked else "")  # Q6
+    out, _ = git_stdout(root, "branch", "--show-current")
+    name = path.rpartition("/")[2]
+    return templates.TemplateResponse(request, "code.html", context | {
+        "tree": file_tree([{"path": n} for n in names]), "shown": shown,
+        "view": read_tracked(root, shown) if shown else {"note": "No README.md in this project."},
+        "branch": None if out is None else out.decode(errors="replace").strip() or "detached HEAD",  # Q7
+        "lang": name.rpartition(".")[2].lower() if "." in name else None,  # Q9, same rule as review_files
+    })
+
+
 # §5.1, Q8: one row per event, round, verdict, decision, and comment, labelled; ties sort by kind, then id.
 TIMELINE = """
 SELECT created_at, 0 AS kind, id, IIF(from_status IS NULL, 'created · ', '') || COALESCE(to_status, '')
