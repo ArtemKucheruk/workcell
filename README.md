@@ -103,7 +103,8 @@ feature
 Rules that hold everywhere:
 - Agents get their context from files, not from the conversation, and each writes only its
   own file.
-- One job at a time. A new job starts only after every finished job is merged into `main`.
+- One job per terminal. Run `/factory next` in another terminal to start a second job; it
+  skips backlog lines that need code from, or would edit the same code as, an unfinished job.
 - Nobody but you commits, pushes, merges, rebases, or switches branches. The orchestrator's
   only git write is `git worktree add`.
 
@@ -118,7 +119,7 @@ Code session at the repo root:
 
 | command | does |
 |---|---|
-| `/factory next` | runs the first unchecked line in `factory/backlog.md` |
+| `/factory next` | runs the first unchecked line in `factory/backlog.md` that no active job blocks |
 | `/factory <feature>` | adds a job with the next free id and runs it |
 | `/factory resume [<id>]` | continues an in-progress job whose session ended |
 | `/factory approve <id>` | marks the job done, ticks the backlog, and prints your git commands |

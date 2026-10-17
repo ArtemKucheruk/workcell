@@ -1,0 +1,26 @@
+APPROVE
+Built: `fctl connect` (stdlib only, reuses `api()`). It finds the main checkout through `--git-common-dir`, so a worktree or a subdirectory connects the main repo. The default branch is `origin/HEAD`, falling back to the main checkout's branch. Also `db.now()` and the three §6.1 routes: `GET /api/workspaces`, `POST /api/projects/connect` (an upsert keyed by path, with the Q5 422s), and `GET /api/projects?path=` (none / uncommitted / ready). There's the workspace page (per-status counts, factory state, last activity), the `+ Workspace` and move-project htmx form routes (stdlib `parse_qs`, 204 + `HX-Redirect`), the stub project page, the workspace list on `/`, and a small `<style>` in base.html with no hard-coded colors.
+Rounds: 1 of 2, and all 4 reviews PASS. Tests: 87 passed, 1 warning (Starlette's httpx deprecation, the same as in 001). AC1–AC38 each map to a passing test that checks the criterion (I checked the test bodies, not just build.md). No middleware or schema change, and no new dependencies.
+Docs: MVP §3.1 step 3 still says the path comes from `git rev-parse --show-toplevel`. The build uses `--git-common-dir` (Q1). That matches MVP §2 and data-model §5.1 ("main checkout path") and claude-code §7.4 step 1. Both commands give the same path from the main checkout or a subdirectory. They differ only from a worktree, and there §3.1's command would break §2. So the work doesn't conflict with docs/, but a one-line edit to §3.1 would clear up the inconsistency.
+Not blocking: (security) an HTTPS remote with `user:token@` in it is stored in SQLite as is. Strip the userinfo before a later job shows or uses it. (code) 20-digit ids raise OverflowError and return 500, not Q15's 404. Nothing is written. (ui) htmx doesn't swap 4xx responses, so a server 422 or 404 on the two forms shows nothing on the page.
+
+## Open questions
+- Q1 (repo root): `git rev-parse --path-format=absolute --git-common-dir`. If its basename is `.git`, the root is the parent. Otherwise it falls back to `--show-toplevel`. Then realpath, and `git -C <main>` for every later call. Used as written.
+- Q2 (default branch, remote): `symbolic-ref --short refs/remotes/origin/HEAD` with `origin/` stripped, else the main checkout's `branch --show-current`, else exit 1 with the detached-HEAD message. The remote is `remote get-url origin`, or null. Used as written.
+- Q3 (outside a repo): `fctl: not inside a git repository: <cwd>`, exit 1. Used as written.
+- Q4 (rerun): keyed by path. A rerun overwrites workspace, name, remote, and branch, so it undoes a move made in the UI. A null `test_cmd` keeps the stored one, and `created_at` never changes. Used as written.
+- Q5 (validation): workspace and name are stripped and must be non-empty. `path` must be absolute (its existence isn't checked). `default_branch` must be non-empty and must not start with `-`. Each failure is a 422 with a string `detail`. Used as written.
+- Q6 (factory state): `ready` if `cat-file -e <branch>:SKILL.md` succeeds, else `uncommitted` if the file is on disk, else `none`. Any git failure counts as not committed, and `factory_version` is ignored. Used as written.
+- Q7 (url): `request.base_url` + `projects/<id>`, and the same `Connected …` line on a first connect and a rerun. Used as written.
+- Q8 (`?path=`): an exact string match. Unknown → 404 `no project at <path>`. A missing parameter → FastAPI's 422. Used as written.
+- Q9 (workspace order): by name, and empty workspaces are included. Used as written.
+- Q10 (form routes): `POST /workspaces` and `POST /projects/{id}/workspace`, parsed with `parse_qs`, answering 204 + `HX-Redirect`. `+ Workspace` gets or creates. Used as written. On top of the default's `required`, the builder added `pattern=".*\S.*"`, a `title`, an `aria-label`, and a placeholder, so the browser also blocks a whitespace-only name. The server 422 is unchanged.
+- Q11 (project page): a stub with the `<name> · <workspace link>` heading, the path, and the move `<select>`. 004 adds the board. Used as written.
+- Q12 (workspace page): rows ordered by name. Columns Backlog / In progress / Review / Done. Factory state as a plain word. Last activity is the max of `created_at` and the tasks' `updated_at`, in a local-time `<time>`. Used as written. The empty-state text is the Q12 wording, with the command wrapped in `<code>`.
+- Q13 (`/`): workspaces as links with project counts, or "No projects yet." when there are none. Used as written.
+- Q14 (timestamps): UTC `YYYY-MM-DDTHH:MM:SSZ`. Used as written.
+- Q15 (errors): FastAPI's JSON 404, no HTML error page. Used as written, except that huge ids return 500 (see above).
+- Q16 (styles): a short `<style>` in base.html using the system font and `GrayText`, no `app.css`. Used as written.
+- Q17 (test git isolation): an empty `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM=1`, author and committer env vars, `git init -b main`, and local bare repos as remotes. Used as written.
+- New (bare repo): if `--show-toplevel` also fails, it gives the Q3 "not inside a git repository" error. No test.
+- New (printed workspace): `Connected … (<workspace>)` prints the stripped name, the same as the server stores it. The body sends the name as given.

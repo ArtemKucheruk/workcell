@@ -1,0 +1,978 @@
+diff --git a/src/claude_factories/app.py b/src/claude_factories/app.py
+index 5bcc8e6..ae2d9fa 100644
+--- a/src/claude_factories/app.py
++++ b/src/claude_factories/app.py
+@@ -1,6 +1,8 @@
+ """The FastAPI app behind `fctl serve`."""
+ 
++import codecs
+ import os
++import re
+ import sqlite3
+ import subprocess
+ from contextlib import asynccontextmanager, closing
+@@ -16,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
+ from fastapi.templating import Jinja2Templates
+ from typing import Literal
+ 
+-from pydantic import BaseModel, FiniteFloat
++from pydantic import BaseModel, Field, FiniteFloat
+ 
+ from . import db
+ 
+@@ -26,6 +28,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+ SKILL = ".claude/skills/factory/SKILL.md"
+ COLUMNS = ("backlog", "in_progress", "review", "done")
+ REVIEWERS = ("security", "ux", "ui", "code")
++MAX_PATCH = 5 * 1024 * 1024  # Q5: UTF-8 bytes of the patch alone
+ STAGE_STATUS = {  # docs/data-model-and-api.md §5.2
+     "spec": "in_progress", "build": "in_progress", "agent_review": "in_progress",
+     "approval": "in_progress", "rework": "in_progress",
+@@ -66,6 +69,13 @@ async def validation_error(request: Request, exc: RequestValidationError):
+     return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
+ 
+ 
++@app.exception_handler(UnicodeEncodeError)
++async def unencodable(request: Request, exc: UnicodeEncodeError):
++    """A JSON `\\ud800` escape decodes to a lone surrogate, which UTF-8 and SQLite reject: a 422, not
++    a 500. Raised inside a transaction, so it rolls back."""
++    return JSONResponse({"detail": "text must not contain lone surrogates"}, status_code=422)
++
++
+ # --- Helpers -----------------------------------------------------------------
+ 
+ 
+@@ -208,9 +218,17 @@ def find_project(path: str):
+ # --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
+ 
+ 
++class RoundBody(BaseModel):
++    """§6.3's rounds body, and §6.2's `submit` (Q4). base_sha may later become a git argument."""
++    base_sha: str = Field(pattern=r"^[0-9a-f]{7,64}$")
++    patch: str
++    build_md: str | None = None
++
++
+ class TaskBody(BaseModel):
+     title: str
+     description_md: str = ""
++    submit: RoundBody | None = None
+ 
+ 
+ class TaskPatch(BaseModel):
+@@ -241,28 +259,34 @@ def list_tasks(project_id: int):
+ 
+ 
+ @app.post("/api/projects/{project_id}/tasks", status_code=201)
+-def create_task(project_id: int, body: TaskBody):
++def create_task(project_id: int, body: TaskBody, request: Request):
++    """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (Q3)."""
+     title = body.title.strip()
+     if not title:
+         raise HTTPException(422, "title must not be blank")
++    status, stage, actor = ("review", "human_review", "app") if body.submit else ("backlog", None, "me")
+     with closing(db.connect()) as conn, conn:
+-        conn.execute("BEGIN IMMEDIATE")  # the bottom position and the insert, atomically
++        conn.execute("BEGIN IMMEDIATE")  # the bottom position, the inserts, and the round, atomically
+         if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
+             raise HTTPException(404)
+         position = conn.execute(
+-            "SELECT COALESCE(MAX(position) + 1, 1.0) FROM tasks WHERE project_id = ? AND status = 'backlog'",
+-            (project_id,),
++            "SELECT COALESCE(MAX(position) + 1, 1.0) FROM tasks WHERE project_id = ? AND status = ?",
++            (project_id, status),
+         ).fetchone()[0]
+         now = db.now()
+         task_id = conn.execute(
+-            "INSERT INTO tasks (project_id, title, description_md, status, position, created_at, updated_at)"
+-            " VALUES (?, ?, ?, 'backlog', ?, ?, ?)",
+-            (project_id, title, body.description_md, position, now, now),
++            "INSERT INTO tasks (project_id, title, description_md, status, stage, position, created_at,"
++            " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
++            (project_id, title, body.description_md, status, stage, position, now, now),
+         ).lastrowid
+         conn.execute(
+-            "INSERT INTO events (task_id, actor, to_status, created_at) VALUES (?, 'me', 'backlog', ?)",
+-            (task_id, now),
++            "INSERT INTO events (task_id, actor, to_status, stage, created_at) VALUES (?, ?, ?, ?, ?)",
++            (task_id, actor, status, stage, now),
+         )
++        if body.submit:  # a 4xx in here rolls the task back too
++            submitted = insert_round(conn, task_id, body.submit)
++    if body.submit:
++        return {"task_id": task_id} | submitted | {"url": f"{request.base_url}tasks/{task_id}/review"}
+     return {"id": task_id, "status": "backlog"}
+ 
+ 
+@@ -326,6 +350,144 @@ def patch_task(task_id: int, body: TaskPatch):
+     return {"id": task_id, "status": status, "stage": stage}
+ 
+ 
++# --- Rounds (docs/data-model-and-api.md §6.3) ---------------------------------
++
++PATCH_NAMES = {"rename from ": "from", "rename to ": "to", "--- ": "old", "+++ ": "new"}
++
++
++def unquote(name: str) -> str:
++    """Q6: git C-quotes a name holding `"`, `\\`, or control bytes; octal escapes are UTF-8 bytes."""
++    if len(name) < 2 or name[0] != '"' or name[-1] != '"':
++        return name
++    return codecs.escape_decode(name[1:-1].encode())[0].decode(errors="replace")
++
++
++def parse_section(section: str) -> dict:
++    """Q6: one `diff --git` section → its round_files row."""
++    header, *lines = section.split("\n")
++    row = {"path": None, "old_path": None, "change": "modified", "binary": 0, "additions": 0,
++           "deletions": 0, "patch": section}
++    names, in_hunks = {}, False
++    for line in lines:
++        if in_hunks:
++            row["additions"] += line.startswith("+")
++            row["deletions"] += line.startswith("-")
++        elif line.startswith("@@"):
++            in_hunks = True
++        elif line.startswith("new file mode "):
++            row["change"] = "added"
++        elif line.startswith("deleted file mode "):
++            row["change"] = "deleted"
++        elif line.startswith("Binary files ") and line.endswith(" differ"):
++            row["binary"] = 1
++        else:
++            for prefix, key in PATCH_NAMES.items():
++                if line.startswith(prefix):  # git adds a tab after a name with a space
++                    names[key] = unquote(line[len(prefix):].removesuffix("\t"))
++    new, old = names.get("new", "/dev/null"), names.get("old", "/dev/null")
++    if "to" in names:
++        row.update(path=names["to"], old_path=names.get("from"), change="renamed")
++    elif new != "/dev/null":
++        row["path"] = new.removeprefix("b/") if new.startswith("b/") else None
++    elif old != "/dev/null":
++        row["path"] = old.removeprefix("a/") if old.startswith("a/") else None
++    else:  # mode-only, binary, or empty: `diff --git a/X b/X`, split at its midpoint
++        pair = header.removeprefix("diff --git ")
++        mid = len(pair) // 2
++        a, b = unquote(pair[:mid]), unquote(pair[mid + 1:])
++        if pair[mid:mid + 1] == " " and a[:2] == "a/" and b[:2] == "b/" and a[2:] == b[2:]:
++            row["path"] = a[2:]
++    if not row["path"]:
++        raise HTTPException(422, f"can't read the file path in: {header[:200]}")
++    return row
++
++
++def split_patch(patch: str) -> list[dict]:
++    """Q6: one row per file, in patch order. Sections split on \\n only, so joined they give the
++    patch back byte for byte."""
++    if not patch.startswith("diff --git "):
++        raise HTTPException(422, 'patch must start with "diff --git"')
++    rows: dict[str, dict] = {}
++    for section in re.split(r"(?m)^(?=diff --git )", patch)[1:]:
++        row = parse_section(section)
++        if seen := rows.get(row["path"]):  # git splits a file <-> symlink typechange in two
++            seen.update(change="modified", old_path=None, binary=seen["binary"] | row["binary"],
++                        additions=seen["additions"] + row["additions"],
++                        deletions=seen["deletions"] + row["deletions"], patch=seen["patch"] + row["patch"])
++        else:
++            rows[row["path"]] = row
++    return list(rows.values())
++
++
++def insert_round(conn: sqlite3.Connection, task_id: int, body: RoundBody) -> dict:
++    """Check the patch (Q4, Q5), number the round and pick its trigger (Q1), and insert it with its
++    files, inside the caller's BEGIN IMMEDIATE so any 4xx writes nothing."""
++    if len(body.patch.encode()) > MAX_PATCH:
++        raise HTTPException(413, "patch over 5 MB")
++    if not body.patch.strip():
++        raise HTTPException(422, "no changes to submit")
++    files = split_patch(body.patch)
++    n = conn.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM rounds WHERE task_id = ?", (task_id,)).fetchone()[0]
++    changes_requested = conn.execute(
++        "SELECT 1 FROM decisions d JOIN rounds r ON r.id = d.round_id WHERE r.task_id = ? AND r.n = ?"
++        " AND d.actor = 'me' AND d.decision = 'CHANGES_REQUESTED'",
++        (task_id, n - 1),
++    ).fetchone()
++    trigger = "initial" if n == 1 else "human" if changes_requested else "agent"
++    round_id = conn.execute(
++        "INSERT INTO rounds (task_id, n, trigger, base_sha, build_md, created_at) VALUES (?, ?, ?, ?, ?, ?)",
++        (task_id, n, trigger, body.base_sha, body.build_md, db.now()),
++    ).lastrowid
++    conn.executemany(
++        "INSERT INTO round_files (round_id, path, old_path, change, binary, additions, deletions, patch)"
++        " VALUES (:round_id, :path, :old_path, :change, :binary, :additions, :deletions, :patch)",
++        [f | {"round_id": round_id} for f in files],
++    )
++    return {"round": n, "files_changed": len(files), "additions": sum(f["additions"] for f in files),
++            "deletions": sum(f["deletions"] for f in files)}
++
++
++@app.post("/api/tasks/{task_id}/rounds", status_code=201)
++def submit_round(task_id: int, body: RoundBody, request: Request):
++    with closing(db.connect()) as conn, conn:
++        conn.execute("BEGIN IMMEDIATE")  # n, the round, its files, and the status commit together
++        conn.row_factory = sqlite3.Row
++        task = conn.execute("SELECT status, stage, worktree_path FROM tasks WHERE id = ?", (task_id,)).fetchone()
++        if not task:
++            raise HTTPException(404)
++        submitted = insert_round(conn, task_id, body)
++        if task["worktree_path"] is None:  # Q2: every round puts a standalone task in Review
++            now = db.now()
++            conn.execute(
++                "UPDATE tasks SET status = 'review', stage = 'human_review', done_at = NULL, updated_at = ?"
++                " WHERE id = ?",
++                (now, task_id),
++            )
++            if (task["status"], task["stage"]) != ("review", "human_review"):
++                conn.execute(
++                    "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
++                    " VALUES (?, 'app', ?, 'review', 'human_review', ?)",
++                    (task_id, task["status"], now),
++                )
++    return submitted | {"url": f"{request.base_url}tasks/{task_id}/review?round={submitted['round']}"}
++
++
++@app.get("/api/tasks/{task_id}/rounds/{n}/diff")
++def round_diff(task_id: int, n: str):
++    """Q7: the round's files' patches joined in rowid order; `latest` is the highest n."""
++    one_or_404("SELECT 1 FROM tasks WHERE id = ?", (task_id,))
++    if n == "latest":
++        found = query("SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,))
++        missing = f"#{task_id} has no rounds"
++    else:  # compared as text, so 'abc', '01', or a huge number simply match nothing
++        found = query("SELECT id FROM rounds WHERE task_id = ? AND CAST(n AS TEXT) = ?", (task_id, n))
++        missing = f"#{task_id} has no round {n}"
++    if not found:
++        raise HTTPException(404, missing)
++    patches = query("SELECT patch FROM round_files WHERE round_id = ? ORDER BY rowid", (found[0]["id"],))
++    return Response("".join(p["patch"] for p in patches), media_type="text/x-diff")
++
++
+ # --- Pages and htmx forms (docs/ui.md §8) ------------------------------------
+ 
+ 
+@@ -394,7 +556,7 @@ async def add_task_form(request: Request, project_id: int):
+         title=await form_field(request, "title"),
+         description_md=await form_field(request, "description_md"),
+     )
+-    create_task(project_id, body)
++    create_task(project_id, body, request)
+     return hx_redirect(f"/projects/{project_id}")
+ 
+ 
+diff --git a/src/claude_factories/cli.py b/src/claude_factories/cli.py
+index d4a65c3..d283970 100644
+--- a/src/claude_factories/cli.py
++++ b/src/claude_factories/cli.py
+@@ -5,6 +5,7 @@ import json
+ import os
+ import subprocess
+ import sys
++import tempfile
+ import urllib.error
+ import urllib.parse
+ import urllib.request
+@@ -96,6 +97,63 @@ def task_add(args):
+     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}")
+ 
+ 
++def capture() -> tuple[str, str]:
++    """docs/claude-code.md §7.4 step 2: HEAD and the patch of the cwd's tracked and untracked
++    changes, via a temp index so the real one is untouched. The diff flags pin the format the
++    server parses against user config, and the output is read as bytes: text=True would turn
++    \\r\\n into \\n (Q8)."""
++    base_sha = _git("rev-parse", "--verify", "-q", "HEAD^{commit}")
++    if not base_sha:
++        _fail("HEAD has no commit yet; commit once before submitting")
++    # ponytail: read-tree leaves no stat data, so add -A rehashes every file; seed the temp index
++    # from a copy of the real one if big repos get slow
++    steps = (
++        ["read-tree", base_sha],
++        ["add", "-A"],  # respects .gitignore
++        ["diff", "--cached", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
++         "--src-prefix=a/", "--dst-prefix=b/", base_sha],
++    )
++    with tempfile.TemporaryDirectory() as tmp:
++        env = os.environ | {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
++        for step in steps:
++            r = subprocess.run(["git", "-c", "core.quotePath=false", *step], capture_output=True, env=env)
++            if r.returncode:
++                _fail(f"git {step[0]} failed: {r.stderr.decode(errors='replace').strip()}")
++    return base_sha, r.stdout.decode(errors="replace")
++
++
++def stdin_text() -> str:
++    """Q9: a heredoc or a pipe, sent unchanged; nothing from a terminal, so a hand-typed command
++    doesn't wait for Ctrl-D."""
++    return "" if sys.stdin.isatty() else sys.stdin.read()
++
++
++def summary(r: dict) -> str:
++    files = f"{r['files_changed']} file" + ("" if r["files_changed"] == 1 else "s")
++    return f"{files}, +{r['additions']} −{r['deletions']} → {r['url']}"
++
++
++def submit(args):
++    if (args.id is None) != args.new or args.new != (args.title is not None):  # Q11
++        args.usage_error("give a task id, or --new with --title")
++    main = main_checkout()  # also the "not inside a git repository" check
++    base_sha, patch = capture()
++    text = stdin_text()
++    if args.new:
++        project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
++        body = {"title": args.title, "description_md": text, "submit": {"base_sha": base_sha, "patch": patch}}
++        r = api("POST", f"/api/projects/{project['id']}/tasks", body)
++        print(f"Review #{r['task_id']}: {summary(r)}")
++    else:
++        r = api("POST", f"/api/tasks/{args.id}/rounds", {"base_sha": base_sha, "build_md": text, "patch": patch})
++        print(f"Round {r['round']} of #{args.id}: {summary(r)}")
++
++
++def diff(args):
++    n = "latest" if args.round is None else args.round
++    sys.stdout.write(api("GET", f"/api/tasks/{args.id}/rounds/{n}/diff"))
++
++
+ def serve(args):
+     import uvicorn  # heavy imports stay out of every other command
+ 
+@@ -121,5 +179,14 @@ def main(argv=None):
+     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
+     p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
+     p.set_defaults(func=task_add)
++    p = commands.add_parser("submit", help="send this tree's changes for review, as a new task or a round")
++    p.add_argument("id", nargs="?", type=int, help="the task to add a round to (stdin: build notes)")
++    p.add_argument("--new", action="store_true", help="create a task straight in Review (stdin: description)")
++    p.add_argument("--title", help="the new task's title, with --new")
++    p.set_defaults(func=submit, usage_error=p.error)
++    p = commands.add_parser("diff", help="print a round's full patch")
++    p.add_argument("id", type=int, help="the task")
++    p.add_argument("--round", type=int, help="the round's number (default: the latest)")
++    p.set_defaults(func=diff)
+     args = parser.parse_args(argv)
+     args.func(args)
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 9117990..aa25860 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -36,6 +36,22 @@ def git(cwd, *args) -> str:
+     return r.stdout.strip()
+ 
+ 
++def write(repo, files: dict):
++    """Write {relative path: str or bytes} under repo, bytes as given (\\r\\n kept)."""
++    for name, content in files.items():
++        path = repo / name
++        path.parent.mkdir(parents=True, exist_ok=True)
++        path.write_bytes(content if isinstance(content, bytes) else content.encode())
++
++
++def commit(repo, files: dict | None = None) -> str:
++    """Write files, commit everything, and return the new HEAD."""
++    write(repo, files or {})
++    git(repo, "add", "-A")
++    git(repo, "commit", "-q", "-m", "c")
++    return git(repo, "rev-parse", "HEAD")
++
++
+ def sql(query, args=()):
+     """Run one statement against the test's database; its rows."""
+     with closing(db.connect()) as conn, conn:
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 06d32e0..bb7038d 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,3 +1,4 @@
++import io
+ import json
+ import os
+ import socket
+@@ -11,7 +12,7 @@ from pathlib import Path
+ 
+ import pytest
+ import uvicorn
+-from conftest import git
++from conftest import commit, git, write
+ 
+ from claude_factories import cli, db
+ 
+@@ -381,3 +382,221 @@ def test_task_usage_errors(server, repo, monkeypatch, capsys, argv, usage):  # A
+     assert e.value.code == 2
+     assert capsys.readouterr().err.startswith(usage)
+     assert server.requests == []
++
++
++# --- fctl submit -------------------------------------------------------------
++
++SUBMITTED = {"task_id": 17, "round": 1, "files_changed": 3, "additions": 38, "deletions": 2,
++             "url": "http://127.0.0.1:4545/tasks/17/review"}
++ROUND = {"round": 2, "files_changed": 4, "additions": 126, "deletions": 9,
++         "url": "http://127.0.0.1:4545/tasks/12/review?round=2"}
++NO_COMMIT = "fctl: HEAD has no commit yet; commit once before submitting\n"
++
++
++def reply(obj, status=200):
++    return (status, "application/json", json.dumps(obj).encode())
++
++
++@pytest.fixture
++def new_server(server):
++    server.replies = [reply(PROJECT), reply(SUBMITTED, 201)]
++    return server
++
++
++@pytest.fixture
++def round_server(server):
++    server.reply = reply(ROUND, 201)
++    return server
++
++
++def fctl(monkeypatch, *argv, stdin=""):
++    """cli.main with sys.stdin replaced (a str becomes a pipe's contents)."""
++    monkeypatch.setattr(sys, "stdin", io.StringIO(stdin) if isinstance(stdin, str) else stdin)
++    cli.main(list(argv))
++
++
++def sent_round(server) -> dict:
++    """The one request a `fctl submit <id>` sends: POST /api/tasks/12/rounds; its body."""
++    [(method, path, _, body)] = server.requests
++    assert (method, path) == ("POST", "/api/tasks/12/rounds")
++    return json.loads(body)
++
++
++@pytest.fixture
++def changed(repo):
++    """repo with a.py committed then modified."""
++    commit(repo, {"a.py": "x = 1\n"})
++    write(repo, {"a.py": "x = 2\n"})
++    return repo
++
++
++def test_submit_new_sends_capture(new_server, repo, monkeypatch):  # AC27
++    head = commit(repo, {".gitignore": "debug.log\n", "a.py": "x = 1\n"})
++    write(repo, {"a.py": "x = 2\n", "c.py": "y = 1\n", "debug.log": "noise\n"})
++    monkeypatch.chdir(repo)
++    fctl(monkeypatch, "submit", "--new", "--title", "Fix open redirect after login", stdin="Fixed it.\n")
++    (get, path, _, _), (post, post_path, _, raw) = new_server.requests
++    assert (get, path) == ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}))
++    assert (post, post_path) == ("POST", "/api/projects/3/tasks")
++    body = json.loads(raw)
++    patch = body["submit"]["patch"]
++    assert body == {"title": "Fix open redirect after login", "description_md": "Fixed it.\n",
++                    "submit": {"base_sha": head, "patch": patch}}
++    assert "diff --git a/a.py b/a.py\n" in patch
++    assert "diff --git a/c.py b/c.py\nnew file mode " in patch
++    assert "debug.log" not in patch
++
++
++def test_submit_leaves_real_index(round_server, repo, monkeypatch):  # AC28
++    commit(repo, {"a.py": "x = 1\n"})
++    write(repo, {"a.py": "x = 2\n", "c.py": "y = 1\n"})
++    git(repo, "add", "a.py")
++    before = git(repo, "status", "--porcelain")
++    assert before == "M  a.py\n?? c.py"
++    monkeypatch.chdir(repo)
++    fctl(monkeypatch, "submit", "12")
++    assert git(repo, "status", "--porcelain") == before
++    patch = sent_round(round_server)["patch"]
++    assert "diff --git a/a.py b/a.py\n" in patch and "diff --git a/c.py b/c.py\n" in patch
++
++
++@pytest.mark.parametrize("files, shown", [(3, "3 files"), (1, "1 file")])
++def test_submit_new_prints_review(new_server, changed, monkeypatch, capsys, files, shown):  # AC29
++    new_server.replies[1] = reply(SUBMITTED | {"files_changed": files}, 201)
++    monkeypatch.chdir(changed)
++    fctl(monkeypatch, "submit", "--new", "--title", "T")
++    assert capsys.readouterr().out == f"Review #17: {shown}, +38 −2 → http://127.0.0.1:4545/tasks/17/review\n"
++
++
++def test_submit_round_from_worktree(round_server, changed, monkeypatch):  # AC30
++    git(changed, "commit", "-qam", "a.py at x = 2")
++    worktree = changed / ".claude" / "worktrees" / "x"
++    git(changed, "worktree", "add", "-q", "-b", "factory/x", str(worktree))
++    head = commit(worktree, {"b.py": "only in the worktree\n"})
++    assert head != git(changed, "rev-parse", "HEAD")
++    write(worktree, {"a.py": "x = 3\n"})
++    monkeypatch.chdir(worktree)
++    fctl(monkeypatch, "submit", "12", stdin="notes\n")
++    body = sent_round(round_server)
++    assert body == {"base_sha": head, "build_md": "notes\n", "patch": body["patch"]}
++    assert "diff --git a/a.py b/a.py\n" in body["patch"] and "+x = 3\n" in body["patch"]
++
++
++def test_submit_round_prints_round(round_server, changed, monkeypatch, capsys):  # AC31
++    monkeypatch.chdir(changed)
++    fctl(monkeypatch, "submit", "12")
++    assert capsys.readouterr().out == (
++        "Round 2 of #12: 4 files, +126 −9 → http://127.0.0.1:4545/tasks/12/review?round=2\n"
++    )
++
++
++def test_submit_from_subdirectory(round_server, repo, monkeypatch):  # AC32
++    commit(repo, {"a.py": "x = 1\n", "src/pkg/m.py": "m = 1\n"})
++    git(repo, "config", "diff.relative", "true")  # the capture must override it
++    write(repo, {"a.py": "x = 2\n"})
++    monkeypatch.chdir(repo / "src" / "pkg")
++    fctl(monkeypatch, "submit", "12")
++    assert "diff --git a/a.py b/a.py\n" in sent_round(round_server)["patch"]
++
++
++def test_submit_keeps_crlf(round_server, repo, monkeypatch):  # AC33
++    commit(repo, {"w.txt": "keep\r\nold\r\n"})
++    write(repo, {"w.txt": "keep\r\nnew\r\n"})
++    monkeypatch.chdir(repo)
++    fctl(monkeypatch, "submit", "12")
++    patch = sent_round(round_server)["patch"]
++    assert "-old\r\n" in patch and "+new\r\n" in patch
++
++
++def test_submit_ignores_diff_config(round_server, repo, monkeypatch):  # AC34
++    for key in ("diff.noprefix", "diff.mnemonicPrefix"):
++        git(repo, "config", key, "true")
++    git(repo, "config", "color.diff", "always")
++    write(repo, {"naïve.txt": "x\n"})
++    monkeypatch.chdir(repo)
++    fctl(monkeypatch, "submit", "12")
++    patch = sent_round(round_server)["patch"]
++    assert "diff --git a/naïve.txt b/naïve.txt\n" in patch and "+++ b/naïve.txt\n" in patch
++    assert "\x1b" not in patch
++
++
++def test_submit_skips_terminal_stdin(new_server, changed, monkeypatch):  # AC35
++    class Terminal(io.StringIO):
++        def isatty(self):
++            return True
++
++        def read(self, *args):
++            pytest.fail("read stdin from a terminal")
++
++    monkeypatch.chdir(changed)
++    fctl(monkeypatch, "submit", "--new", "--title", "T", stdin=Terminal())
++    new_server.reply = reply(ROUND, 201)
++    fctl(monkeypatch, "submit", "12", stdin=Terminal())
++    assert json.loads(new_server.requests[1][3])["description_md"] == ""
++    assert json.loads(new_server.requests[2][3])["build_md"] == ""
++
++
++@pytest.mark.parametrize("argv", [
++    [], ["12", "--new", "--title", "T"], ["--new"], ["12", "--title", "T"], ["abc"],
++])
++def test_submit_usage_errors(server, changed, monkeypatch, capsys, argv):  # AC36
++    monkeypatch.chdir(changed)
++    with pytest.raises(SystemExit) as e:
++        fctl(monkeypatch, "submit", *argv)
++    assert e.value.code == 2
++    assert capsys.readouterr().err.startswith("usage: fctl submit")
++    assert server.requests == []
++
++
++@pytest.mark.parametrize("argv", [["--new", "--title", "T"], ["12"]])
++def test_submit_outside_repo(server, tmp_path, monkeypatch, capsys, argv):  # AC37
++    nowhere = tmp_path / "nowhere"
++    nowhere.mkdir()
++    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
++    monkeypatch.chdir(nowhere)
++    with pytest.raises(SystemExit) as e:
++        fctl(monkeypatch, "submit", *argv)
++    assert e.value.code == 1
++    assert capsys.readouterr().err == f"fctl: not inside a git repository: {os.getcwd()}\n"
++    assert server.requests == []
++
++
++def test_submit_without_commit(server, tmp_path, monkeypatch, capsys):  # AC38
++    fresh = tmp_path / "fresh"
++    git(tmp_path, "init", "-q", "-b", "main", str(fresh))
++    write(fresh, {"a.py": "x = 1\n"})
++    monkeypatch.chdir(fresh)
++    with pytest.raises(SystemExit) as e:
++        fctl(monkeypatch, "submit", "12")
++    assert e.value.code == 1
++    assert capsys.readouterr().err == NO_COMMIT
++    assert server.requests == []
++
++
++def test_submit_new_unconnected(server, changed, monkeypatch, capsys):  # AC39
++    main = os.path.realpath(changed)
++    server.reply = (404, "application/json", json.dumps({"detail": f"no project at {main}"}).encode())
++    monkeypatch.chdir(changed)
++    with pytest.raises(SystemExit) as e:
++        fctl(monkeypatch, "submit", "--new", "--title", "T")
++    assert e.value.code == 1
++    assert capsys.readouterr().err == f"fctl: 404 no project at {main}\n"
++    assert [m for m, _, _, _ in server.requests] == ["GET"]
++
++
++# --- fctl diff ---------------------------------------------------------------
++
++DIFF = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\r\n+naïve"  # no final newline
++
++
++def test_diff_prints_latest(server, capsys):  # AC40
++    server.reply = (200, "text/x-diff; charset=utf-8", DIFF.encode())
++    cli.main(["diff", "12"])
++    assert [(m, p) for m, p, _, _ in server.requests] == [("GET", "/api/tasks/12/rounds/latest/diff")]
++    assert capsys.readouterr().out == DIFF
++
++
++def test_diff_round_option(server):  # AC41
++    server.reply = (200, "text/x-diff; charset=utf-8", DIFF.encode())
++    cli.main(["diff", "12", "--round", "2"])
++    assert [(m, p) for m, p, _, _ in server.requests] == [("GET", "/api/tasks/12/rounds/2/diff")]
+diff --git a/tests/test_rounds.py b/tests/test_rounds.py
+new file mode 100644
+index 0000000..06d2ee0
+--- /dev/null
++++ b/tests/test_rounds.py
+@@ -0,0 +1,354 @@
++import json
++import os
++
++import pytest
++from conftest import commit, sql, write
++
++from claude_factories import cli
++
++H = {"X-Requested-By": "fctl"}
++OLD = "2026-01-01T00:00:00Z"
++SHA = "9f2c1e4b7d0a4c1d2aae81f0b3a1b2c3d4e5f607"
++FILES = "path, old_path, change, binary, additions, deletions"
++AC1_ROWS = [
++    ("a.py", None, "modified", 0, 1, 1),
++    ("b.py", None, "deleted", 0, 0, 4),
++    ("c.py", None, "added", 0, 2, 0),
++]
++MISSING = object()
++
++
++@pytest.fixture
++def project(client):
++    return connect(client, "/code/api")
++
++
++def connect(client, path):
++    body = {"path": path, "workspace": "personal", "name": "api", "default_branch": "main"}
++    r = client.post("/api/projects/connect", json=body, headers=H)
++    assert r.status_code == 200, r.text
++    return r.json()["id"]
++
++
++def add_task(project_id, status="in_progress", stage=None, position=1.0, worktree=None):
++    return sql(
++        "INSERT INTO tasks (project_id, title, status, stage, position, worktree_path, created_at, updated_at)"
++        " VALUES (?, 't', ?, ?, ?, ?, ?, ?) RETURNING id",
++        (project_id, status, stage, position, worktree, OLD, OLD),
++    )[0][0]
++
++
++@pytest.fixture
++def task(project):
++    return add_task(project)
++
++
++def add_round(task_id, n=1):
++    return sql(
++        "INSERT INTO rounds (task_id, n, trigger, base_sha, created_at) VALUES (?, ?, 'initial', ?, ?) RETURNING id",
++        (task_id, n, SHA, OLD),
++    )[0][0]
++
++
++def add_decision(task_id, round_id, actor, decision):
++    sql("INSERT INTO decisions (task_id, round_id, actor, decision, created_at) VALUES (?, ?, ?, ?, ?)",
++        (task_id, round_id, actor, decision, OLD))
++
++
++def captured(repo, monkeypatch) -> str:
++    """The patch `fctl submit` would send from repo (§7.4 capture)."""
++    monkeypatch.chdir(repo)
++    return cli.capture()[1]
++
++
++@pytest.fixture
++def ac1_patch(repo, monkeypatch):
++    """a.py: 1 line changed; b.py: 4 lines deleted; c.py: 2 lines added."""
++    commit(repo, {"a.py": "x = 1\n", "b.py": "b1\nb2\nb3\nb4\n"})
++    write(repo, {"a.py": "x = 2\n", "c.py": "c = 1\nc = 2\n"})
++    (repo / "b.py").unlink()
++    return captured(repo, monkeypatch)
++
++
++def post(client, task_id, patch, **body):
++    return client.post(f"/api/tasks/{task_id}/rounds", json={"base_sha": SHA, "patch": patch} | body, headers=H)
++
++
++def files(task_id):
++    """The task's latest round's round_files, in insertion order."""
++    return sql(
++        f"SELECT {FILES} FROM round_files WHERE round_id ="
++        " (SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1) ORDER BY rowid",
++        (task_id,),
++    )
++
++
++def split(client, task_id, patch):
++    r = post(client, task_id, patch)
++    assert r.status_code == 201, r.text
++    return files(task_id)
++
++
++def rounds(task_id):
++    return sql("SELECT n, trigger, base_sha, build_md FROM rounds WHERE task_id = ? ORDER BY n", (task_id,))
++
++
++def task_row(task_id):
++    return sql("SELECT status, stage, position FROM tasks WHERE id = ?", (task_id,))[0]
++
++
++def events(task_id):
++    return sql("SELECT actor, from_status, to_status, stage FROM events WHERE task_id = ? ORDER BY id", (task_id,))
++
++
++def counts(*tables):
++    return [sql(f"SELECT COUNT(*) FROM {t}")[0][0] for t in tables]
++
++
++def big_patch(size):
++    """A well-formed patch of exactly `size` UTF-8 bytes; the ï makes bytes ≠ characters."""
++    head = "diff --git a/big.txt b/big.txt\nnew file mode 100644\n--- /dev/null\n+++ b/big.txt\n@@ -0,0 +1 @@\n+naïve "
++    patch = head + "x" * (size - len(head.encode()) - 1) + "\n"
++    assert len(patch.encode()) == size
++    return patch
++
++
++# --- Patch split into round_files --------------------------------------------
++
++
++def test_split_modified_deleted_added(client, task, ac1_patch):  # AC1
++    assert split(client, task, ac1_patch) == AC1_ROWS
++    patches = [p for (p,) in sql("SELECT patch FROM round_files ORDER BY rowid")]
++    for (path, *_), patch in zip(AC1_ROWS, patches, strict=True):
++        assert patch.startswith(f"diff --git a/{path} b/{path}\n")
++    assert "".join(patches) == ac1_patch
++
++
++def test_split_renames(client, task, repo, monkeypatch):  # AC2
++    lines = [f"line {i}\n" for i in range(10)]
++    commit(repo, {"old.py": "".join(lines), "x.txt": "same\n"})
++    (repo / "old.py").unlink()
++    write(repo, {"new.py": "".join(["changed\n"] + lines[1:])})
++    (repo / "x.txt").rename(repo / "y.txt")
++    assert split(client, task, captured(repo, monkeypatch)) == [
++        ("new.py", "old.py", "renamed", 0, 1, 1),
++        ("y.txt", "x.txt", "renamed", 0, 0, 0),
++    ]
++
++
++def test_split_binary(client, task, repo, monkeypatch):  # AC3
++    write(repo, {"img.bin": b"\x89PNG\0\0\x01\xff"})
++    assert split(client, task, captured(repo, monkeypatch)) == [("img.bin", None, "added", 1, 0, 0)]
++
++
++def test_split_mode_change(client, task, repo, monkeypatch):  # AC4
++    commit(repo, {"run.sh": "echo hi\n"})
++    (repo / "run.sh").chmod(0o755)
++    assert split(client, task, captured(repo, monkeypatch)) == [("run.sh", None, "modified", 0, 0, 0)]
++
++
++def test_split_space_and_quote_names(client, task, repo, monkeypatch):  # AC5
++    write(repo, {"my notes.txt": "a\n", 'say "hi".txt': "b\n"})
++    patch = captured(repo, monkeypatch)
++    assert "+++ b/my notes.txt\t\n" in patch  # git's trailing tab and C-quoting reach the parser
++    assert '+++ "b/say \\"hi\\".txt"' in patch
++    assert [row[0] for row in split(client, task, patch)] == ["my notes.txt", 'say "hi".txt']
++
++
++def test_split_counts_header_like_lines(client, task, repo, monkeypatch):  # AC6
++    commit(repo, {"m.txt": "keep\n-- old\n"})
++    write(repo, {"m.txt": "keep\n++ new\n"})
++    patch = captured(repo, monkeypatch)
++    assert "\n--- old\n+++ new\n" in patch
++    assert split(client, task, patch) == [("m.txt", None, "modified", 0, 1, 1)]
++
++
++def test_split_typechange_merges(client, task, repo, monkeypatch):  # AC7
++    commit(repo, {"link": "x\n"})
++    (repo / "link").unlink()
++    os.symlink("target", repo / "link")
++    patch = captured(repo, monkeypatch)
++    assert split(client, task, patch) == [("link", None, "modified", 0, 1, 1)]
++    [(stored,)] = sql("SELECT patch FROM round_files")
++    assert stored == patch
++    assert stored.count("diff --git a/link b/link\n") == 2
++
++
++# --- POST /api/tasks/{id}/rounds ---------------------------------------------
++
++
++def test_round_response(client, task, ac1_patch):  # AC8
++    add_round(task, 1)
++    r = post(client, task, ac1_patch, build_md="Token bucket …")
++    assert r.status_code == 201, r.text
++    [(count, additions, deletions)] = sql(
++        "SELECT COUNT(*), SUM(additions), SUM(deletions) FROM round_files f JOIN rounds r ON r.id = f.round_id"
++        " WHERE r.task_id = ? AND r.n = 2",
++        (task,),
++    )
++    assert r.json() == {"round": 2, "files_changed": count, "additions": additions, "deletions": deletions,
++                        "url": f"http://127.0.0.1:4545/tasks/{task}/review?round=2"}
++    assert (count, additions, deletions) == (3, 3, 5)
++    assert sql("SELECT base_sha, build_md FROM rounds WHERE task_id = ? AND n = 2", (task,)) == [
++        (SHA, "Token bucket …")
++    ]
++
++
++def test_round_without_build_md(client, task, ac1_patch):  # AC9
++    assert post(client, task, ac1_patch).status_code == 201
++    assert rounds(task)[0][3] is None
++
++
++def test_first_round_is_initial(client, task, ac1_patch):  # AC10
++    assert post(client, task, ac1_patch).status_code == 201
++    assert rounds(task) == [(1, "initial", SHA, None)]
++
++
++@pytest.mark.parametrize("decision", [None, ("approver", "ESCALATE")])
++def test_round_after_agent_is_agent(client, task, ac1_patch, decision):  # AC11
++    round_id = add_round(task, 1)
++    if decision:
++        add_decision(task, round_id, *decision)
++    assert post(client, task, ac1_patch).status_code == 201
++    assert rounds(task)[1][:2] == (2, "agent")
++
++
++def test_round_after_my_changes_requested_is_human(client, task, ac1_patch):  # AC12
++    add_decision(task, add_round(task, 1), "me", "CHANGES_REQUESTED")
++    assert post(client, task, ac1_patch).status_code == 201
++    assert post(client, task, ac1_patch).status_code == 201
++    assert [r[:2] for r in rounds(task)] == [(1, "initial"), (2, "human"), (3, "agent")]
++
++
++def test_standalone_round_moves_to_review(client, project, ac1_patch):  # AC13
++    task = add_task(project, "in_progress", "rework", 3.0)
++    assert post(client, task, ac1_patch).status_code == 201
++    assert task_row(task) == ("review", "human_review", 3.0)
++    assert events(task) == [("app", "in_progress", "review", "human_review")]
++    assert post(client, task, ac1_patch).status_code == 201  # already in review · human_review
++    assert task_row(task) == ("review", "human_review", 3.0)
++    assert len(events(task)) == 1
++
++
++def test_worktree_round_keeps_status(client, project, ac1_patch):  # AC14
++    task = add_task(project, "in_progress", "build", worktree="/code/api/.claude/worktrees/12-x")
++    assert post(client, task, ac1_patch).status_code == 201
++    assert task_row(task)[:2] == ("in_progress", "build")
++    assert events(task) == []
++
++
++def test_round_unknown_task(client, ac1_patch):  # AC15
++    assert post(client, 999, ac1_patch).status_code == 404
++    assert counts("rounds", "round_files") == [0, 0]
++
++
++@pytest.mark.parametrize("change", [
++    {"base_sha": MISSING}, {"base_sha": "HEAD"}, {"base_sha": "-c"}, {"base_sha": "abc"},
++    {"patch": MISSING}, {"patch": "hello\n"}, {"patch": "diff --git nonsense\n"},
++])
++def test_round_bad_body(client, task, ac1_patch, change):  # AC16
++    body = {k: v for k, v in ({"base_sha": SHA, "patch": ac1_patch} | change).items() if v is not MISSING}
++    r = client.post(f"/api/tasks/{task}/rounds", json=body, headers=H)
++    assert r.status_code == 422, r.text
++    assert counts("rounds", "round_files") == [0, 0]
++
++
++@pytest.mark.parametrize("patch", ["", "\n"])
++def test_round_empty_patch(client, task, patch):  # AC17
++    r = post(client, task, patch)
++    assert (r.status_code, r.json()) == (422, {"detail": "no changes to submit"})
++
++
++def test_round_lone_surrogate(client, task, ac1_patch):  # not an AC: a 422 instead of a 500
++    body = '{"base_sha": "%s", "build_md": "\\ud800", "patch": %s}' % (SHA, json.dumps(ac1_patch))
++    r = client.post(f"/api/tasks/{task}/rounds", content=body, headers=H | {"Content-Type": "application/json"})
++    assert (r.status_code, r.json()) == (422, {"detail": "text must not contain lone surrogates"})
++    assert counts("rounds", "round_files") == [0, 0]
++
++
++@pytest.mark.parametrize("size, status", [(5_242_881, 413), (5_242_880, 201)])
++def test_round_patch_size(client, task, size, status):  # AC18
++    r = post(client, task, big_patch(size))
++    assert r.status_code == status, r.text[:200]
++    if status == 413:
++        assert r.json() == {"detail": "patch over 5 MB"}
++        assert counts("rounds", "round_files") == [0, 0]
++
++
++# --- POST /api/projects/{id}/tasks with submit --------------------------------
++
++
++def create(client, project_id, patch, title="Fix open redirect after login"):
++    body = {"title": title, "description_md": "`next` was …", "submit": {"base_sha": SHA, "patch": patch}}
++    return client.post(f"/api/projects/{project_id}/tasks", json=body, headers=H)
++
++
++def test_submit_new_response(client, project, ac1_patch):  # AC19
++    r = create(client, project, ac1_patch)
++    assert r.status_code == 201, r.text
++    [(task,)] = sql("SELECT id FROM tasks")
++    assert r.json() == {"task_id": task, "round": 1, "files_changed": 3, "additions": 3, "deletions": 5,
++                        "url": f"http://127.0.0.1:4545/tasks/{task}/review"}
++
++
++def test_submit_new_task_row(client, project, ac1_patch):  # AC20
++    for status, position in (("review", 2.0), ("review", 7.0), ("backlog", 20.0)):
++        add_task(project, status, position=position)
++    task = create(client, project, ac1_patch).json()["task_id"]
++    assert sql("SELECT status, stage, branch, worktree_path, description_md, position FROM tasks WHERE id = ?",
++               (task,)) == [("review", "human_review", None, None, "`next` was …", 8.0)]
++    empty = connect(client, "/code/web")
++    task = create(client, empty, ac1_patch).json()["task_id"]
++    assert task_row(task)[2] == 1.0
++
++
++def test_submit_new_round(client, project, ac1_patch):  # AC21
++    task = create(client, project, ac1_patch).json()["task_id"]
++    assert rounds(task) == [(1, "initial", SHA, None)]
++    assert files(task) == AC1_ROWS
++
++
++def test_submit_new_event(client, project, ac1_patch):  # AC22
++    task = create(client, project, ac1_patch).json()["task_id"]
++    assert events(task) == [("app", None, "review", "human_review")]
++
++
++@pytest.mark.parametrize("patch, title", [("", "Fix it"), (None, "  ")])
++def test_submit_new_rejected(client, project, ac1_patch, patch, title):  # AC23
++    r = create(client, project, ac1_patch if patch is None else patch, title)
++    assert r.status_code == 422, r.text
++    assert counts("tasks", "rounds", "round_files", "events") == [0, 0, 0, 0]
++
++
++def test_submit_new_too_big(client, project):  # AC24
++    r = create(client, project, big_patch(5_242_881))
++    assert r.status_code == 413
++    assert counts("tasks", "rounds", "round_files", "events") == [0, 0, 0, 0]
++
++
++# --- GET /api/tasks/{id}/rounds/{n|latest}/diff --------------------------------
++
++
++def test_diff_returns_patch_bytes(client, task, repo, monkeypatch):  # AC25
++    commit(repo, {"w.txt": "keep\r\nold\r\n"})
++    write(repo, {"w.txt": "keep\r\nnew\r\n", "naïve.txt": "naïve\n"})
++    first = captured(repo, monkeypatch)
++    write(repo, {"later.py": "x\n"})
++    second = captured(repo, monkeypatch)
++    assert "-old\r\n" in first and "naïve" in first
++    assert post(client, task, first).status_code == 201
++    assert post(client, task, second).status_code == 201
++    for n, patch in (("1", first), ("latest", second)):
++        r = client.get(f"/api/tasks/{task}/rounds/{n}/diff")
++        assert r.status_code == 200
++        assert r.headers["content-type"].startswith("text/x-diff")
++        assert r.content == patch.encode()
++
++
++def test_diff_missing(client, task):  # AC26
++    r = client.get(f"/api/tasks/{task}/rounds/latest/diff")
++    assert (r.status_code, r.json()) == (404, {"detail": f"#{task} has no rounds"})
++    for n in ("9", "abc"):
++        r = client.get(f"/api/tasks/{task}/rounds/{n}/diff")
++        assert (r.status_code, r.json()) == (404, {"detail": f"#{task} has no round {n}"})
++    assert client.get("/api/tasks/999/rounds/latest/diff").status_code == 404
