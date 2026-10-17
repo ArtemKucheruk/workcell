@@ -1,12 +1,16 @@
 """The FastAPI app behind `fctl serve`."""
 
 import codecs
+import json
 import os
 import re
 import sqlite3
 import subprocess
+import threading
+import uuid
 from contextlib import asynccontextmanager, closing
 from datetime import datetime
+from itertools import takewhile
 from pathlib import Path
 from urllib.parse import parse_qs
 
@@ -350,6 +354,188 @@ def patch_task(task_id: int, body: TaskPatch):
                 (task_id, actor, task["status"], status, stage, now),
             )
     return {"id": task_id, "status": status, "stage": stage}
+
+
+# --- Runs (docs/data-model-and-api.md §6.2, docs/MVP.md §4.3, §4.4) -----------
+
+PROMPT = "/factory {task_id}"  # MVP §10 OQ1: the one place the prompt lives
+ALLOWED_TOOLS = (  # §4.4; the test command's entry is added per project (Q7)
+    "Bash(fctl show *)", "Bash(fctl diff *)", "Bash(fctl spec *)", "Bash(fctl submit *)",
+    "Bash(fctl verdict *)", "Bash(fctl comment *)", "Bash(fctl decide *)", "Bash(fctl stage *)",
+    "Bash(fctl round *)", "Bash(git status *)", "Bash(git diff *)",
+)
+DISALLOWED_TOOLS = (
+    "Bash(git commit *)", "Bash(git push *)", "Bash(git merge *)", "Bash(git rebase *)",
+    "Bash(git reset *)", "Bash(git checkout *)",
+)
+EXCLUDE_LINE = b".claude/worktrees/"
+
+
+def slug(title: str) -> str:
+    """Q3: `Rate-limit login endpoint` → `rate-limit-login`; nothing left → `task`."""
+    return "-".join(re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-").split("-")[:3]) or "task"
+
+
+def refuse_if_running(conn: sqlite3.Connection):
+    """§4.4: one run at a time, across all projects."""
+    if run := conn.execute("SELECT id FROM runs WHERE status = 'running'").fetchone():
+        raise HTTPException(409, f"run #{run[0]} active")
+
+
+def worktree(task: sqlite3.Row) -> str:
+    """Q5: the exclude line, then Q4: the stored worktree, or a new one from the default branch, stored
+    right away so an auth refusal leaves it for the next run."""
+    path = task["path"]
+    exclude = Path(subprocess.run(
+        ["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip())
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    old = exclude.read_bytes() if exclude.exists() else b""
+    if EXCLUDE_LINE not in old.splitlines():
+        with exclude.open("ab") as f:
+            f.write((b"\n" if old and not old.endswith(b"\n") else b"") + EXCLUDE_LINE + b"\n")
+    if task["worktree_path"]:  # reused as stored, even if the title changed since
+        if not os.path.isdir(task["worktree_path"]):
+            raise HTTPException(409, f"worktree {task['worktree_path']} is missing")
+        return task["worktree_path"]
+    name = f"{task['id']}-{slug(task['title'])}"
+    branch, wt = f"factory/{name}", os.path.join(path, ".claude", "worktrees", name)
+    added = subprocess.run(
+        ["git", "-C", path, "worktree", "add", "-b", branch, wt, task["default_branch"]],
+        capture_output=True, text=True, errors="replace",
+    )
+    if added.returncode:
+        raise HTTPException(409, f"git worktree add failed: {added.stderr.strip()}")
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE tasks SET branch = ?, worktree_path = ? WHERE id = ?", (branch, wt, task["id"]))
+    return wt
+
+
+def run_env(request: Request) -> dict:
+    """§4.3: no API key or provider variables, so the run bills to the subscription. Q8: FCTL_URL."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN") and not k.startswith("CLAUDE_CODE_USE_")}
+    return env | {"FCTL_URL": str(request.base_url).rstrip("/")}
+
+
+def subscription_auth(cwd: str, env: dict) -> bool:
+    """§4.3, Q6: `claude auth status`, run like the run itself, exits 0 and reports claude.ai."""
+    try:
+        r = subprocess.run(["claude", "auth", "status"], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                           capture_output=True, text=True, timeout=30)
+        info = json.loads(r.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):  # no binary, not JSON, hung
+        return False
+    return r.returncode == 0 and isinstance(info, dict) and info.get("authMethod") == "claude.ai"
+
+
+def finish_run(run_id: int, proc: subprocess.Popen, log_path: Path):
+    """Q10: on exit, the exit code and the log's last `result` event decide the run row. The task
+    is never touched (§3.4 step 8)."""
+    code, event = proc.wait(), None
+    with log_path.open(errors="replace") as log:
+        for line in log:
+            try:
+                parsed = json.loads(line)
+            except ValueError:  # stderr and anything else that isn't JSON
+                continue
+            if isinstance(parsed, dict) and parsed.get("type") == "result":
+                event = parsed
+    is_error = bool(event and event.get("is_error"))
+    if code == 0 and event and not is_error:
+        status, error = "succeeded", None
+    else:
+        status = "failed"
+        error = str(event.get("result")) if is_error else f"exit code {code}" if code else "no result event"
+    session = event.get("session_id") if event and isinstance(event.get("session_id"), str) else None
+    with closing(db.connect()) as conn, conn:
+        conn.execute(
+            "UPDATE runs SET status = ?, exit_code = ?, error = ?, session_id = COALESCE(?, session_id),"
+            " ended_at = ? WHERE id = ?",
+            (status, code, error, session, db.now(), run_id),
+        )
+
+
+@app.post("/api/tasks/{task_id}/run", status_code=202)
+def run_task(task_id: int, request: Request):
+    """Q2's order: 404, run active, status (Q1), factory (Q12), worktree (Q4), auth; then the run row,
+    the move, and the event in one transaction, then the spawn (§4.4)."""
+    task = one_or_404(
+        "SELECT t.id, t.title, t.status, t.worktree_path, p.path, p.default_branch, p.test_cmd"
+        " FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+        (task_id,),
+    )
+    with closing(db.connect()) as conn:
+        refuse_if_running(conn)
+    if task["status"] in ("review", "done"):
+        raise HTTPException(409, f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
+    if factory_state(task["path"], task["default_branch"]) != "ready":
+        raise HTTPException(409, f"factory isn't committed on {task['default_branch']}")
+    wt, env = worktree(task), run_env(request)
+    if not subscription_auth(wt, env):
+        raise HTTPException(409, "not on subscription auth")
+    session_id = str(uuid.uuid4())
+    test_words = list(takewhile(lambda w: not w.startswith("-"), (task["test_cmd"] or "").split()))  # Q7
+    allowed = ALLOWED_TOOLS + ((f"Bash({' '.join(test_words)} *)",) if test_words else ())
+    cmd = ["claude", "-p", PROMPT.format(task_id=task_id), "--session-id", session_id,
+           "--output-format", "stream-json", "--verbose", "--forward-subagent-text",
+           "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+           "--allowedTools", *allowed, "--disallowedTools", *DISALLOWED_TOOLS]
+    runs_dir = db.data_dir() / "runs"
+    runs_dir.mkdir(exist_ok=True)
+    with closing(db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        refuse_if_running(conn)
+        now = db.now()
+        try:
+            run_id = conn.execute(
+                "INSERT INTO runs (task_id, session_id, status, log_path, started_at)"
+                " VALUES (?, ?, 'running', '', ?) RETURNING id",
+                (task_id, session_id, now),
+            ).fetchone()[0]
+        except sqlite3.IntegrityError:  # one_active_run
+            refuse_if_running(conn)
+            raise
+        log_path = runs_dir / f"{run_id}.jsonl"
+        conn.execute("UPDATE runs SET log_path = ? WHERE id = ?", (str(log_path), run_id))
+        moved = conn.execute(  # Q9: an in_progress task keeps its status and stage
+            "UPDATE tasks SET status = 'in_progress', stage = NULL, updated_at = ? WHERE id = ? AND status = 'backlog'",
+            (now, task_id),
+        )
+        if moved.rowcount:
+            conn.execute(
+                "INSERT INTO events (task_id, actor, from_status, to_status, created_at)"
+                " VALUES (?, 'app', 'backlog', 'in_progress', ?)",
+                (task_id, now),
+            )
+    try:
+        with log_path.open("wb") as log:
+            proc = subprocess.Popen(cmd, cwd=wt, env=env, stdin=subprocess.DEVNULL, stdout=log,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as e:  # Q11: a running row with no process would block every run
+        error = f"can't start claude: {e}"
+        with closing(db.connect()) as conn, conn:
+            conn.execute("UPDATE runs SET status = 'failed', error = ?, ended_at = ? WHERE id = ?",
+                         (error, db.now(), run_id))
+        raise HTTPException(500, error)
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE runs SET pid = ? WHERE id = ?", (proc.pid, run_id))
+    threading.Thread(target=finish_run, args=(run_id, proc, log_path), daemon=True).start()
+    return {"run_id": run_id, "session_id": session_id, "worktree": os.path.relpath(wt, task["path"])}
+
+
+@app.post("/api/projects/{project_id}/run-next", status_code=202)
+def run_next(project_id: int, request: Request):
+    """Q13: the top backlog card, lowest position then lowest id, through all of /run's checks."""
+    one_or_404("SELECT 1 FROM projects WHERE id = ?", (project_id,))
+    top = query(
+        "SELECT id FROM tasks WHERE project_id = ? AND status = 'backlog' ORDER BY position, id LIMIT 1",
+        (project_id,),
+    )
+    if not top:
+        raise HTTPException(404, "backlog is empty")
+    return {"task_id": top[0]["id"], "run_id": run_task(top[0]["id"], request)["run_id"]}
 
 
 # --- Rounds (docs/data-model-and-api.md §6.3) ---------------------------------
