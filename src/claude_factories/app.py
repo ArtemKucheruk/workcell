@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import sqlite3
 import subprocess
 import threading
@@ -13,7 +14,7 @@ from contextlib import asynccontextmanager, closing
 from datetime import datetime
 from itertools import takewhile
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlencode
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -28,6 +29,7 @@ import jinja2
 from markdown_it import MarkdownIt
 from markupsafe import Markup
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import db
@@ -51,7 +53,15 @@ STAGE_STATUS = {  # docs/data-model-and-api.md §5.2
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init()
+    with closing(db.connect()) as conn, conn:  # 013 Q5: a crash left these; no signal, the pid may be reused
+        conn.execute("UPDATE runs SET status = 'failed', error = 'app restarted', ended_at = ?"
+                     " WHERE status = 'running'", (db.now(),))
     yield
+    for run in query("SELECT id FROM runs WHERE status = 'running'"):  # 013 Q4: stopping serve stops every run
+        try:
+            stop_run(run["id"])
+        except HTTPException:  # it ended in between
+            pass
 
 
 app = FastAPI(title="Claude Factories", lifespan=lifespan)
@@ -506,13 +516,15 @@ def subscription_auth(cwd: str, env: dict) -> bool:
 
 def finish_run(run_id: int, proc: subprocess.Popen, log_path: Path):
     """Q10: on exit, the exit code and the log's last `result` event decide the run row. The task
-    is never touched (§3.4 step 8)."""
+    is never touched (§3.4 step 8). 013 Q1: a row Stop already ended gets only its exit code."""
     code, event = proc.wait(), None
+    with closing(db.connect()) as conn, conn:  # at once, so Stop never signals a reaped pgid (013 security)
+        conn.execute("UPDATE runs SET exit_code = ? WHERE id = ?", (code, run_id))
     with log_path.open(errors="replace") as log:
         for line in log:
             try:
                 parsed = json.loads(line)
-            except ValueError:  # stderr and anything else that isn't JSON
+            except (ValueError, RecursionError):  # stderr and anything else that isn't JSON
                 continue
             if isinstance(parsed, dict) and parsed.get("type") == "result":
                 event = parsed
@@ -525,9 +537,9 @@ def finish_run(run_id: int, proc: subprocess.Popen, log_path: Path):
     session = event.get("session_id") if event and isinstance(event.get("session_id"), str) else None
     with closing(db.connect()) as conn, conn:
         conn.execute(
-            "UPDATE runs SET status = ?, exit_code = ?, error = ?, session_id = COALESCE(?, session_id),"
-            " ended_at = ? WHERE id = ?",
-            (status, code, error, session, db.now(), run_id),
+            "UPDATE runs SET status = ?, error = ?, session_id = COALESCE(?, session_id), ended_at = ?"
+            " WHERE id = ? AND status = 'running'",
+            (status, error, session, db.now(), run_id),
         )
 
 
@@ -597,6 +609,109 @@ def run_task(task_id: int, request: Request):
         conn.execute("UPDATE runs SET pid = ? WHERE id = ?", (proc.pid, run_id))
     threading.Thread(target=finish_run, args=(run_id, proc, log_path), daemon=True).start()
     return {"run_id": run_id, "session_id": session_id, "worktree": os.path.relpath(wt, task["path"])}
+
+
+@app.post("/api/runs/{run_id}/stop")  # also the shutdown's stop
+def stop_run(run_id: int) -> dict:
+    """013 Q1, Q2: mark the row stopped first, so the exit thread can't record `failed`, then SIGTERM
+    the run's process group (§4.4). The pid is only ever one the app stored for its own spawn."""
+    with closing(db.connect()) as conn, conn:
+        found = conn.execute(
+            "UPDATE runs SET status = 'stopped', ended_at = ? WHERE id = ? AND status = 'running'"
+            " RETURNING pid, exit_code",
+            (db.now(), run_id),
+        ).fetchone()
+    if not found:
+        one_or_404("SELECT 1 FROM runs WHERE id = ?", (run_id,), f"run #{run_id} not found")
+        raise HTTPException(409, f"run #{run_id} is not running")
+    pid, exit_code = found
+    # ponytail: a Stop in the ms between the runs insert and the pid update marks the row without
+    # signalling; the run then finishes unstopped. Store the pid before the insert commits if that bites.
+    if pid and exit_code is None:  # an exit code means the leader was reaped: its pgid may be reused
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):  # the group exited; or its id is now another user's
+            pass
+    return {"id": run_id, "status": "stopped"}
+
+
+LOG_NAME_KEYS = ("name", "subagent_type")  # 013 Q8: what an Agent spawn is called
+LOG_SUMMARY_KEYS = ("command", "file_path", "pattern", "name", "subagent_type", "description")  # Q7
+
+
+def first_string(d: dict, keys: tuple) -> str | None:
+    return next((v for k in keys if isinstance(v := d.get(k), str) and v), None)
+
+
+def log_items(lines: list[str], after: int) -> list[dict]:
+    """013 Q7, Q8: stream-json lines → display items for lines[after:]. Agent names come from every
+    tool_use in `lines`, so a subagent still resolves when its spawn is before `after`."""
+    def blocks(event: dict) -> list[dict]:
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+    def first_line(text: str) -> str:
+        return (text.splitlines() or [""])[0]
+
+    events = []
+    for line in lines:
+        try:
+            events.append(json.loads(line))
+        except (ValueError, RecursionError):  # stderr, or a line nested past the parser's limit
+            events.append(None)
+    names = {}
+    for e in events:
+        if isinstance(e, dict) and e.get("type") == "assistant":
+            for b in blocks(e):
+                inp = b.get("input")
+                if b.get("type") == "tool_use" and isinstance(b.get("id"), str) and isinstance(inp, dict):
+                    if name := first_string(inp, LOG_NAME_KEYS):
+                        names[b["id"]] = name
+    items = []
+    for line, e in zip(lines[after:], events[after:]):
+        if not isinstance(e, dict):
+            if line.strip():
+                items.append({"t": "raw", "text": line.removesuffix("\r")})
+            continue
+        parent = e.get("parent_tool_use_id")
+        who = "orchestrator" if parent is None else names.get(parent, "agent") if isinstance(parent, str) else "agent"
+        if e.get("type") == "assistant":
+            for b in blocks(e):
+                if b.get("type") == "text" and isinstance(b.get("text"), str) and b["text"].strip():
+                    items.append({"t": "text", "text": f"{who} · {b['text'].strip()}"})
+                elif b.get("type") == "tool_use" and isinstance(b.get("name"), str):
+                    inp = b.get("input")
+                    summary = first_line(first_string(inp, LOG_SUMMARY_KEYS) or "") if isinstance(inp, dict) else ""
+                    items.append({"t": "tool", "text": f"{who} · {b['name']}" + (f" {summary}" if summary else "")})
+        elif e.get("type") == "user":
+            for b in blocks(e):
+                if b.get("type") != "tool_result" or b.get("is_error") is not True:
+                    continue
+                content = b.get("content")
+                if isinstance(content, list):
+                    content = "\n".join(i["text"] for i in content
+                                        if isinstance(i, dict) and isinstance(i.get("text"), str))
+                if isinstance(content, str):  # §4.4: how permission denials show up
+                    items.append({"t": "error", "text": f"{who} · {first_line(content)}"})
+        elif e.get("type") == "result":
+            text = e.get("result") if isinstance(e.get("result"), str) else e.get("subtype")
+            if isinstance(text, str):
+                items.append({"t": "result", "text": text})
+    return items
+
+
+@app.get("/api/runs/{run_id}/log")
+def run_log(run_id: int, after: int = Query(0, ge=0)):
+    """013 Q6: `after` and `next` count complete lines; a trailing partial line waits for its newline.
+    Q9: no log file yet is an empty page, never an error."""
+    run = one_or_404("SELECT log_path FROM runs WHERE id = ?", (run_id,), f"run #{run_id} not found")
+    try:  # ponytail: the whole file per poll; keep a byte offset per cursor if logs get big
+        with open(run["log_path"], encoding="utf-8", errors="replace", newline="") as f:
+            lines = f.read().split("\n")[:-1]
+    except OSError:
+        return {"next": 0, "lines": []}
+    return {"next": len(lines), "lines": log_items(lines, after)}
 
 
 @app.post("/api/projects/{project_id}/run-next", status_code=202)
@@ -907,12 +1022,26 @@ def approve(task_id: int, body: ApproveBody):
 
 
 @app.post("/api/tasks/{task_id}/request-changes", status_code=202)
-def request_changes(task_id: int, body: ChangesBody):
-    """§3.6: my CHANGES_REQUESTED → in_progress · rework (Q1: standalone too)."""
+def request_changes(task_id: int, body: ChangesBody, request: Request):
+    """§3.6: my CHANGES_REQUESTED → in_progress · rework (Q1: standalone too), then for a factory task
+    (013 Q11) the rework run: /factory <id> in its worktree, a fresh session (Q13). Q12: an active run
+    refuses before any write; any later refusal from run_task leaves the decision and the move."""
     if not body.body_md.strip():
         raise HTTPException(422, "body_md must not be blank")
+    task = one_or_404("SELECT branch, worktree_path FROM tasks WHERE id = ?", (task_id,))
+    factory = bool(task["branch"] and task["worktree_path"])
+    if factory:
+        with closing(db.connect()) as conn:
+            refuse_if_running(conn)
     decide_review(task_id, "CHANGES_REQUESTED", body.body_md, "in_progress", "rework")
-    return {"status": "in_progress", "stage": "rework", "run_id": None}  # 013 spawns the rework run
+    if not factory:
+        return {"status": "in_progress", "stage": "rework", "run_id": None}
+    try:
+        run_id = run_task(task_id, request)["run_id"]
+    except HTTPException as e:
+        e.recorded = True  # the decision and the move are committed; the form shows them (013 ux review)
+        raise
+    return {"status": "in_progress", "stage": "rework", "run_id": run_id}
 
 
 def context_md(task: sqlite3.Row, rounds: list[sqlite3.Row], feedback: sqlite3.Row | None = None) -> str:
@@ -1252,6 +1381,10 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
                 path: str = "", side: str = "", line: str = ""):
     """§8.2's Conversation tab, or with `tab=files` §8.3's Files changed for the picked round (008).
     `path`, `side`, and `line` open the inline comment form under that line (008 Q1)."""
+    return templates.TemplateResponse(request, "review.html", review_context(task_id, n, tab, path, side, line))
+
+
+def review_context(task_id: int, n: str, tab: str, path: str = "", side: str = "", line: str = "") -> dict:
     task = one_or_404(
         "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
         " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
@@ -1273,14 +1406,14 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
         "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
         " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
     )
-    return templates.TemplateResponse(request, "review.html", {
+    return {
         "task": task, "rounds": rounds, "selected": next((r for r in rounds if r["n"] == picked), None),
         "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
         "timeline": query(TIMELINE, {"task": task_id}),
         "tab": tab, "files": files, "tree": file_tree(files),
         # Q6: from the task row, so it survives a reload and also follows fctl approve or a drag to Done
         "commit_hint": commit_hint(task) if task["status"] == "done" else None,
-    })
+    }
 
 
 @app.post("/tasks/{task_id}/approve")
@@ -1292,7 +1425,18 @@ def approve_form(task_id: int):
 
 @app.post("/tasks/{task_id}/request-changes")
 async def request_changes_form(request: Request, task_id: int):
-    request_changes(task_id, ChangesBody(body_md=await form_field(request, "body_md")))
+    body = ChangesBody(body_md=await form_field(request, "body_md"))
+    try:
+        await run_in_threadpool(request_changes, task_id, body, request)  # the spawn blocks
+    except HTTPException as e:
+        if not getattr(e, "recorded", False):  # nothing written: the page's alert shows the detail
+            raise
+        # 013 ux review: htmx doesn't swap a 4xx, so the page would still offer the decision just made.
+        # Swap in its header as it is now (round and tab from the page's URL), the refusal in the alert.
+        shown = parse_qs(urlsplit(request.headers.get("hx-current-url", "")).query)
+        context = review_context(task_id, shown.get("round", ["latest"])[0], shown.get("tab", [""])[0])
+        return templates.TemplateResponse(request, "review.html", context | {"refused": e.detail}, headers={
+            "HX-Retarget": "header", "HX-Reselect": "header", "HX-Reswap": "outerHTML"})
     return hx_redirect(f"/tasks/{task_id}/review")
 
 

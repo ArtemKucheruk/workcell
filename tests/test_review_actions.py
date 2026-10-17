@@ -153,7 +153,8 @@ def test_approve_missing(client, project):  # AC9
 def test_request_changes(client, factory_task):  # AC10
     task, _ = factory_task
     r = rework(client, task)
-    assert (r.status_code, r.json()) == (202, {"status": "in_progress", "stage": "rework", "run_id": None})
+    # 013 Q12: /code/api isn't a repo, so the rework spawn is refused after the move is recorded
+    assert (r.status_code, r.json()) == (409, {"detail": "factory isn't committed on main"})
     status, stage, position, done_at, updated_at = row(task)
     assert (status, stage, position, done_at) == ("in_progress", "rework", 1.0, None)
     assert current(updated_at)
@@ -173,7 +174,8 @@ def test_request_changes_standalone(client, factory_task, standalone):  # AC12
     assert row(task)[:4] == ("in_progress", "rework", 1.0, None)
     assert decisions(task) == [("me", "CHANGES_REQUESTED", r2, NOTE)]
     assert events(task) == [("me", "review", "in_progress", "rework")]
-    assert rework(client, factory_task[0]).status_code == 202
+    r = rework(client, factory_task[0])  # 013: a factory task's spawn is tried, and refused here
+    assert (r.status_code, r.json()) == (409, {"detail": "factory isn't committed on main"})
     assert sql("SELECT COUNT(*) FROM runs") == [(0,)]
 
 
@@ -275,8 +277,8 @@ def test_approve_form(client, factory_task):  # AC20
     assert row(task)[0] == "done"
 
 
-def test_request_changes_form(client, project, factory_task):  # AC21
-    task, _ = factory_task
+def test_request_changes_form(client, project, standalone):  # AC21: standalone, so no spawn (013)
+    task, _ = standalone
     r = client.post(f"/tasks/{task}/request-changes", content=b"body_md=Make+it+configurable", headers=FORM)
     assert (r.status_code, r.headers["HX-Redirect"]) == (204, f"/tasks/{task}/review")
     assert [d[3] for d in decisions(task)] == ["Make it configurable"]
