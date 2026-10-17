@@ -36,6 +36,22 @@ def git(cwd, *args) -> str:
     return r.stdout.strip()
 
 
+def write(repo, files: dict):
+    """Write {relative path: str or bytes} under repo, bytes as given (\\r\\n kept)."""
+    for name, content in files.items():
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content if isinstance(content, bytes) else content.encode())
+
+
+def commit(repo, files: dict | None = None) -> str:
+    """Write files, commit everything, and return the new HEAD."""
+    write(repo, files or {})
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "c")
+    return git(repo, "rev-parse", "HEAD")
+
+
 def sql(query, args=()):
     """Run one statement against the test's database; its rows."""
     with closing(db.connect()) as conn, conn:
