@@ -69,6 +69,15 @@
     .comment + .comment { margin-top: .5rem; }
     .comment > p { margin: .25rem 0 0; }
     code.hljs { background: transparent; padding: 0; }
+    /* Code page (docs/ui.md §8 item 6) */
+    #file-tree summary { cursor: pointer; }
+    #file-tree a[aria-current="page"] { font-weight: bold; }
+    .code-view { display: flex; overflow-x: auto; border: 1px solid GrayText; border-radius: 6px; }
+    .code-view pre { margin: 0; padding: .5rem; font: .85rem/1.4 ui-monospace, monospace; }
+    .code-view .gutter { position: sticky; left: 0; background: Canvas; color: GrayText; text-align: right;
+      user-select: none; border-right: 1px solid GrayText; }
+    .code-view code { font: inherit; }  /* the gutter's line height, so numbers line up */
+    .code-view code.hljs { display: inline; padding: 0; overflow: visible; }
   </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>

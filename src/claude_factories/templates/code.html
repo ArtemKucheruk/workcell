@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{% if path %}{{ path }} · {% endif %}{{ project.name }} · Code{% endblock %}
+{% block content %}
+{# Q8: a directory is open only if it holds the shown file #}
+{% macro tree_list(node, prefix="") %}<ul>
+{%- for name, child in node.items() %}
+<li>{% if name.endswith("/") %}<details{% if path.startswith(prefix ~ name) %} open{% endif %}><summary>{{ name }}</summary>{{ tree_list(child, prefix ~ name) }}</details>
+{%- else %}<a href="/projects/{{ project.id }}/code?path={{ child.path | urlencode }}"{% if child.path == path %} aria-current="page"{% endif %}>{{ name }}</a>{% endif %}</li>
+{%- endfor %}
+</ul>{% endmacro %}
+<header>
+  <p><a href="/">Claude Factories</a></p>
+  <h1><a href="/projects/{{ project.id }}">{{ project.name }}</a> · Code</h1>
+  {% if branch %}<p>Branch <code>{{ branch }}</code></p>{% endif %}
+</header>
+<main>
+{% if error %}
+<p role="alert">Can't list files in {{ project.path }}: {{ error }}</p>
+{% elif not tree %}
+<p class="muted">No tracked files.</p>
+{% else %}
+<div class="files-layout">
+<nav id="file-tree" aria-label="Files">{{ tree_list(tree) }}</nav>
+<div>
+  {% if shown %}<h2 class="file-header"><code>{{ shown }}</code></h2>{% endif %}
+  {% if view.note %}
+  <p class="muted">{{ view.note }}</p>
+  {% elif path %}
+  {# Q9: one <pre><code> for the whole file, so highlight.js sees multi-line constructs whole #}
+  <div class="code-view"><pre class="gutter" aria-hidden="true">{{ range(1, view.lines + 1) | join("\n") }}</pre><pre><code{% if lang %} data-lang="{{ lang }}"{% endif %}>{{ view.text }}</code></pre></div>
+  {% else %}
+  <article class="readme">{{ view.text | markdown }}</article>
+  {% endif %}
+</div>
+</div>
+<script>
+// Q9: color with the file's extension only if highlight.js knows it; no auto-detection.
+document.querySelectorAll(".code-view code[data-lang]").forEach((code) => {
+  const language = code.dataset.lang;
+  if (!hljs.getLanguage(language)) return;
+  code.innerHTML = hljs.highlight(code.textContent, {language, ignoreIllegals: true}).value;
+  code.classList.add("hljs");
+});
+</script>
+{% endif %}
+</main>
+{% endblock %}
