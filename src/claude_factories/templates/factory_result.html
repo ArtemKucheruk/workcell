@@ -1,0 +1,14 @@
+{% if error %}
+<p role="alert">{{ error }}</p>
+{% else %}
+{% if written %}
+<p>Wrote {{ written | length }} file{{ "" if written | length == 1 else "s" }}:</p>
+<ul>{% for path in written %}<li><code>{{ path }}</code></li>{% endfor %}</ul>
+{% endif %}
+{% if skipped %}
+<p>Skipped {{ skipped | length }} existing file{{ "" if skipped | length == 1 else "s" }} (tick Overwrite to replace them):</p>
+<ul>{% for path in skipped %}<li><code>{{ path }}</code></li>{% endfor %}</ul>
+{% endif %}
+<p>Commit them so runs can see the factory:</p>
+<pre><code>{{ commit_hint }}</code></pre>
+{% endif %}

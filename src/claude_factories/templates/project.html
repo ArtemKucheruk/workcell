@@ -10,6 +10,12 @@
   <div class="toolbar">
     <a href="/projects/{{ project.id }}/code">Code</a>
     <span>Factory: {{ factory }}{% if factory == "ready" %} ✓{% endif %}</span>
+    {% if factory != "ready" %}
+    <form hx-post="/projects/{{ project.id }}/factory" hx-target="#factory-result">
+      <label><input type="checkbox" name="overwrite"> Overwrite existing files</label>
+      <button>Create factory</button>
+    </form>
+    {% endif %}
     <details>
       <summary>+ New task</summary>
       <form hx-post="/projects/{{ project.id }}/tasks">
@@ -20,6 +26,7 @@
     </details>
     <button disabled title="Runs aren't available yet">Run next ▶</button>
   </div>
+  <div id="factory-result" aria-live="polite"></div>
 </header>
 <main>
 <p class="muted">{{ project.path }}</p>
