@@ -12,7 +12,8 @@ disagree, stop and tell me.
 
 You spawn every agent, create worktrees, snapshot diffs, and, with the orchestrators in other
 terminals, are the only writers of `factory/board.json`. You write no code, specs, reviews, or
-decisions: each agent writes its own file. Agents never run git writes. Yours are exactly:
+decisions: each agent writes its own file. The one exception is a skipped review-ui file
+(agent_review step 2). Agents never run git writes. Yours are exactly:
 `git fetch`, `git worktree add`, publish (commit, push, PR), and approve (PR merge, worktree
 remove, branch delete). Nobody rebases, stashes, resets, force-pushes, or switches branches.
 Commits and PRs carry no Claude attribution: no `Co-Authored-By` trailer, no "Generated with
@@ -134,13 +135,14 @@ n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the c
 3. Wait for it. No J/round-<n>/build.md → ask the builder once to write it, then stop and
    report if it's still missing (`/factory resume` picks up from here).
 4. Snapshot the worktree, untracked files included, without touching its index, against the
-   job's base on main (after a rework, HEAD is the job's earlier commit):
+   job's base on main (after a rework, HEAD is the job's earlier commit). Vendored `*.min.*`
+   files and `uv.lock` stay out of the patch: every reviewer and the approver read it.
    ```sh
    t=$(mktemp -d); wt=.claude/worktrees/<id>
    base=$(git -C $wt merge-base HEAD origin/main)
    GIT_INDEX_FILE=$t/index git -C $wt read-tree HEAD
    GIT_INDEX_FILE=$t/index git -C $wt add -A
-   GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base > factory/jobs/<id>/round-<n>/diff.patch
+   GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' > factory/jobs/<id>/round-<n>/diff.patch
    rm -rf $t
    ```
    Over 5 MB means generated files got in (.venv/, caches): have the builder fix .gitignore,
@@ -149,7 +151,10 @@ n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the c
 ### agent_review, round n
 1. Stage agent_review.
 2. Spawn `review-security`, `review-ux`, `review-ui`, `review-code` in ONE message, each with
-   "Job <id>, round <n>."
+   "Job <id>, round <n>." Skip `review-ui` when the diff touches no UI files, i.e.
+   `grep -qE '^diff --git .*/(templates|static)/' J/round-<n>/diff.patch` fails: write
+   J/round-<n>/review-ui.md yourself, `VERDICT: PASS` then
+   `no UI in this job (diff touches no templates/ or static/; review-ui skipped)`.
 3. As each finishes, read the first line of J/round-<n>/review-<r>.md and set `reviews.<r>`.
    Anything but `VERDICT: PASS` counts as CHANGES.
 4. WAIT FOR ALL: the round is done only when all 4 review files exist. Spawn a reviewer
@@ -219,7 +224,8 @@ name one. Continue from its stage:
 - spec: J/spec.md exists → build round 1; else spec.
 - build or rework: J/round-<round>/build.md exists → snapshot (build step 4), then
   agent_review; else build with n = round.
-- agent_review: fill `reviews` from the files that exist; spawn only the missing reviewers.
+- agent_review: fill `reviews` from the files that exist; spawn only the missing reviewers
+  (review-ui follows the skip rule in agent_review step 2).
 - approval: run approval again.
 
 ## Dashboard

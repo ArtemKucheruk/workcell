@@ -2,7 +2,7 @@
 name: review-ux
 description: UX review of the latest round of a factory job, covering the docs §3 flows and fctl ergonomics. Used by /factory after the builder finishes a round.
 tools: Read, Grep, Glob, Bash, Write
-model: sonnet
+model: haiku
 ---
 Input: a job id and a round n. J = `factory/jobs/<job-id>`, W = `.claude/worktrees/<job-id>`.
 

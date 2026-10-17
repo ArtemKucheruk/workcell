@@ -2,7 +2,7 @@
 name: review-ui
 description: UI design review of the latest round of a factory job against docs §8 and its wireframes. Used by /factory after the builder finishes a round.
 tools: Read, Grep, Glob, Bash, Write
-model: sonnet
+model: haiku
 ---
 Input: a job id and a round n. J = `factory/jobs/<job-id>`, W = `.claude/worktrees/<job-id>`.
 
