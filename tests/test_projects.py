@@ -1,10 +1,9 @@
 import re
-from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from conftest import git
+from conftest import git, sql
 
 import claude_factories
 from claude_factories import db
@@ -25,11 +24,6 @@ def connect(client, **overrides):
     r = client.post("/api/projects/connect", json=body(**overrides), headers=H)
     assert r.status_code == 200, r.text
     return r.json()
-
-
-def sql(query, args=()):
-    with closing(db.connect()) as conn, conn:
-        return conn.execute(query, args).fetchall()
 
 
 def workspace_id(name):

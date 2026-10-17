@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DEFAULT_URL = "http://127.0.0.1:4545"
@@ -16,15 +17,19 @@ def _fail(message: str):
     raise SystemExit(1)
 
 
+def base_url() -> str:
+    return (os.environ.get("FCTL_URL") or DEFAULT_URL).rstrip("/")
+
+
 def api(method: str, path: str, body=None):
     """Call the app. Returns parsed JSON or text; on any failure prints to stderr and exits 1."""
-    base = os.environ.get("FCTL_URL") or DEFAULT_URL
+    base = base_url()
     headers = {"X-Requested-By": "fctl"}
     data = None
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(base.rstrip("/") + path, data=data, headers=headers, method=method)
+    req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as resp:
             raw = resp.read()
@@ -85,6 +90,12 @@ def connect(args):
     print(f"Connected {body['name']} ({args.workspace.strip()}) → {project['url']}")
 
 
+def task_add(args):
+    project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main_checkout()}))
+    task = api("POST", f"/api/projects/{project['id']}/tasks", {"title": args.title})
+    print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}")
+
+
 def serve(args):
     import uvicorn  # heavy imports stay out of every other command
 
@@ -105,5 +116,10 @@ def main(argv=None):
     p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
     p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
     p.set_defaults(func=connect)
+    p = commands.add_parser("task", help="manage tasks")
+    task_commands = p.add_subparsers(dest="task_command", required=True)
+    p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
+    p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
+    p.set_defaults(func=task_add)
     args = parser.parse_args(argv)
     args.func(args)

@@ -1,9 +1,11 @@
 import os
 import subprocess
+from contextlib import closing
 
 import pytest
 from fastapi.testclient import TestClient
 
+from claude_factories import db
 from claude_factories.app import app
 
 
@@ -32,6 +34,12 @@ def git(cwd, *args) -> str:
     """Run git in cwd; its stripped stdout. Raises if git fails."""
     r = subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
     return r.stdout.strip()
+
+
+def sql(query, args=()):
+    """Run one statement against the test's database; its rows."""
+    with closing(db.connect()) as conn, conn:
+        return conn.execute(query, args).fetchall()
 
 
 @pytest.fixture

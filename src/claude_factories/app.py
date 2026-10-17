@@ -9,10 +9,14 @@ from pathlib import Path
 from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, FiniteFloat
 
 from . import db
 
@@ -20,6 +24,13 @@ HERE = Path(__file__).parent
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 SKILL = ".claude/skills/factory/SKILL.md"
+COLUMNS = ("backlog", "in_progress", "review", "done")
+REVIEWERS = ("security", "ux", "ui", "code")
+STAGE_STATUS = {  # docs/data-model-and-api.md §5.2
+    "spec": "in_progress", "build": "in_progress", "agent_review": "in_progress",
+    "approval": "in_progress", "rework": "in_progress",
+    "human_review": "review", "escalated": "review",
+}
 
 
 @asynccontextmanager
@@ -45,6 +56,14 @@ async def local_safety(request: Request, call_next):
     if request.method not in SAFE_METHODS and request.headers.get("x-requested-by") != "fctl":
         return JSONResponse({"detail": "X-Requested-By: fctl header required"}, status_code=403)
     return await call_next(request)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    """FastAPI's default 422 without each error's echoed `input`: json.loads lets NaN and Infinity
+    in, and echoing them back would fail to encode as JSON and turn the 422 into a 500."""
+    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -97,6 +116,36 @@ async def form_field(request: Request, name: str) -> str:
 
 def hx_redirect(url: str) -> Response:
     return Response(status_code=204, headers={"HX-Redirect": url})
+
+
+def round_summaries(task_id: int) -> list[dict]:
+    """A task's rounds by n: file count, +/− sums, and all 4 verdicts ('pending' if missing)."""
+    rounds = query(
+        "SELECT r.id, r.n, r.trigger, COUNT(f.path) AS files, COALESCE(SUM(f.additions), 0) AS additions,"
+        " COALESCE(SUM(f.deletions), 0) AS deletions FROM rounds r"
+        " LEFT JOIN round_files f ON f.round_id = r.id WHERE r.task_id = ? GROUP BY r.id ORDER BY r.n",
+        (task_id,),
+    )
+    verdicts = {
+        (v["round_id"], v["reviewer"]): v["verdict"]
+        for v in query(
+            "SELECT v.round_id, v.reviewer, v.verdict FROM verdicts v"
+            " JOIN rounds r ON r.id = v.round_id WHERE r.task_id = ?",
+            (task_id,),
+        )
+    }
+    return [
+        {"n": r["n"], "trigger": r["trigger"], "files": r["files"], "additions": r["additions"],
+         "deletions": r["deletions"],
+         "verdicts": {who: verdicts.get((r["id"], who), "pending") for who in REVIEWERS}}
+        for r in rounds
+    ]
+
+
+def latest_run(task_id: int) -> dict | None:
+    """Q9: the task's latest run whatever its status, so a failed one can show as stalled."""
+    found = query("SELECT id, status FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1", (task_id,))
+    return dict(found[0]) if found else None
 
 
 # --- JSON API (docs/data-model-and-api.md §6.1) -------------------------------
@@ -154,6 +203,127 @@ def find_project(path: str):
     p = found[0]
     factory = factory_state(p["path"], p["default_branch"])
     return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
+
+
+# --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
+
+
+class TaskBody(BaseModel):
+    title: str
+    description_md: str = ""
+
+
+class TaskPatch(BaseModel):
+    spec_md: str | None = None
+    stage: (
+        Literal["spec", "build", "agent_review", "approval", "rework", "human_review", "escalated"] | None
+    ) = None
+    status: Literal["backlog", "in_progress", "review", "done"] | None = None
+    position: FiniteFloat | None = None
+
+
+@app.get("/api/projects/{project_id}/tasks")
+def list_tasks(project_id: int):
+    one_or_404("SELECT 1 FROM projects WHERE id = ?", (project_id,))
+    tasks = query("SELECT id, title, status, stage, position FROM tasks WHERE project_id = ?", (project_id,))
+    items = []
+    # ponytail: 3 queries per task; one grouped query if a board grows past a few hundred tasks
+    for t in sorted(tasks, key=lambda t: (COLUMNS.index(t["status"]), t["position"], t["id"])):
+        rounds = round_summaries(t["id"])
+        last = rounds[-1] if rounds else {}
+        items.append({
+            "id": t["id"], "title": t["title"], "status": t["status"], "stage": t["stage"],
+            "round": last.get("n"), "verdicts": last.get("verdicts"),
+            "additions": last.get("additions"), "deletions": last.get("deletions"),
+            "run": latest_run(t["id"]),
+        })
+    return items
+
+
+@app.post("/api/projects/{project_id}/tasks", status_code=201)
+def create_task(project_id: int, body: TaskBody):
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(422, "title must not be blank")
+    with closing(db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")  # the bottom position and the insert, atomically
+        if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
+            raise HTTPException(404)
+        position = conn.execute(
+            "SELECT COALESCE(MAX(position) + 1, 1.0) FROM tasks WHERE project_id = ? AND status = 'backlog'",
+            (project_id,),
+        ).fetchone()[0]
+        now = db.now()
+        task_id = conn.execute(
+            "INSERT INTO tasks (project_id, title, description_md, status, position, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'backlog', ?, ?, ?)",
+            (project_id, title, body.description_md, position, now, now),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO events (task_id, actor, to_status, created_at) VALUES (?, 'me', 'backlog', ?)",
+            (task_id, now),
+        )
+    return {"id": task_id, "status": "backlog"}
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task(task_id: int):
+    task = one_or_404("SELECT id, title, status, stage, branch FROM tasks WHERE id = ?", (task_id,))
+    decisions = query(
+        "SELECT d.id, r.n AS round, d.actor, d.decision, d.body_md, d.created_at FROM decisions d"
+        " JOIN rounds r ON r.id = d.round_id WHERE d.task_id = ? ORDER BY d.id",
+        (task_id,),
+    )
+    return dict(task) | {
+        "rounds": round_summaries(task_id),
+        "decisions": [dict(d) for d in decisions],
+        "run": latest_run(task_id),
+    }
+
+
+@app.patch("/api/tasks/{task_id}")
+def patch_task(task_id: int, body: TaskPatch):
+    sent = body.model_fields_set
+    if sent not in ({"spec_md"}, {"stage"}, {"status", "position"}):
+        raise HTTPException(422, "send exactly one of: spec_md, stage, or status with position")
+    if any(getattr(body, key) is None for key in sent):
+        raise HTTPException(422, f"{', '.join(sorted(sent))} must not be null")
+    with closing(db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")  # the 409 check, the update, and the event commit together
+        conn.row_factory = sqlite3.Row
+        task = conn.execute("SELECT status, stage, done_at FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not task:
+            raise HTTPException(404)
+        now = db.now()
+        if body.spec_md is not None:
+            conn.execute(
+                "UPDATE tasks SET spec_md = ?, updated_at = ? WHERE id = ?", (body.spec_md, now, task_id)
+            )
+            return {"id": task_id, "status": task["status"], "stage": task["stage"]}
+        if body.stage is not None:
+            status, stage, actor = STAGE_STATUS[body.stage], body.stage, "orchestrator"
+        else:  # a manual move (board drag): status and position, stage cleared
+            run = conn.execute(
+                "SELECT id FROM runs WHERE task_id = ? AND status = 'running'", (task_id,)
+            ).fetchone()
+            if run:
+                raise HTTPException(409, f"run #{run['id']} active")
+            status, stage, actor = body.status, None, "me"
+        done_at = None
+        if status == "done":
+            done_at = (task["status"] == "done" and task["done_at"]) or now
+        conn.execute(
+            "UPDATE tasks SET status = ?, stage = ?, position = COALESCE(?, position), done_at = ?,"
+            " updated_at = ? WHERE id = ?",
+            (status, stage, body.position, done_at, now, task_id),
+        )
+        if (status, stage) != (task["status"], task["stage"]):
+            conn.execute(
+                "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (task_id, actor, task["status"], status, stage, now),
+            )
+    return {"id": task_id, "status": status, "stage": stage}
 
 
 # --- Pages and htmx forms (docs/ui.md §8) ------------------------------------

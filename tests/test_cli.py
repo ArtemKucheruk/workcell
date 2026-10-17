@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 import threading
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -94,13 +95,15 @@ def test_serve_prints_banner_before_run(uvicorn_calls):  # AC7
 
 @pytest.fixture
 def server(monkeypatch):
-    """A stdlib HTTP server that records requests and sends `server.reply`."""
+    """A stdlib HTTP server that records requests. It sends the next of `server.replies`, or
+    `server.reply` once those run out."""
 
     class Handler(BaseHTTPRequestHandler):
         def handle_one(self):
             n = int(self.headers.get("Content-Length") or 0)
             self.server.requests.append((self.command, self.path, self.headers, self.rfile.read(n)))
-            status, ctype, body = self.server.reply
+            replies = self.server.replies
+            status, ctype, body = replies.pop(0) if replies else self.server.reply
             self.send_response(status)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
@@ -115,6 +118,7 @@ def server(monkeypatch):
     srv = HTTPServer(("127.0.0.1", 0), Handler)
     srv.requests = []
     srv.reply = (200, "application/json", b"{}")
+    srv.replies = []
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     monkeypatch.setenv("FCTL_URL", f"http://127.0.0.1:{srv.server_port}")
     yield srv
@@ -292,3 +296,88 @@ def test_connect_requires_workspace(connect_server, repo, monkeypatch, capsys): 
     assert e.value.code == 2
     assert capsys.readouterr().err.startswith("usage: fctl connect")
     assert connect_server.requests == []
+
+
+# --- fctl task add -----------------------------------------------------------
+
+PROJECT = {"id": 3, "name": "api", "default_branch": "main", "factory": "none"}
+
+
+@pytest.fixture
+def task_server(server):
+    server.replies = [
+        (200, "application/json", json.dumps(PROJECT).encode()),
+        (201, "application/json", json.dumps({"id": 12, "status": "backlog"}).encode()),
+    ]
+    return server
+
+
+def looked_up_path(server):
+    """The first request (the project lookup GET)'s query, decoded."""
+    method, path, _, _ = server.requests[0]
+    url = urllib.parse.urlsplit(path)
+    assert (method, url.path) == ("GET", "/api/projects")
+    return urllib.parse.parse_qs(url.query)
+
+
+def test_task_add(task_server, repo, monkeypatch, capsys):  # AC35
+    monkeypatch.chdir(repo)
+    cli.main(["task", "add", "Rate-limit login endpoint"])
+    main = os.path.realpath(repo)
+    assert [(m, p) for m, p, _, _ in task_server.requests] == [
+        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": main})),
+        ("POST", "/api/projects/3/tasks"),
+    ]
+    assert json.loads(task_server.requests[1][3]) == {"title": "Rate-limit login endpoint"}
+    assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+
+
+def test_task_add_path_with_space(task_server, tmp_path, monkeypatch):  # AC36
+    spaced = tmp_path / "my repo"
+    git(tmp_path, "init", "-q", "-b", "main", str(spaced))
+    monkeypatch.chdir(spaced)
+    cli.main(["task", "add", "x"])
+    assert looked_up_path(task_server) == {"path": [os.path.realpath(spaced)]}
+
+
+def test_task_add_from_worktree(task_server, repo, monkeypatch):  # AC37
+    worktree = repo / ".claude" / "worktrees" / "x"
+    git(repo, "worktree", "add", "-q", "-b", "factory/x", str(worktree))
+    monkeypatch.chdir(worktree)
+    cli.main(["task", "add", "x"])
+    assert looked_up_path(task_server) == {"path": [os.path.realpath(repo)]}
+
+
+def test_task_add_unconnected(server, repo, monkeypatch, capsys):  # AC38
+    main = os.path.realpath(repo)
+    server.reply = (404, "application/json", json.dumps({"detail": f"no project at {main}"}).encode())
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["task", "add", "x"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == f"fctl: 404 no project at {main}\n"
+    assert [m for m, _, _, _ in server.requests] == ["GET"]
+
+
+def test_task_add_outside_repo(server, tmp_path, monkeypatch, capsys):  # AC39
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.chdir(nowhere)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["task", "add", "x"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == f"fctl: not inside a git repository: {os.getcwd()}\n"
+    assert server.requests == []
+
+
+@pytest.mark.parametrize(
+    "argv, usage", [(["task", "add"], "usage: fctl task add"), (["task"], "usage: fctl task")]
+)
+def test_task_usage_errors(server, repo, monkeypatch, capsys, argv, usage):  # AC40
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        cli.main(argv)
+    assert e.value.code == 2
+    assert capsys.readouterr().err.startswith(usage)
+    assert server.requests == []
