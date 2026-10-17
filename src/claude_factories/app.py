@@ -4,6 +4,7 @@ import codecs
 import json
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import threading
@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Literal, get_args
 
+import jinja2
 from markdown_it import MarkdownIt
 from markupsafe import Markup
 from pydantic import BaseModel, Field, FiniteFloat
@@ -236,6 +238,61 @@ def find_project(path: str):
     p = found[0]
     factory = factory_state(p["path"], p["default_branch"])
     return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
+
+
+# --- Create factory (docs/MVP.md §3.2, docs/claude-code.md §7.1, §7.3) ---------
+
+FACTORY_FILES = (SKILL, *(f".claude/agents/{a}.md" for a in (  # Q6: written and listed in this order
+    "spec-writer", "builder", "review-security", "review-ux", "review-ui", "review-code", "approver")))
+# Q5: markdown, not HTML; values go in verbatim and are never evaluated as template code
+FACTORY_TEMPLATES = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(HERE / "factory_templates"),
+    autoescape=False, keep_trailing_newline=True, undefined=jinja2.StrictUndefined,
+)
+COMMIT_HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'
+
+
+class FactoryBody(BaseModel):
+    overwrite: bool = False
+
+
+def create_factory(project_id: int, overwrite: bool) -> dict:
+    """Q7, Q8: every check before any write; existing files (lexists) are skipped unless overwrite."""
+    p = one_or_404(
+        "SELECT p.name, p.path, p.default_branch, p.test_cmd, w.name AS workspace FROM projects p"
+        " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
+        (project_id,),
+    )
+    if not (p["test_cmd"] or "").strip():
+        raise HTTPException(409, "no test command: in the repo, run fctl connect --workspace"
+                                 f' {shlex.quote(p["workspace"])} --test-cmd "<your test command>"')
+    root = p["path"]
+    if not os.path.isdir(root):
+        raise HTTPException(409, f"{root} is not a directory")
+    real_root = Path(os.path.realpath(root))
+    for rel in FACTORY_FILES:
+        if not Path(os.path.realpath(os.path.join(root, rel))).is_relative_to(real_root):
+            raise HTTPException(409, f"{rel} resolves outside the project")
+    values = {"name": p["name"], "default_branch": p["default_branch"], "test_cmd": p["test_cmd"]}
+    written, skipped = [], []
+    for rel in FACTORY_FILES:
+        target = Path(root, rel)
+        if os.path.lexists(target) and not overwrite:
+            skipped.append(rel)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(FACTORY_TEMPLATES.get_template(rel.removeprefix(".claude/")).render(values),
+                          encoding="utf-8")
+        written.append(rel)
+    if written:  # Q9
+        with closing(db.connect()) as conn, conn:
+            conn.execute("UPDATE projects SET factory_version = 1 WHERE id = ?", (project_id,))
+    return {"written": written, "skipped": skipped, "commit_hint": COMMIT_HINT}
+
+
+@app.post("/api/projects/{project_id}/factory")
+def create_factory_api(project_id: int, body: FactoryBody):
+    return create_factory(project_id, body.overwrite)
 
 
 # --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
@@ -936,6 +993,16 @@ async def move_project(request: Request, project_id: int):
         if moved.rowcount == 0:
             raise HTTPException(404)
     return hx_redirect(f"/projects/{project_id}")
+
+
+@app.post("/projects/{project_id}/factory", response_class=HTMLResponse)
+async def create_factory_form(request: Request, project_id: int):
+    """Q11: htmx doesn't swap 4xx, so errors come back as a 200 fragment with role="alert"."""
+    try:
+        result = create_factory(project_id, bool(await form_field(request, "overwrite")))
+    except HTTPException as e:
+        result = {"error": e.detail}
+    return templates.TemplateResponse(request, "factory_result.html", result)
 
 
 # §5.1, Q8: one row per event, round, verdict, decision, and comment, labelled; ties sort by kind, then id.
