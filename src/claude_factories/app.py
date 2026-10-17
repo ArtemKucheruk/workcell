@@ -1,6 +1,8 @@
 """The FastAPI app behind `fctl serve`."""
 
+import codecs
 import os
+import re
 import sqlite3
 import subprocess
 from contextlib import asynccontextmanager, closing
@@ -16,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Literal
 
-from pydantic import BaseModel, FiniteFloat
+from pydantic import BaseModel, Field, FiniteFloat
 
 from . import db
 
@@ -26,6 +28,7 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 SKILL = ".claude/skills/factory/SKILL.md"
 COLUMNS = ("backlog", "in_progress", "review", "done")
 REVIEWERS = ("security", "ux", "ui", "code")
+MAX_PATCH = 5 * 1024 * 1024  # Q5: UTF-8 bytes of the patch alone
 STAGE_STATUS = {  # docs/data-model-and-api.md §5.2
     "spec": "in_progress", "build": "in_progress", "agent_review": "in_progress",
     "approval": "in_progress", "rework": "in_progress",
@@ -64,6 +67,13 @@ async def validation_error(request: Request, exc: RequestValidationError):
     in, and echoing them back would fail to encode as JSON and turn the 422 into a 500."""
     errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
     return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
+
+
+@app.exception_handler(UnicodeEncodeError)
+async def unencodable(request: Request, exc: UnicodeEncodeError):
+    """A JSON `\\ud800` escape decodes to a lone surrogate, which UTF-8 and SQLite reject: a 422, not
+    a 500. Raised inside a transaction, so it rolls back."""
+    return JSONResponse({"detail": "text must not contain lone surrogates"}, status_code=422)
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -208,9 +218,17 @@ def find_project(path: str):
 # --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
 
 
+class RoundBody(BaseModel):
+    """§6.3's rounds body, and §6.2's `submit` (Q4). base_sha may later become a git argument."""
+    base_sha: str = Field(pattern=r"^[0-9a-f]{7,64}$")
+    patch: str
+    build_md: str | None = None
+
+
 class TaskBody(BaseModel):
     title: str
     description_md: str = ""
+    submit: RoundBody | None = None
 
 
 class TaskPatch(BaseModel):
@@ -241,28 +259,34 @@ def list_tasks(project_id: int):
 
 
 @app.post("/api/projects/{project_id}/tasks", status_code=201)
-def create_task(project_id: int, body: TaskBody):
+def create_task(project_id: int, body: TaskBody, request: Request):
+    """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (Q3)."""
     title = body.title.strip()
     if not title:
         raise HTTPException(422, "title must not be blank")
+    status, stage, actor = ("review", "human_review", "app") if body.submit else ("backlog", None, "me")
     with closing(db.connect()) as conn, conn:
-        conn.execute("BEGIN IMMEDIATE")  # the bottom position and the insert, atomically
+        conn.execute("BEGIN IMMEDIATE")  # the bottom position, the inserts, and the round, atomically
         if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
             raise HTTPException(404)
         position = conn.execute(
-            "SELECT COALESCE(MAX(position) + 1, 1.0) FROM tasks WHERE project_id = ? AND status = 'backlog'",
-            (project_id,),
+            "SELECT COALESCE(MAX(position) + 1, 1.0) FROM tasks WHERE project_id = ? AND status = ?",
+            (project_id, status),
         ).fetchone()[0]
         now = db.now()
         task_id = conn.execute(
-            "INSERT INTO tasks (project_id, title, description_md, status, position, created_at, updated_at)"
-            " VALUES (?, ?, ?, 'backlog', ?, ?, ?)",
-            (project_id, title, body.description_md, position, now, now),
+            "INSERT INTO tasks (project_id, title, description_md, status, stage, position, created_at,"
+            " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, title, body.description_md, status, stage, position, now, now),
         ).lastrowid
         conn.execute(
-            "INSERT INTO events (task_id, actor, to_status, created_at) VALUES (?, 'me', 'backlog', ?)",
-            (task_id, now),
+            "INSERT INTO events (task_id, actor, to_status, stage, created_at) VALUES (?, ?, ?, ?, ?)",
+            (task_id, actor, status, stage, now),
         )
+        if body.submit:  # a 4xx in here rolls the task back too
+            submitted = insert_round(conn, task_id, body.submit)
+    if body.submit:
+        return {"task_id": task_id} | submitted | {"url": f"{request.base_url}tasks/{task_id}/review"}
     return {"id": task_id, "status": "backlog"}
 
 
@@ -324,6 +348,153 @@ def patch_task(task_id: int, body: TaskPatch):
                 (task_id, actor, task["status"], status, stage, now),
             )
     return {"id": task_id, "status": status, "stage": stage}
+
+
+# --- Rounds (docs/data-model-and-api.md §6.3) ---------------------------------
+
+PATCH_NAMES = {"rename from ": "from", "rename to ": "to", "--- ": "old", "+++ ": "new"}
+
+
+def unquote(name: str) -> str:
+    """Q6: git C-quotes a name holding `"`, `\\`, or control bytes; octal escapes are UTF-8 bytes."""
+    if len(name) < 2 or name[0] != '"' or name[-1] != '"':
+        return name
+    try:
+        return codecs.escape_decode(name[1:-1].encode())[0].decode(errors="replace")
+    except ValueError:  # a trailing `\` or a bad `\x`: "" makes the caller's 422
+        return ""
+
+
+def safe_path(path: str | None) -> bool:
+    """Git never writes an empty, absolute, `..`, or NUL path; refuse them before pages link to it."""
+    return bool(path) and not path.startswith("/") and "\0" not in path and ".." not in path.split("/")
+
+
+def parse_section(section: str) -> dict:
+    """Q6: one `diff --git` section → its round_files row."""
+    header, *lines = section.split("\n")
+    row = {"path": None, "old_path": None, "change": "modified", "binary": 0, "additions": 0,
+           "deletions": 0, "patch": section}
+    names, in_hunks = {}, False
+    for line in lines:
+        if in_hunks:
+            row["additions"] += line.startswith("+")
+            row["deletions"] += line.startswith("-")
+        elif line.startswith("@@"):
+            in_hunks = True
+        elif line.startswith("new file mode "):
+            row["change"] = "added"
+        elif line.startswith("deleted file mode "):
+            row["change"] = "deleted"
+        elif line.startswith("Binary files ") and line.endswith(" differ"):
+            row["binary"] = 1
+        else:
+            for prefix, key in PATCH_NAMES.items():
+                if line.startswith(prefix):  # git adds a tab after a name with a space
+                    names[key] = unquote(line[len(prefix):].removesuffix("\t"))
+    new, old = names.get("new", "/dev/null"), names.get("old", "/dev/null")
+    if "to" in names:
+        row.update(path=names["to"], old_path=names.get("from"), change="renamed")
+    elif new != "/dev/null":
+        row["path"] = new.removeprefix("b/") if new.startswith("b/") else None
+    elif old != "/dev/null":
+        row["path"] = old.removeprefix("a/") if old.startswith("a/") else None
+    else:  # mode-only, binary, or empty: `diff --git a/X b/X`, split at its midpoint
+        pair = header.removeprefix("diff --git ")
+        mid = len(pair) // 2
+        a, b = unquote(pair[:mid]), unquote(pair[mid + 1:])
+        if pair[mid:mid + 1] == " " and a[:2] == "a/" and b[:2] == "b/" and a[2:] == b[2:]:
+            row["path"] = a[2:]
+    if not safe_path(row["path"]) or (row["change"] == "renamed" and not safe_path(row["old_path"])):
+        raise HTTPException(422, f"can't read a safe file path in: {header[:200]}")
+    return row
+
+
+def split_patch(patch: str) -> list[dict]:
+    """Q6: one row per file, in patch order. Sections split on \\n only, so joined they give the
+    patch back byte for byte."""
+    if not patch.startswith("diff --git "):
+        raise HTTPException(422, 'patch must start with "diff --git"')
+    rows: dict[str, dict] = {}
+    for section in re.split(r"(?m)^(?=diff --git )", patch)[1:]:
+        row = parse_section(section)
+        if seen := rows.get(row["path"]):  # git splits a file <-> symlink typechange in two
+            seen.update(change="modified", old_path=None, binary=seen["binary"] | row["binary"],
+                        additions=seen["additions"] + row["additions"],
+                        deletions=seen["deletions"] + row["deletions"], patch=seen["patch"] + row["patch"])
+        else:
+            rows[row["path"]] = row
+    return list(rows.values())
+
+
+def insert_round(conn: sqlite3.Connection, task_id: int, body: RoundBody) -> dict:
+    """Check the patch (Q4, Q5), number the round and pick its trigger (Q1), and insert it with its
+    files, inside the caller's BEGIN IMMEDIATE so any 4xx writes nothing."""
+    if len(body.patch.encode()) > MAX_PATCH:
+        raise HTTPException(413, "patch over 5 MB")
+    if not body.patch.strip():
+        raise HTTPException(422, "no changes to submit")
+    files = split_patch(body.patch)
+    n = conn.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM rounds WHERE task_id = ?", (task_id,)).fetchone()[0]
+    changes_requested = conn.execute(
+        "SELECT 1 FROM decisions d JOIN rounds r ON r.id = d.round_id WHERE r.task_id = ? AND r.n = ?"
+        " AND d.actor = 'me' AND d.decision = 'CHANGES_REQUESTED'",
+        (task_id, n - 1),
+    ).fetchone()
+    trigger = "initial" if n == 1 else "human" if changes_requested else "agent"
+    round_id = conn.execute(
+        "INSERT INTO rounds (task_id, n, trigger, base_sha, build_md, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (task_id, n, trigger, body.base_sha, body.build_md, db.now()),
+    ).lastrowid
+    conn.executemany(
+        "INSERT INTO round_files (round_id, path, old_path, change, binary, additions, deletions, patch)"
+        " VALUES (:round_id, :path, :old_path, :change, :binary, :additions, :deletions, :patch)",
+        [f | {"round_id": round_id} for f in files],
+    )
+    return {"round": n, "files_changed": len(files), "additions": sum(f["additions"] for f in files),
+            "deletions": sum(f["deletions"] for f in files)}
+
+
+@app.post("/api/tasks/{task_id}/rounds", status_code=201)
+def submit_round(task_id: int, body: RoundBody, request: Request):
+    with closing(db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")  # n, the round, its files, and the status commit together
+        conn.row_factory = sqlite3.Row
+        task = conn.execute("SELECT status, stage, worktree_path FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        if not task:
+            raise HTTPException(404)
+        submitted = insert_round(conn, task_id, body)
+        if task["worktree_path"] is None:  # Q2: every round puts a standalone task in Review
+            now = db.now()
+            conn.execute(
+                "UPDATE tasks SET status = 'review', stage = 'human_review', done_at = NULL, updated_at = ?"
+                " WHERE id = ?",
+                (now, task_id),
+            )
+            if (task["status"], task["stage"]) != ("review", "human_review"):
+                conn.execute(
+                    "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
+                    " VALUES (?, 'app', ?, 'review', 'human_review', ?)",
+                    (task_id, task["status"], now),
+                )
+    return submitted | {"url": f"{request.base_url}tasks/{task_id}/review?round={submitted['round']}"}
+
+
+@app.get("/api/tasks/{task_id}/rounds/{n}/diff")
+def round_diff(task_id: int, n: str):
+    """Q7: the round's files' patches joined in rowid order; `latest` is the highest n."""
+    one_or_404("SELECT 1 FROM tasks WHERE id = ?", (task_id,))
+    if n == "latest":
+        found = query("SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,))
+        missing = f"#{task_id} has no rounds"
+    else:  # compared as text, so 'abc', '01', or a huge number simply match nothing
+        found = query("SELECT id FROM rounds WHERE task_id = ? AND CAST(n AS TEXT) = ?", (task_id, n))
+        missing = f"#{task_id} has no round {n}"
+    if not found:
+        raise HTTPException(404, missing)
+    patches = query("SELECT patch FROM round_files WHERE round_id = ? ORDER BY rowid", (found[0]["id"],))
+    return Response("".join(p["patch"] for p in patches), media_type="text/x-diff",
+                    headers={"X-Content-Type-Options": "nosniff"})  # agent-written text, never HTML
 
 
 # --- Pages and htmx forms (docs/ui.md §8) ------------------------------------
@@ -394,7 +565,7 @@ async def add_task_form(request: Request, project_id: int):
         title=await form_field(request, "title"),
         description_md=await form_field(request, "description_md"),
     )
-    create_task(project_id, body)
+    create_task(project_id, body, request)
     return hx_redirect(f"/projects/{project_id}")
 
 

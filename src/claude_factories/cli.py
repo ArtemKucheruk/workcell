@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -96,6 +97,63 @@ def task_add(args):
     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}")
 
 
+def capture() -> tuple[str, str]:
+    """docs/claude-code.md §7.4 step 2: HEAD and the patch of the cwd's tracked and untracked
+    changes, via a temp index so the real one is untouched. The diff flags pin the format the
+    server parses against user config, and the output is read as bytes: text=True would turn
+    \\r\\n into \\n (Q8)."""
+    base_sha = _git("rev-parse", "--verify", "-q", "HEAD^{commit}")
+    if not base_sha:
+        _fail("HEAD has no commit yet; commit once before submitting")
+    # ponytail: read-tree leaves no stat data, so add -A rehashes every file; seed the temp index
+    # from a copy of the real one if big repos get slow
+    steps = (
+        ["read-tree", base_sha],
+        ["add", "-A"],  # respects .gitignore
+        ["diff", "--cached", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative",
+         "--src-prefix=a/", "--dst-prefix=b/", base_sha],
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        env = os.environ | {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+        for step in steps:
+            r = subprocess.run(["git", "-c", "core.quotePath=false", *step], capture_output=True, env=env)
+            if r.returncode:
+                _fail(f"git {step[0]} failed: {r.stderr.decode(errors='replace').strip()}")
+    return base_sha, r.stdout.decode(errors="replace")
+
+
+def stdin_text() -> str:
+    """Q9: a heredoc or a pipe, sent unchanged; nothing from a terminal, so a hand-typed command
+    doesn't wait for Ctrl-D."""
+    return "" if sys.stdin.isatty() else sys.stdin.read()
+
+
+def summary(r: dict) -> str:
+    files = f"{r['files_changed']} file" + ("" if r["files_changed"] == 1 else "s")
+    return f"{files}, +{r['additions']} −{r['deletions']} → {r['url']}"
+
+
+def submit(args):
+    if (args.id is None) != args.new or args.new != (args.title is not None):  # Q11
+        args.usage_error("give a task id, or --new with --title")
+    main = main_checkout()  # also the "not inside a git repository" check
+    base_sha, patch = capture()
+    text = stdin_text()
+    if args.new:
+        project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
+        body = {"title": args.title, "description_md": text, "submit": {"base_sha": base_sha, "patch": patch}}
+        r = api("POST", f"/api/projects/{project['id']}/tasks", body)
+        print(f"Review #{r['task_id']}: {summary(r)}")
+    else:
+        r = api("POST", f"/api/tasks/{args.id}/rounds", {"base_sha": base_sha, "build_md": text, "patch": patch})
+        print(f"Round {r['round']} of #{args.id}: {summary(r)}")
+
+
+def diff(args):
+    n = "latest" if args.round is None else args.round
+    sys.stdout.write(api("GET", f"/api/tasks/{args.id}/rounds/{n}/diff"))
+
+
 def serve(args):
     import uvicorn  # heavy imports stay out of every other command
 
@@ -121,5 +179,14 @@ def main(argv=None):
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
     p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
     p.set_defaults(func=task_add)
+    p = commands.add_parser("submit", help="send this tree's changes for review, as a new task or a round")
+    p.add_argument("id", nargs="?", type=int, help="the task to add a round to (stdin: build notes)")
+    p.add_argument("--new", action="store_true", help="create a task straight in Review (stdin: description)")
+    p.add_argument("--title", help="the new task's title, with --new")
+    p.set_defaults(func=submit, usage_error=p.error)
+    p = commands.add_parser("diff", help="print a round's full patch")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("--round", type=int, help="the round's number (default: the latest)")
+    p.set_defaults(func=diff)
     args = parser.parse_args(argv)
     args.func(args)
