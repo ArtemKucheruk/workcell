@@ -9,12 +9,14 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 DEFAULT_URL = "http://127.0.0.1:4545"
 # The app's values, repeated here for argparse `choices`: this module must not import app.py.
 REVIEWERS = ("security", "ux", "ui", "code")
 STAGES = ("spec", "build", "agent_review", "approval", "rework", "human_review", "escalated")
 DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; mine go through `fctl approve` and `fctl rework`
+SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
 
 
 def _fail(message: str):
@@ -81,6 +83,20 @@ def default_branch(main: str) -> str:
     return branch
 
 
+def setup(args):
+    """docs/claude-code.md §7.1: install the global skills. fctl owns SKILL.md and overwrites it;
+    other files in those folders stay (Q2). No HTTP. Stops at the first failed write (Q4)."""
+    for name in SKILLS:
+        content = (Path(__file__).parent / "global_skills" / name / "SKILL.md").read_bytes()
+        dest = Path.home() / ".claude" / "skills" / name / "SKILL.md"  # Q1: CLAUDE_CONFIG_DIR ignored
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
+        except OSError as e:
+            _fail(f"can't write {dest}: {e.strerror}")
+        print(f"Wrote {dest}")
+
+
 def connect(args):
     main = main_checkout()
     body = {
@@ -95,10 +111,36 @@ def connect(args):
     print(f"Connected {body['name']} ({args.workspace.strip()}) → {project['url']}")
 
 
+def project_at(main: str) -> dict:
+    """The connected project whose main checkout is `main`; 404 `no project at …` if none."""
+    return api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
+
+
 def task_add(args):
-    project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main_checkout()}))
+    project = project_at(main_checkout())
     task = api("POST", f"/api/projects/{project['id']}/tasks", {"title": args.title})
-    print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}")
+    # flush: a refused run's stderr line must come after this one, also when stdout is a pipe
+    print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}", flush=True)
+    if args.run:  # Q11: a refused run leaves the task in Backlog, its Added line already printed
+        print_run(task["id"], api("POST", f"/api/tasks/{task['id']}/run")["run_id"])
+
+
+def print_run(task_id: int, run_id: int):
+    """Q9: the task page, where the run log shows."""
+    print(f"Run #{run_id} on #{task_id} → {base_url()}/tasks/{task_id}")
+
+
+def run(args):
+    """docs/claude-code.md §7.2: `fctl run <id>` needs no repo; `fctl run next` takes the top of the
+    current repo's Backlog (Q10)."""
+    if args.target == "next":
+        r = api("POST", f"/api/projects/{project_at(main_checkout())['id']}/run-next")
+        print_run(r["task_id"], r["run_id"])
+    elif args.target.isdecimal():
+        task_id = int(args.target)
+        print_run(task_id, api("POST", f"/api/tasks/{task_id}/run")["run_id"])
+    else:
+        args.usage_error(f"target must be a task id or next, not {args.target!r}")
 
 
 def capture() -> tuple[str, str]:
@@ -144,7 +186,7 @@ def submit(args):
     base_sha, patch = capture()
     text = stdin_text()
     if args.new:
-        project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
+        project = project_at(main)
         body = {"title": args.title, "description_md": text, "submit": {"base_sha": base_sha, "patch": patch}}
         r = api("POST", f"/api/projects/{project['id']}/tasks", body)
         print(f"Review #{r['task_id']}: {summary(r)}")
@@ -233,6 +275,8 @@ def main(argv=None):
     p = commands.add_parser("serve", help="start the app on 127.0.0.1")
     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
     p.set_defaults(func=serve)
+    p = commands.add_parser("setup", help="write the /factory-connect and /factory-submit skills to ~/.claude")
+    p.set_defaults(func=setup)
     p = commands.add_parser("connect", help="register the current git repo as a project")
     p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
     p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
@@ -241,7 +285,11 @@ def main(argv=None):
     task_commands = p.add_subparsers(dest="task_command", required=True)
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
     p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
+    p.add_argument("--run", action="store_true", help="then start a factory run on it")
     p.set_defaults(func=task_add)
+    p = commands.add_parser("run", help="start a factory run on a task, or on the top of this repo's Backlog")
+    p.add_argument("target", help='a task id, or "next"')
+    p.set_defaults(func=run, usage_error=p.error)
     p = commands.add_parser("submit", help="send this tree's changes for review, as a new task or a round")
     p.add_argument("id", nargs="?", type=int, help="the task to add a round to (stdin: build notes)")
     p.add_argument("--new", action="store_true", help="create a task straight in Review (stdin: description)")

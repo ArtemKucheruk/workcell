@@ -11,9 +11,11 @@ from claude_factories.app import app
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    """Every test gets its own FCTL_HOME, a do-nothing fake `claude` first on PATH, and git
-    without the user's config (Q17)."""
+    """Every test gets its own FCTL_HOME and HOME (so nothing touches the real ~/.claude), a
+    do-nothing fake `claude` first on PATH, and git without the user's config (Q17)."""
     monkeypatch.setenv("FCTL_HOME", str(tmp_path / "fctl-home"))
+    (tmp_path / "home").mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("FCTL_URL", raising=False)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()

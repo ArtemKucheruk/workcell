@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -757,3 +758,186 @@ def test_approve_refused(server, capsys):  # 009 AC26
         cli.main(["approve", "12"])
     assert e.value.code == 1
     assert capsys.readouterr().err == "fctl: 409 #12 is not in review\n"
+
+
+# --- fctl setup (015) ----------------------------------------------------------------
+
+
+def skill(name) -> Path:
+    return Path(os.environ["HOME"]) / ".claude" / "skills" / name / "SKILL.md"
+
+
+def frontmatter(text) -> tuple[str, str]:
+    """A SKILL.md's (frontmatter, body); it must start with a `---` block."""
+    assert text.startswith("---\n")
+    front, body = text[4:].split("\n---\n", 1)
+    return front, body
+
+
+def test_setup_writes_skills(server):  # 015 AC1
+    assert not (Path(os.environ["HOME"]) / ".claude").exists()
+    cli.main(["setup"])
+    assert skill("factory-connect").is_file()
+    assert skill("factory-submit").is_file()
+
+
+def test_setup_output(server, capsys):  # 015 AC2
+    cli.main(["setup"])
+    assert capsys.readouterr().out == f"Wrote {skill('factory-connect')}\nWrote {skill('factory-submit')}\n"
+
+
+def test_setup_is_offline(server, monkeypatch):  # 015 AC3
+    cli.main(["setup"])
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    monkeypatch.setenv("FCTL_URL", f"http://127.0.0.1:{port}")  # bound then closed: nothing listens
+    cli.main(["setup"])  # returns: exit 0
+    assert server.requests == []
+
+
+def test_setup_connect_skill(server):  # 015 AC4
+    cli.main(["setup"])
+    front, body = frontmatter(skill("factory-connect").read_text())
+    assert "name: factory-connect" in front.splitlines()
+    assert re.search(r"^description: \S", front, re.M)
+    for needle in ("$ARGUMENTS", "fctl connect --workspace", "--test-cmd"):
+        assert needle in body
+
+
+def test_setup_submit_skill(server):  # 015 AC5
+    cli.main(["setup"])
+    front, body = frontmatter(skill("factory-submit").read_text())
+    assert "name: factory-submit" in front.splitlines()
+    assert re.search(r"^description: \S", front, re.M)
+    assert "fctl submit --new --title" in body
+    assert "fctl submit <id> <<'EOF'" in body
+    assert re.search(r"fctl submit --new --title .*<<'EOF'\n", body)
+
+
+def test_setup_overwrites_only_skill_md(server):  # 015 AC6
+    cli.main(["setup"])
+    first = skill("factory-connect").read_bytes()
+    skill("factory-connect").write_text("my edit\n")
+    notes = skill("factory-connect").with_name("notes.md")
+    notes.write_text("mine\n")
+    cli.main(["setup"])
+    assert skill("factory-connect").read_bytes() == first
+    assert notes.read_text() == "mine\n"
+
+
+def test_setup_cant_write(server, capsys):  # 015 AC7
+    skills = Path(os.environ["HOME"]) / ".claude" / "skills"
+    skills.parent.mkdir()
+    skills.write_text("not a dir\n")
+    with pytest.raises(SystemExit) as e:
+        cli.main(["setup"])
+    assert e.value.code == 1
+    err = capsys.readouterr().err
+    assert err.startswith(f"fctl: can't write {skill('factory-connect')}: ")
+    assert "Traceback" not in err
+
+
+# --- fctl run, task add --run (015) --------------------------------------------------
+
+RUN = {"run_id": 41, "session_id": "s", "worktree": ".claude/worktrees/12-x"}
+ADDED = {"id": 12, "status": "backlog"}
+
+
+def test_run_task(server, capsys):  # 015 AC8
+    server.reply = reply(RUN, 202)
+    cli.main(["run", "12"])
+    assert requests(server) == [("POST", "/api/tasks/12/run", None)]
+    assert capsys.readouterr().out == f"Run #41 on #12 → {os.environ['FCTL_URL']}/tasks/12\n"
+
+
+def test_run_task_outside_repo(server, tmp_path, monkeypatch):  # 015 AC9
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.chdir(nowhere)
+    server.reply = reply(RUN, 202)
+    cli.main(["run", "12"])
+    assert requests(server) == [("POST", "/api/tasks/12/run", None)]
+
+
+def test_run_next(server, repo, monkeypatch, capsys):  # 015 AC10
+    server.replies = [reply(PROJECT), reply({"task_id": 14, "run_id": 42}, 202)]
+    monkeypatch.chdir(repo)
+    cli.main(["run", "next"])
+    assert requests(server) == [
+        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None),
+        ("POST", "/api/projects/3/run-next", None),
+    ]
+    assert capsys.readouterr().out == f"Run #42 on #14 → {os.environ['FCTL_URL']}/tasks/14\n"
+
+
+def test_run_next_outside_repo(server, tmp_path, monkeypatch, capsys):  # 015 AC11
+    nowhere = tmp_path / "nowhere"
+    nowhere.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.chdir(nowhere)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["run", "next"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == f"fctl: not inside a git repository: {os.getcwd()}\n"
+    assert server.requests == []
+
+
+def test_run_next_empty_backlog(server, repo, monkeypatch, capsys):  # 015 AC12
+    server.replies = [reply(PROJECT), reply({"detail": "backlog is empty"}, 404)]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["run", "next"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: 404 backlog is empty\n"
+
+
+def test_run_refused(server, capsys):  # 015 AC13
+    server.reply = reply({"detail": "run #41 active"}, 409)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["run", "12"])
+    assert e.value.code == 1
+    out, err = capsys.readouterr()
+    assert (out, err) == ("", "fctl: 409 run #41 active\n")
+
+
+@pytest.mark.parametrize("argv", [["run"], ["run", "abc"]])
+def test_run_usage_errors(server, capsys, argv):  # 015 AC14
+    with pytest.raises(SystemExit) as e:
+        cli.main(argv)
+    assert e.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: fctl run")
+    assert server.requests == []
+
+
+def test_task_add_run(server, repo, monkeypatch, capsys):  # 015 AC15
+    server.replies = [reply(PROJECT), reply(ADDED, 201), reply(RUN, 202)]
+    monkeypatch.chdir(repo)
+    cli.main(["task", "add", "T", "--run"])
+    assert requests(server) == [
+        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None),
+        ("POST", "/api/projects/3/tasks", {"title": "T"}),
+        ("POST", "/api/tasks/12/run", None),
+    ]
+    url = os.environ["FCTL_URL"]
+    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 → {url}/tasks/12\n"
+
+
+def test_task_add_run_refused(server, repo, monkeypatch, capsys):  # 015 AC16
+    server.replies = [reply(PROJECT), reply(ADDED, 201), reply({"detail": "not on subscription auth"}, 409)]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        cli.main(["task", "add", "T", "--run"])
+    assert e.value.code == 1
+    out, err = capsys.readouterr()
+    assert out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+    assert err == "fctl: 409 not on subscription auth\n"
+
+
+def test_task_add_without_run(server, repo, monkeypatch, capsys):  # 015 AC17
+    server.replies = [reply(PROJECT), reply(ADDED, 201), reply(RUN, 202)]
+    monkeypatch.chdir(repo)
+    cli.main(["task", "add", "T"])
+    assert [(m, p) for m, p, _ in requests(server)][1:] == [("POST", "/api/projects/3/tasks")]
+    assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
