@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}#{{ task.id }} {{ task.title }} · {{ task.project }}{% endblock %}
+{% block content %}
+{% set labels = {"backlog": "Backlog", "in_progress": "In progress", "review": "Review", "done": "Done"} %}
+{% set short = {"security": "sec", "ux": "ux", "ui": "ui", "code": "code"} %}
+{% set symbol = {"PASS": "✓", "CHANGES": "✗", "pending": "·"} %}
+<header>
+  <p><a href="/projects/{{ task.project_id }}">{{ task.project }}</a></p>
+  <h1>#{{ task.id }} {{ task.title }}</h1>
+  <div class="review-meta">
+    <span id="status">{{ labels[task.status] }}
+      {%- if task.stage == "escalated" %} · <strong class="escalated">⚠ NEEDS YOU — escalated</strong>
+      {%- elif task.stage == "human_review" %} · waiting on you
+      {%- elif task.stage %} · {{ task.stage }}{% endif %}</span>
+    {% if task.branch %}<code>{{ task.branch }}</code>{% endif %}
+    {% if rounds %}
+    <form method="get" action="/tasks/{{ task.id }}/review">
+      <label>round <select name="round" onchange="this.form.submit()">
+        {% for r in rounds %}<option value="{{ r.n }}"{% if r is sameas selected %} selected{% endif %}>{{ r.n }}</option>{% endfor %}
+      </select></label>
+      <noscript><button>Show</button></noscript>
+    </form>
+    {% endif %}
+    {% if selected %}<span id="files" class="diff">{{ selected.files }} file{{ "" if selected.files == 1 else "s" }} changed +{{ selected.additions }} −{{ selected.deletions }}</span>{% endif %}
+  </div>
+</header>
+<main>
+<h2>Conversation</h2>
+<section id="description">
+  <h3>Description</h3>
+  {% if task.description_md.strip() %}{{ task.description_md | markdown }}{% else %}<p class="muted">No description.</p>{% endif %}
+  {% if task.spec_md and task.spec_md.strip() %}
+  <details><summary>Spec</summary>{{ task.spec_md | markdown }}</details>
+  {% endif %}
+</section>
+<section id="rounds">
+  <h3>Rounds</h3>
+  {% for r in rounds %}
+  {% set verdicts = posted.get(r.n, {}) %}
+  <div id="round-{{ r.n }}" class="round">
+    <p class="round-row"><strong>Round {{ r.n }}</strong> <span class="muted">{{ r.trigger }}</span>
+      {% if task.worktree_path is none and not verdicts %}<span class="muted">no agent review</span>
+      {% else %}<span class="chips">{% for who, verdict in r.verdicts.items() %} <span title="{{ who }}: {{ verdict }}">{{ short[who] }} {{ symbol[verdict] }}</span>{% endfor %}</span>{% endif %}
+      <span class="diff">+{{ r.additions }} −{{ r.deletions }}</span></p>
+    {% for who in reviewers if who in verdicts and verdicts[who].body_md.strip() %}
+    {% set v = verdicts[who] %}
+    <details class="verdict"><summary>{{ who }} · {{ v.verdict }} <span class="muted">{{ v.body_md.strip().splitlines()[0] }}</span></summary>
+      {{ v.body_md | markdown }}
+    </details>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">No rounds yet.</p>
+  {% endfor %}
+</section>
+{% if approver %}
+<section id="approver">
+  <p><strong>Approver · {{ approver.decision }}</strong> <span class="muted">round {{ approver.n }}</span></p>
+  {{ approver.body_md | markdown }}
+</section>
+{% endif %}
+<section id="timeline">
+  <h3>Timeline</h3>
+  <ol>
+    {% for i in timeline %}
+    <li><time datetime="{{ i.created_at }}">{{ i.created_at | local_time }}</time> {{ i.label }}
+      {% if i.body_md %}{{ i.body_md | markdown }}{% endif %}</li>
+    {% endfor %}
+  </ol>
+</section>
+{% if rounds %}
+<form hx-post="/tasks/{{ task.id }}/comments" class="comment-box">
+  <textarea name="body_md" rows="4" required placeholder="Leave a comment…" aria-label="Comment"></textarea>
+  <button>Comment</button>
+</form>
+{% else %}
+<p class="muted">Comments open once a round is submitted.</p>
+{% endif %}
+</main>
+{% endblock %}

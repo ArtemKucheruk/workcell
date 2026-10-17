@@ -28,7 +28,19 @@
     .chips, .diff { font-variant-numeric: tabular-nums; }
     /* Q3: the only hard-coded color; light-dark keeps contrast in both schemes */
     .card.escalated { border-left: 4px solid light-dark(#cf222e, #f85149); }
-    .escalated .badge { color: light-dark(#cf222e, #f85149); font-weight: bold; }
+    .escalated .badge, #status .escalated { color: light-dark(#cf222e, #f85149); font-weight: bold; }
+    /* Review page (docs/ui.md §8.2) */
+    .review-meta { display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; }
+    .review-meta form { display: inline; }
+    .round { border-bottom: 1px solid GrayText; padding-block: .25rem; }
+    .round-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: .25rem 0; }
+    .chips span + span { margin-left: .5rem; }
+    details.verdict { margin-left: 1rem; }
+    details.verdict summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #timeline ol { list-style: none; padding: 0; display: grid; gap: .25rem; }
+    #timeline time { color: GrayText; font-variant-numeric: tabular-nums; margin-right: .5rem; }
+    #timeline li > :not(time) { margin: .25rem 0 0 1rem; }
+    .comment-box { display: grid; gap: .5rem; max-width: 48rem; }
   </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>

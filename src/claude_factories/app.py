@@ -16,13 +16,17 @@ from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Literal, get_args
 
+from markdown_it import MarkdownIt
+from markupsafe import Markup
 from pydantic import BaseModel, Field, FiniteFloat
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import db
 
@@ -54,6 +58,10 @@ templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["local_time"] = (
     lambda iso: datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M")
 )
+# Q13: raw HTML off, and markdown-it's link check drops javascript:/vbscript:/file:/data: URLs.
+# This filter is the only place agent text becomes Markup.
+MD = MarkdownIt("js-default", {"html": False})
+templates.env.filters["markdown"] = lambda text: Markup(MD.render(text or ""))
 
 
 @app.middleware("http")
@@ -75,6 +83,15 @@ async def validation_error(request: Request, exc: RequestValidationError):
     return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
 
 
+@app.exception_handler(StarletteHTTPException)
+async def page_not_found(request: Request, exc: StarletteHTTPException):
+    """A browser GET of a missing page, task, or round gets a page, not JSON. /api and every other
+    status keep FastAPI's JSON."""
+    if exc.status_code == 404 and request.method == "GET" and not request.url.path.startswith("/api/"):
+        return templates.TemplateResponse(request, "error.html", {"detail": exc.detail}, status_code=404)
+    return await http_exception_handler(request, exc)
+
+
 @app.exception_handler(UnicodeEncodeError)
 async def unencodable(request: Request, exc: UnicodeEncodeError):
     """A JSON `\\ud800` escape decodes to a lone surrogate, which UTF-8 and SQLite reject: a 422, not
@@ -91,10 +108,10 @@ def query(sql: str, args=()) -> list[sqlite3.Row]:
         return conn.execute(sql, args).fetchall()
 
 
-def one_or_404(sql: str, args) -> sqlite3.Row:
+def one_or_404(sql: str, args, detail: str | None = None) -> sqlite3.Row:
     found = query(sql, args)
     if not found:
-        raise HTTPException(404)
+        raise HTTPException(404, detail)
     return found[0]
 
 
@@ -919,3 +936,53 @@ async def move_project(request: Request, project_id: int):
         if moved.rowcount == 0:
             raise HTTPException(404)
     return hx_redirect(f"/projects/{project_id}")
+
+
+# §5.1, Q8: one row per event, round, verdict, decision, and comment, labelled; ties sort by kind, then id.
+TIMELINE = """
+SELECT created_at, 0 AS kind, id, IIF(from_status IS NULL, 'created · ', '') || COALESCE(to_status, '')
+  || COALESCE(' · ' || stage, '') AS label, NULL AS body_md FROM events WHERE task_id = :task
+UNION ALL SELECT created_at, 1, id, 'round ' || n, NULL FROM rounds WHERE task_id = :task
+UNION ALL SELECT v.created_at, 2, v.rowid, v.reviewer || ' ' || v.verdict || ' · round ' || r.n, NULL
+  FROM verdicts v JOIN rounds r ON r.id = v.round_id WHERE r.task_id = :task
+UNION ALL SELECT d.created_at, 3, d.id, d.actor || ' ' || d.decision || ' · round ' || r.n, d.body_md
+  FROM decisions d JOIN rounds r ON r.id = d.round_id WHERE d.task_id = :task
+UNION ALL SELECT c.created_at, 4, c.id, c.author || COALESCE(' on ' || c.path || ':' || c.line, '')
+  || ' · round ' || r.n, c.body_md FROM comments c JOIN rounds r ON r.id = c.round_id WHERE c.task_id = :task
+ORDER BY created_at, kind, id
+"""
+
+
+@app.get("/tasks/{task_id}/review", response_class=HTMLResponse)
+def review_page(request: Request, task_id: int, n: str = Query("latest", alias="round")):
+    """§8.2's Conversation tab. `round` picks only the header's files and +/− (Q4)."""
+    task = one_or_404(
+        "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
+        " t.branch, t.worktree_path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+        (task_id,), f"Task #{task_id} not found",
+    )
+    rounds = round_summaries(task_id)
+    # AC11: with no rounds, `latest` is a page without a selector, not round_or_404's 404
+    picked = round_or_404(task_id, n)["n"] if rounds or n != "latest" else None
+    posted: dict[int, dict] = {}  # round n → {reviewer: verdict row}, for the bodies (Q5, Q6)
+    for v in query(
+        "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
+        " WHERE r.task_id = ?", (task_id,),
+    ):
+        posted.setdefault(v["n"], {})[v["reviewer"]] = v
+    approver = query(  # Q7: only the approver's latest
+        "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
+        " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
+    )
+    return templates.TemplateResponse(request, "review.html", {
+        "task": task, "rounds": rounds, "selected": next((r for r in rounds if r["n"] == picked), None),
+        "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
+        "timeline": query(TIMELINE, {"task": task_id}),
+    })
+
+
+@app.post("/tasks/{task_id}/comments")
+async def add_comment_form(request: Request, task_id: int):
+    """Q9: a conversation comment from me on the latest round; post_comment validates and writes."""
+    post_comment(task_id, CommentBody(author="me", body_md=await form_field(request, "body_md")))
+    return hx_redirect(f"/tasks/{task_id}/review")
