@@ -1,3 +1,255 @@
 {
-  "jobs": []
+  "jobs": [
+    {
+      "id": "001-setup",
+      "title": "Project setup: fctl package, serve, schema, safety",
+      "description": "uv project and package layout, console script `fctl` (\u00a73.0); `fctl serve [--port 4545]` on 127.0.0.1 (\u00a77.2); data dir `FCTL_HOME` (default `~/.claude-factories`); full `schema.sql` from \u00a75.1 applied at startup in WAL mode; base Jinja layout with vendored htmx and highlight.js; local-safety middleware (\u00a74.5: Host check, `X-Requested-By: fctl` on mutating requests); `fctl` HTTP client in the stdlib-only CLI module that sends the header; `.gitignore`; pytest + TestClient wired to a temp `FCTL_HOME` and a fake `claude` on PATH.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/001-setup",
+      "worktree": ".claude/worktrees/001-setup",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-16T23:45:02Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-16T23:49:42Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-16T23:55:27Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-16T23:58:13Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T00:00:43Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-17T00:04:35Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "002-projects",
+      "title": "Projects: connect, workspaces, factory state, page",
+      "description": "`GET /api/workspaces`, `POST /api/projects/connect`, `GET /api/projects?path=` (\u00a76.1); `fctl connect --workspace W [--test-cmd C]` collecting path, name, remote, and default branch, rerun updates, unknown workspace created, and the main repo resolved from inside a worktree via `--git-common-dir` (\u00a73.1, \u00a77.4 step 1); factory state none / uncommitted / ready from `git cat-file -e <default_branch>:.claude/skills/factory/SKILL.md` (\u00a73.2 step 4); workspace page with project rows, `+ Workspace`, and moving a project to another workspace (\u00a78 item 2).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/002-projects",
+      "worktree": ".claude/worktrees/002-projects",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T12:22:23Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T12:28:40Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T12:35:28Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T12:37:36Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T12:40:06Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T12:45:27Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "003-tasks-api",
+      "title": "Tasks API: CRUD, stage and status, events, task add",
+      "description": "`GET /api/projects/{id}/tasks`, `POST /api/projects/{id}/tasks`, `GET /api/tasks/{id}`, `PATCH /api/tasks/{id}` for `spec_md`, `stage`, and `status`+`position` (\u00a76.2); stage \u2192 status mapping with an `events` row on every change (\u00a75.2, \u00a77.5); a manual move clears stage and is refused with 409 while a run is active; new tasks go to the bottom of Backlog (\u00a73.3); `fctl task add \"title\"` (\u00a77.2).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/003-tasks-api",
+      "worktree": ".claude/worktrees/003-tasks-api",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T12:47:04Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T12:52:08Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T12:58:17Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T12:59:59Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T13:01:34Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T13:03:00Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "004-board",
+      "title": "Project board: columns, cards, drag and drop, new task",
+      "description": "project board page (\u00a78 item 3, \u00a78.1): four columns with counts, cards with stage, chips per round, +/\u2212, \"waiting on you\" and red escalated bar; native HTML5 drag and drop between columns and to reorder Backlog (PATCH); `+ New task` form with title and markdown description (\u00a73.3); header with Code link, factory state, and a disabled Run next; htmx poll every 3 s; empty states.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/004-board",
+      "worktree": ".claude/worktrees/004-board",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T13:04:20Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T13:09:43Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T13:18:23Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T13:20:37Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T13:22:25Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T13:38:40Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "005-submit",
+      "title": "Rounds: submit API, round files, fctl submit and diff",
+      "description": "`POST /api/tasks/{id}/rounds` and task create with `submit` (\u00a76.2, \u00a76.3); round `trigger` initial / agent / human and `base_sha`; per-file split into `round_files` with change type, rename `old_path`, binary flag, and +/\u2212 counts; 413 over 5 MB; `fctl submit --new --title T` and `fctl submit <id>` with the temp-index capture of tracked and untracked files (\u00a77.4); standalone submit lands in review \u00b7 human_review (\u00a75.2); `GET /api/tasks/{id}/rounds/{n|latest}/diff` and `fctl diff <id> [--round N]`.",
+      "round": 2,
+      "branch": "factory/005-submit",
+      "worktree": ".claude/worktrees/005-submit",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/5",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T13:51:10Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T14:00:13Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T14:12:31Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T14:15:38Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T14:17:40Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T14:20:11Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T14:22:23Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T14:23:57Z",
+          "status": "done",
+          "stage": null
+        }
+      ],
+      "stage": null,
+      "status": "done"
+    }
+  ]
 }

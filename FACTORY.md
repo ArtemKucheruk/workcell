@@ -4,8 +4,10 @@ which is designed in docs/ (start at docs/MVP.md). Keep the factory small: a vie
 understand the whole thing in a few minutes.
 
 This is the bootstrap factory. State lives in files, because the app that will hold it
-doesn't exist yet. It already follows the app's rules: worktrees, Claude never commits, and
-I approve. Moving it into the app later changes where the state lives, not how the loop works.
+doesn't exist yet. It follows the app's rules (worktrees, agents never touch git, I approve)
+with one difference: the orchestrator commits each job to its branch and opens a GitHub PR
+against main, and my approve merges that PR. Moving it into the app later changes where the
+state lives, not how the loop works.
 
 ## The repo and its stack
 
@@ -29,8 +31,9 @@ holds which section.
 ## The orchestrator
 
 The factory is one skill, /factory. Whichever Claude Code session runs it becomes the
-orchestrator. It runs the loop below, spawns every agent, creates worktrees, and is the
-only writer of factory/board.json.
+orchestrator of one job. It runs the loop below, spawns every agent, creates worktrees, and
+writes its job's entry in factory/board.json. To run a second job alongside, I run
+/factory next in another terminal.
 
 ## The loop (edit this to change the factory)
 
@@ -70,15 +73,20 @@ only writer of factory/board.json.
               │human_review │ │  escalated  │               │
               └──────┬──────┘ └──────┬──────┘               │
                      └───────┬───────┘                      │
+                             ▼                              │
+                   ┌──────────────────┐                     │
+                   │ commit, push,    │                     │
+                   │ open/update PR   │                     │
+                   └─────────┬────────┘                     │
                              ▼ waits on me                  │
                    ┌──────────────────┐ /factory rework     │
                    │ I read the job + ├─────────────────────┘
-                   │  worktree diff   │ (new round)
+                   │     the PR       │ (new round)
                    └─────────┬────────┘
                              ▼ /factory approve
                    ┌──────────────────┐
-                   │ done: I commit + │
-                   │  merge to main   │
+                   │ done: PR merged, │
+                   │ worktree removed │
                    └──────────────────┘
 
 ## Stages and statuses
@@ -98,7 +106,7 @@ one-to-one onto the app's tables later.
 .claude/
   skills/factory/SKILL.md          # the orchestrator's instructions
   agents/                          # one file per agent in the loop
-  worktrees/004-submit/            # builder's checkout, branch factory/004-submit
+  worktrees/004-submit/            # builder's checkout, branch factory/feat/004-submit
 factory/
   board.json                       # durable state, drives the dashboard
   dashboard.html                   # visual board, polls board.json
@@ -107,7 +115,7 @@ factory/
     spec.md
     round-1/                       # one folder per review round
       build.md                     # builder: what changed, criteria → tests, test output
-      diff.patch                   # orchestrator: worktree snapshot vs main
+      diff.patch                   # orchestrator: worktree snapshot vs its base on main
       review-security.md           # one file per reviewer
       review-ux.md
       review-ui.md
@@ -119,7 +127,7 @@ factory/
 
 | agent | model | tools | reads | writes |
 |---|---|---|---|---|
-| spec-writer | opus | Read, Grep, Glob, Write | the feature or backlog line, docs/, code on main | `spec.md` |
+| spec-writer | opus | Read, Grep, Glob, Write | the feature or backlog line, docs/, code on main (the job's fresh worktree) | `spec.md` |
 | builder | opus | Read, Edit, Write, Grep, Glob, Bash | `spec.md`, the last round's reviews, `feedback-N.md` | code in its worktree, `round-N/build.md` |
 | review-security | opus | Read, Grep, Glob, Bash, Write | spec, build.md, diff.patch, worktree | `round-N/review-security.md` |
 | review-ux | sonnet | same | same | `round-N/review-ux.md` |
@@ -166,7 +174,7 @@ first line VERDICT: PASS or VERDICT: CHANGES, then findings as file:line, proble
 factory/board.json
 { "jobs": [ { "id": "004-submit", "title": "fctl submit and review rounds",
   "status": "in_progress", "stage": "agent_review", "round": 2,
-  "branch": "factory/004-submit", "worktree": ".claude/worktrees/004-submit",
+  "branch": "factory/feat/004-submit", "worktree": ".claude/worktrees/004-submit",
   "reviews": { "security": "CHANGES", "ux": "PASS", "ui": "pending", "code": "PASS" },
   "history": [ { "at": "2026-10-17T10:03:00Z", "status": "in_progress", "stage": "spec" } ] } ] }
 
@@ -174,21 +182,31 @@ factory/board.json
 - Agents get context from files, not the conversation, and write only their own file.
 - Each review starts with `VERDICT: PASS` or `VERDICT: CHANGES`. decision.md starts with
   APPROVE or ESCALATE.
-- One job at a time. A job starts only when no other job is in_progress or review, and
-  every done job's branch is merged into main (`git branch --merged main`). Otherwise stop
-  and tell me what to merge.
-- When a job starts, the orchestrator creates its worktree with
-  `git worktree add -b factory/<job-id> .claude/worktrees/<job-id> main`.
-  The first time, it also adds `.claude/worktrees/` to `.git/info/exclude`.
+- One job per terminal. `/factory next` starts one job; run in another terminal while
+  jobs are active, it starts the first backlog line that can safely run alongside them: one
+  that doesn't need code from, or edit the same part of a file as, a job that's in_progress
+  or review (or an earlier unchecked backlog line). If none can, it stops and tells me what
+  each one waits on. Every done job's worktree and branch must be gone first.
+- When a job starts, the orchestrator runs `git fetch origin` and creates its worktree with
+  `git worktree add --no-track -b factory/<type>/<job-id> .claude/worktrees/<job-id> origin/main`.
+  `<type>` is feat, fix, ci, docs, refactor, test, or chore, picked from the job's
+  description. The first time, it also adds `.claude/worktrees/` to `.git/info/exclude`.
 - The builder edits only its worktree, plus its own build.md, and runs every command
   inside the worktree.
-- Nobody commits, pushes, merges, rebases, or switches branches. I do all git writes.
+- Agents never run git writes. The orchestrator's are: fetch, `worktree add`, the job's
+  commit + push + PR when it reaches review, and on approve the PR merge, `worktree remove`,
+  and deleting the job branch. Nobody rebases, stashes, resets, force-pushes, or switches
+  branches.
+- Commits and PRs carry no Claude attribution: no `Co-Authored-By` trailer, no
+  "Generated with Claude Code" line.
 - After every builder round, the orchestrator snapshots the worktree, including untracked
-  files, without touching the index:
+  files, without touching the index, against the job's base on main (so rework rounds
+  still show the whole job, not just what changed since the last commit):
       t=$(mktemp -d); wt=.claude/worktrees/<job-id>
+      base=$(git -C $wt merge-base HEAD origin/main)
       GIT_INDEX_FILE=$t/index git -C $wt read-tree HEAD
       GIT_INDEX_FILE=$t/index git -C $wt add -A
-      GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M HEAD > factory/jobs/<job-id>/round-<n>/diff.patch
+      GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base > factory/jobs/<job-id>/round-<n>/diff.patch
       rm -rf $t
 - WAIT FOR ALL: a review round is done only when every reviewer's file exists in the
   round folder. Never resume the builder mid-round.
@@ -197,23 +215,33 @@ factory/board.json
 - Spawn the builder with a name (builder-<job-id>), and resume that same builder with
   SendMessage for each new round, pointing it at the round folder. If it's gone (a new
   session, or a rework after I quit), spawn a fresh builder-<job-id>. The files hold
-  everything it needs.
-- The orchestrator is the only writer of board.json. It appends every status or stage
-  change to the job's history.
+  everything it needs. On approve, once the PR is merged, the orchestrator stops
+  builder-<job-id>.
+- Orchestrators are the only writers of board.json. Each changes only its own job's entry,
+  under a file lock, and appends every status or stage change to the job's history.
 
 ## Commands
 /factory <feature>               add a job (next free id) and run it through the loop
-/factory next                    run the first unchecked item in backlog.md
-/factory approve <job-id>        mark a review job done, tick it in backlog.md, and print my
-                                 commit + merge commands (below)
+/factory next                    run the first unchecked item in backlog.md that no active
+                                 job blocks
+/factory approve <job-id>        merge the job's PR, mark it done, tick it in backlog.md, stop
+                                 its builder, and remove its worktree and branch (below)
 /factory rework <job-id> <note>  save my note as feedback-<n>.md, set stage rework, and
-                                 resume the builder for round <n>
+                                 resume the builder for round <n>; the new commit lands on
+                                 the same PR
 
-What `/factory approve` prints for me to run:
+When a job reaches review, the orchestrator runs:
     git -C .claude/worktrees/<job-id> add -A
     git -C .claude/worktrees/<job-id> commit -m "<job title>"
-    git merge --ff-only factory/<job-id>
-    git worktree remove .claude/worktrees/<job-id> && git branch -d factory/<job-id>
+    git -C .claude/worktrees/<job-id> push -u origin factory/<type>/<job-id>
+    gh pr create --base main --head factory/<type>/<job-id> --title "<job title>" --body-file factory/jobs/<job-id>/decision.md
+
+What `/factory approve` runs:
+    gh pr merge factory/<type>/<job-id> --merge
+    TaskStop builder-<job-id>
+    git worktree remove .claude/worktrees/<job-id>
+    git branch -D factory/<type>/<job-id> && git push origin --delete factory/<type>/<job-id>
+    git fetch origin --prune
 
 ## Dashboard
 One self-contained HTML file, served with `python3 -m http.server` from factory/.
@@ -250,6 +278,7 @@ file-based loop.
 After writing the factory files, stop and tell me to run:
 
     git init -b main && git add -A && git commit -m "Docs and factory"
+    gh repo create --source . --push --private
 
-Worktrees branch from main, so main needs a commit. /factory refuses to start a job
-without one.
+Worktrees branch from origin/main, so main needs a commit on GitHub. /factory refuses
+to start a job without one.

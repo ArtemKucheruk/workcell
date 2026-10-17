@@ -10,7 +10,8 @@ Read:
 - The job's `description` in factory/board.json: that is the request.
 - FACTORY.md "The repo and its stack", and factory/backlog.md to see what neighbor jobs own.
 - docs/: start at the table in docs/MVP.md, then the sections the request names.
-- The code on main: the repo root, never `.claude/worktrees/`.
+- The code on main: the job's worktree `.claude/worktrees/<job-id>`, fresh from
+  origin/main (the builder hasn't started). Never other worktrees.
 
 Write only J/spec.md:
 

@@ -1,0 +1,980 @@
+diff --git a/src/claude_factories/app.py b/src/claude_factories/app.py
+index b8253b9..f3e0b5a 100644
+--- a/src/claude_factories/app.py
++++ b/src/claude_factories/app.py
+@@ -1,18 +1,25 @@
+ """The FastAPI app behind `fctl serve`."""
+ 
+-from contextlib import asynccontextmanager
++import os
++import sqlite3
++import subprocess
++from contextlib import asynccontextmanager, closing
++from datetime import datetime
+ from pathlib import Path
++from urllib.parse import parse_qs
+ 
+-from fastapi import FastAPI, Request
++from fastapi import FastAPI, HTTPException, Request, Response
+ from fastapi.responses import HTMLResponse, JSONResponse
+ from fastapi.staticfiles import StaticFiles
+ from fastapi.templating import Jinja2Templates
++from pydantic import BaseModel
+ 
+ from . import db
+ 
+ HERE = Path(__file__).parent
+ ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
+ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
++SKILL = ".claude/skills/factory/SKILL.md"
+ 
+ 
+ @asynccontextmanager
+@@ -24,6 +31,9 @@ async def lifespan(app: FastAPI):
+ app = FastAPI(title="Claude Factories", lifespan=lifespan)
+ app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+ templates = Jinja2Templates(directory=HERE / "templates")
++templates.env.filters["local_time"] = (
++    lambda iso: datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M")
++)
+ 
+ 
+ @app.middleware("http")
+@@ -37,7 +47,178 @@ async def local_safety(request: Request, call_next):
+     return await call_next(request)
+ 
+ 
++# --- Helpers -----------------------------------------------------------------
++
++
++def query(sql: str, args=()) -> list[sqlite3.Row]:
++    with closing(db.connect()) as conn:
++        conn.row_factory = sqlite3.Row
++        return conn.execute(sql, args).fetchall()
++
++
++def one_or_404(sql: str, args) -> sqlite3.Row:
++    found = query(sql, args)
++    if not found:
++        raise HTTPException(404)
++    return found[0]
++
++
++def get_or_create_workspace(conn: sqlite3.Connection, name: str) -> int:
++    conn.execute("INSERT OR IGNORE INTO workspaces (name, created_at) VALUES (?, ?)", (name, db.now()))
++    return conn.execute("SELECT id FROM workspaces WHERE name = ?", (name,)).fetchone()[0]
++
++
++def workspaces() -> list[sqlite3.Row]:
++    return query(
++        "SELECT w.id, w.name, COUNT(p.id) AS projects FROM workspaces w"
++        " LEFT JOIN projects p ON p.workspace_id = w.id GROUP BY w.id ORDER BY w.name"
++    )
++
++
++def factory_state(path: str, default_branch: str) -> str:
++    """Q6: ready = SKILL.md committed on the default branch (MVP §3.2), uncommitted = only on disk."""
++    try:
++        committed = subprocess.run(
++            ["git", "-C", path, "cat-file", "-e", f"{default_branch}:{SKILL}"],
++            capture_output=True, timeout=10,
++        ).returncode == 0
++    except (OSError, ValueError, subprocess.TimeoutExpired):  # no git, a NUL in the path, a hung repo
++        committed = False
++    if committed:
++        return "ready"
++    return "uncommitted" if os.path.isfile(os.path.join(path, SKILL)) else "none"
++
++
++async def form_field(request: Request, name: str) -> str:
++    """Q10: htmx sends urlencoded forms; parse with the stdlib (no python-multipart)."""
++    values = parse_qs((await request.body()).decode(errors="replace")).get(name)
++    return values[0].strip() if values else ""
++
++
++def hx_redirect(url: str) -> Response:
++    return Response(status_code=204, headers={"HX-Redirect": url})
++
++
++# --- JSON API (docs/data-model-and-api.md §6.1) -------------------------------
++
++
++class ConnectBody(BaseModel):
++    path: str
++    workspace: str
++    name: str
++    remote_url: str | None = None
++    default_branch: str
++    test_cmd: str | None = None
++
++
++@app.get("/api/workspaces")
++def list_workspaces():
++    return [dict(w) for w in workspaces()]
++
++
++@app.post("/api/projects/connect")
++def connect_project(body: ConnectBody, request: Request):
++    workspace, name, branch = body.workspace.strip(), body.name.strip(), body.default_branch
++    if not os.path.isabs(body.path):
++        raise HTTPException(422, "path must be absolute")
++    if not workspace:
++        raise HTTPException(422, "workspace must not be blank")
++    if not name:
++        raise HTTPException(422, "name must not be blank")
++    if not branch or branch.startswith("-"):  # it becomes a git argument
++        raise HTTPException(422, "default_branch must be non-empty and not start with '-'")
++    with closing(db.connect()) as conn, conn:
++        ws_id = get_or_create_workspace(conn, workspace)
++        row = conn.execute("SELECT id FROM projects WHERE path = ?", (body.path,)).fetchone()
++        if row:  # Q4: path is the key; a null test_cmd keeps the stored one
++            project_id = row[0]
++            conn.execute(
++                "UPDATE projects SET workspace_id = ?, name = ?, remote_url = ?, default_branch = ?,"
++                " test_cmd = COALESCE(?, test_cmd) WHERE id = ?",
++                (ws_id, name, body.remote_url, branch, body.test_cmd, project_id),
++            )
++        else:
++            project_id = conn.execute(
++                "INSERT INTO projects (workspace_id, name, path, remote_url, default_branch, test_cmd,"
++                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
++                (ws_id, name, body.path, body.remote_url, branch, body.test_cmd, db.now()),
++            ).lastrowid
++    return {"id": project_id, "created": row is None, "url": f"{request.base_url}projects/{project_id}"}
++
++
++@app.get("/api/projects")
++def find_project(path: str):
++    found = query("SELECT id, name, path, default_branch FROM projects WHERE path = ?", (path,))
++    if not found:
++        raise HTTPException(404, f"no project at {path}")
++    p = found[0]
++    factory = factory_state(p["path"], p["default_branch"])
++    return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
++
++
++# --- Pages and htmx forms (docs/ui.md §8) ------------------------------------
++
++
+ @app.get("/", response_class=HTMLResponse)
+ def index(request: Request):
+-    # ponytail: placeholder page; the dashboard (job 017) replaces it
+-    return templates.TemplateResponse(request, "index.html")
++    # ponytail: workspace list until the dashboard (job 017) replaces it
++    return templates.TemplateResponse(request, "index.html", {"workspaces": workspaces()})
++
++
++@app.get("/workspaces/{workspace_id}", response_class=HTMLResponse)
++def workspace_page(request: Request, workspace_id: int):
++    workspace = one_or_404("SELECT id, name FROM workspaces WHERE id = ?", (workspace_id,))
++    rows = query(
++        "SELECT p.id, p.name, p.path, p.default_branch,"
++        " COUNT(t.id) FILTER (WHERE t.status = 'backlog') AS backlog,"
++        " COUNT(t.id) FILTER (WHERE t.status = 'in_progress') AS in_progress,"
++        " COUNT(t.id) FILTER (WHERE t.status = 'review') AS review,"
++        " COUNT(t.id) FILTER (WHERE t.status = 'done') AS done,"
++        " MAX(p.created_at, COALESCE(MAX(t.updated_at), '')) AS last_activity"
++        " FROM projects p LEFT JOIN tasks t ON t.project_id = p.id"
++        " WHERE p.workspace_id = ? GROUP BY p.id ORDER BY p.name",
++        (workspace_id,),
++    )
++    # ponytail: one git call per row; cache if a workspace grows past a few dozen projects
++    projects = [dict(r, factory=factory_state(r["path"], r["default_branch"])) for r in rows]
++    return templates.TemplateResponse(
++        request, "workspace.html", {"workspace": workspace, "projects": projects}
++    )
++
++
++@app.post("/workspaces")
++async def create_workspace(request: Request):
++    name = await form_field(request, "name")
++    if not name:
++        raise HTTPException(422, "name must not be blank")
++    with closing(db.connect()) as conn, conn:
++        ws_id = get_or_create_workspace(conn, name)
++    return hx_redirect(f"/workspaces/{ws_id}")
++
++
++@app.get("/projects/{project_id}", response_class=HTMLResponse)
++def project_page(request: Request, project_id: int):
++    # ponytail: stub (Q11); job 004 adds the board
++    project = one_or_404(
++        "SELECT p.id, p.name, p.path, p.workspace_id, w.name AS workspace FROM projects p"
++        " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
++        (project_id,),
++    )
++    return templates.TemplateResponse(
++        request, "project.html", {"project": project, "workspaces": workspaces()}
++    )
++
++
++@app.post("/projects/{project_id}/workspace")
++async def move_project(request: Request, project_id: int):
++    try:
++        ws_id = int(await form_field(request, "workspace_id"))
++    except ValueError:
++        raise HTTPException(422, "workspace_id must be an integer")
++    with closing(db.connect()) as conn, conn:
++        if not conn.execute("SELECT 1 FROM workspaces WHERE id = ?", (ws_id,)).fetchone():
++            raise HTTPException(404)
++        moved = conn.execute("UPDATE projects SET workspace_id = ? WHERE id = ?", (ws_id, project_id))
++        if moved.rowcount == 0:
++            raise HTTPException(404)
++    return hx_redirect(f"/projects/{project_id}")
+diff --git a/src/claude_factories/cli.py b/src/claude_factories/cli.py
+index 3e784db..c082816 100644
+--- a/src/claude_factories/cli.py
++++ b/src/claude_factories/cli.py
+@@ -3,6 +3,7 @@
+ import argparse
+ import json
+ import os
++import subprocess
+ import sys
+ import urllib.error
+ import urllib.request
+@@ -43,6 +44,47 @@ def api(method: str, path: str, body=None):
+         _fail(f'can\'t reach {base} — is "fctl serve" running?')
+ 
+ 
++def _git(*args: str) -> str | None:
++    """Run git; its stripped stdout, or None if it fails."""
++    r = subprocess.run(["git", *args], capture_output=True, text=True)
++    return r.stdout.strip() if r.returncode == 0 else None
++
++
++def main_checkout() -> str:
++    """docs/claude-code.md §7.4 step 1: the main checkout, also from a worktree or a subdirectory."""
++    common = _git("rev-parse", "--path-format=absolute", "--git-common-dir")
++    if common and os.path.basename(common) == ".git":
++        root = os.path.dirname(common)
++    else:  # a bare repo or a separate git dir
++        root = common and _git("rev-parse", "--show-toplevel")
++    if not root:
++        _fail(f"not inside a git repository: {os.getcwd()}")
++    return os.path.realpath(root)
++
++
++def default_branch(main: str) -> str:
++    """origin/HEAD, else the main checkout's current branch (not the worktree's)."""
++    ref = _git("-C", main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
++    branch = ref.removeprefix("origin/") if ref else _git("-C", main, "branch", "--show-current")
++    if not branch:
++        _fail("can't tell the default branch: no origin/HEAD and HEAD is detached")
++    return branch
++
++
++def connect(args):
++    main = main_checkout()
++    body = {
++        "path": main,
++        "workspace": args.workspace,
++        "name": os.path.basename(main),
++        "remote_url": _git("-C", main, "remote", "get-url", "origin"),
++        "default_branch": default_branch(main),
++        "test_cmd": args.test_cmd,
++    }
++    project = api("POST", "/api/projects/connect", body)
++    print(f"Connected {body['name']} ({args.workspace.strip()}) → {project['url']}")
++
++
+ def serve(args):
+     import uvicorn  # heavy imports stay out of every other command
+ 
+@@ -59,5 +101,9 @@ def main(argv=None):
+     p = commands.add_parser("serve", help="start the app on 127.0.0.1")
+     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
+     p.set_defaults(func=serve)
++    p = commands.add_parser("connect", help="register the current git repo as a project")
++    p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
++    p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
++    p.set_defaults(func=connect)
+     args = parser.parse_args(argv)
+     args.func(args)
+diff --git a/src/claude_factories/db.py b/src/claude_factories/db.py
+index 47b58ae..b8e07dc 100644
+--- a/src/claude_factories/db.py
++++ b/src/claude_factories/db.py
+@@ -3,11 +3,17 @@
+ import os
+ import sqlite3
+ from contextlib import closing
++from datetime import UTC, datetime
+ from pathlib import Path
+ 
+ SCHEMA = Path(__file__).with_name("schema.sql")
+ 
+ 
++def now() -> str:
++    """UTC ISO 8601 with seconds and a Z, e.g. 2026-10-17T12:22:23Z."""
++    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
++
++
+ def data_dir() -> Path:
+     return Path(os.environ.get("FCTL_HOME") or Path.home() / ".claude-factories")
+ 
+diff --git a/src/claude_factories/templates/base.html b/src/claude_factories/templates/base.html
+index a1d292b..fc21584 100644
+--- a/src/claude_factories/templates/base.html
++++ b/src/claude_factories/templates/base.html
+@@ -9,6 +9,13 @@
+   <link rel="stylesheet" href="/static/github-dark.min.css" media="(prefers-color-scheme: dark)">
+   <script src="/static/htmx.min.js"></script>
+   <script src="/static/highlight.min.js"></script>
++  <style>
++    body { font-family: system-ui, sans-serif; margin: 1.5rem; line-height: 1.4; }
++    table { border-collapse: collapse; margin-block: 1rem; }
++    th, td { padding: .35rem .75rem; text-align: left; border-bottom: 1px solid GrayText; }
++    td.num { text-align: right; font-variant-numeric: tabular-nums; }
++    .muted { color: GrayText; }
++  </style>
+ </head>
+ <body hx-headers='{"X-Requested-By": "fctl"}'>
+ {% block content %}{% endblock %}
+diff --git a/src/claude_factories/templates/index.html b/src/claude_factories/templates/index.html
+index 034ab23..06482f7 100644
+--- a/src/claude_factories/templates/index.html
++++ b/src/claude_factories/templates/index.html
+@@ -1,5 +1,16 @@
+ {% extends "base.html" %}
+ {% block content %}
+ <header><h1>Claude Factories</h1></header>
+-<main><p>No projects yet.</p></main>
++<main>
++{% if workspaces %}
++<h2>Workspaces</h2>
++<ul>
++  {% for w in workspaces %}
++  <li><a href="/workspaces/{{ w.id }}">{{ w.name }}</a> <span class="muted">{{ w.projects }} project{{ "" if w.projects == 1 else "s" }}</span></li>
++  {% endfor %}
++</ul>
++{% else %}
++<p>No projects yet.</p>
++{% endif %}
++</main>
+ {% endblock %}
+diff --git a/src/claude_factories/templates/project.html b/src/claude_factories/templates/project.html
+new file mode 100644
+index 0000000..8569c04
+--- /dev/null
++++ b/src/claude_factories/templates/project.html
+@@ -0,0 +1,21 @@
++{% extends "base.html" %}
++{% block title %}{{ project.name }} · Claude Factories{% endblock %}
++{% block content %}
++<header>
++  <p><a href="/">Claude Factories</a></p>
++  <h1>{{ project.name }} · <a href="/workspaces/{{ project.workspace_id }}">{{ project.workspace }}</a></h1>
++  <p class="muted">{{ project.path }}</p>
++</header>
++<main>
++<form hx-post="/projects/{{ project.id }}/workspace">
++  <label>Workspace
++    <select name="workspace_id">
++      {% for w in workspaces %}
++      <option value="{{ w.id }}"{% if w.id == project.workspace_id %} selected{% endif %}>{{ w.name }}</option>
++      {% endfor %}
++    </select>
++  </label>
++  <button>Move</button>
++</form>
++</main>
++{% endblock %}
+diff --git a/src/claude_factories/templates/workspace.html b/src/claude_factories/templates/workspace.html
+new file mode 100644
+index 0000000..1cf3d42
+--- /dev/null
++++ b/src/claude_factories/templates/workspace.html
+@@ -0,0 +1,37 @@
++{% extends "base.html" %}
++{% block title %}{{ workspace.name }} · Claude Factories{% endblock %}
++{% block content %}
++<header>
++  <p><a href="/">Claude Factories</a></p>
++  <h1>{{ workspace.name }}</h1>
++</header>
++<main>
++{% if projects %}
++<table>
++  <thead>
++    <tr><th scope="col">Project</th><th scope="col">Path</th><th scope="col">Backlog</th><th scope="col">In progress</th><th scope="col">Review</th><th scope="col">Done</th><th scope="col">Factory</th><th scope="col">Last activity</th></tr>
++  </thead>
++  <tbody>
++    {% for p in projects %}
++    <tr>
++      <td><a href="/projects/{{ p.id }}">{{ p.name }}</a></td>
++      <td class="muted">{{ p.path }}</td>
++      <td class="num">{{ p.backlog }}</td>
++      <td class="num">{{ p.in_progress }}</td>
++      <td class="num">{{ p.review }}</td>
++      <td class="num">{{ p.done }}</td>
++      <td>{{ p.factory }}</td>
++      <td><time datetime="{{ p.last_activity }}">{{ p.last_activity | local_time }}</time></td>
++    </tr>
++    {% endfor %}
++  </tbody>
++</table>
++{% else %}
++<p>No projects yet. Run <code>fctl connect --workspace {{ workspace.name }}</code> inside a repo.</p>
++{% endif %}
++<form hx-post="/workspaces">
++  <input type="text" name="name" required pattern=".*\S.*" title="A name that isn't blank" aria-label="New workspace name" placeholder="New workspace">
++  <button>+ Workspace</button>
++</form>
++</main>
++{% endblock %}
+diff --git a/tests/conftest.py b/tests/conftest.py
+index d82b405..8482ed3 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -1,4 +1,5 @@
+ import os
++import subprocess
+ 
+ import pytest
+ from fastapi.testclient import TestClient
+@@ -8,7 +9,8 @@ from claude_factories.app import app
+ 
+ @pytest.fixture(autouse=True)
+ def isolated(tmp_path, monkeypatch):
+-    """Every test gets its own FCTL_HOME and a do-nothing fake `claude` first on PATH."""
++    """Every test gets its own FCTL_HOME, a do-nothing fake `claude` first on PATH, and git
++    without the user's config (Q17)."""
+     monkeypatch.setenv("FCTL_HOME", str(tmp_path / "fctl-home"))
+     monkeypatch.delenv("FCTL_URL", raising=False)
+     bin_dir = tmp_path / "bin"
+@@ -17,6 +19,28 @@ def isolated(tmp_path, monkeypatch):
+     claude.write_text("#!/bin/sh\nexit 0\n")
+     claude.chmod(0o755)
+     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
++    gitconfig = tmp_path / "gitconfig"
++    gitconfig.write_text("")
++    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))
++    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
++    for who in ("AUTHOR", "COMMITTER"):
++        monkeypatch.setenv(f"GIT_{who}_NAME", "Test")
++        monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.com")
++
++
++def git(cwd, *args) -> str:
++    """Run git in cwd; its stripped stdout. Raises if git fails."""
++    r = subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True, text=True)
++    return r.stdout.strip()
++
++
++@pytest.fixture
++def repo(tmp_path):
++    """A git repo on `main` with one empty commit and no remote."""
++    path = tmp_path / "repo"
++    git(tmp_path, "init", "-q", "-b", "main", str(path))
++    git(path, "commit", "-q", "--allow-empty", "-m", "init")
++    return path
+ 
+ 
+ @pytest.fixture
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index d477d67..b194f07 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,5 @@
+ import json
++import os
+ import socket
+ import subprocess
+ import sys
+@@ -9,6 +10,7 @@ from pathlib import Path
+ 
+ import pytest
+ import uvicorn
++from conftest import git
+ 
+ from claude_factories import cli, db
+ 
+@@ -189,3 +191,104 @@ def test_api_unreachable(monkeypatch, capsys):  # AC28
+         cli.api("GET", "/api/workspaces")
+     assert e.value.code == 1
+     assert capsys.readouterr().err == f'fctl: can\'t reach {url} — is "fctl serve" running?\n'
++
++
++# --- fctl connect ------------------------------------------------------------
++
++CONNECTED = {"id": 3, "created": True, "url": "http://127.0.0.1:4545/projects/3"}
++DETACHED = "fctl: can't tell the default branch: no origin/HEAD and HEAD is detached\n"
++
++
++@pytest.fixture
++def connect_server(server):
++    server.reply = (200, "application/json", json.dumps(CONNECTED).encode())
++    return server
++
++
++def sent_body(server):
++    assert len(server.requests) == 1
++    method, path, _, body = server.requests[0]
++    assert (method, path) == ("POST", "/api/projects/connect")
++    return json.loads(body)
++
++
++def test_connect_clone(connect_server, tmp_path, monkeypatch, capsys):  # AC31
++    src = tmp_path / "src"
++    git(tmp_path, "init", "-q", "-b", "trunk", str(src))
++    git(src, "commit", "-q", "--allow-empty", "-m", "init")
++    origin = tmp_path / "origin.git"
++    git(tmp_path, "clone", "-q", "--bare", str(src), str(origin))
++    clone = tmp_path / "clone"
++    git(tmp_path, "clone", "-q", str(origin), str(clone))
++    git(clone, "switch", "-q", "-c", "feature")
++    monkeypatch.chdir(clone)
++    cli.main(["connect", "--workspace", "personal", "--test-cmd", "pytest -q"])
++    assert sent_body(connect_server) == {
++        "path": os.path.realpath(clone), "workspace": "personal", "name": "clone",
++        "remote_url": str(origin), "default_branch": "trunk", "test_cmd": "pytest -q",
++    }
++    assert capsys.readouterr().out == f"Connected clone (personal) → {CONNECTED['url']}\n"
++
++
++def test_connect_without_test_cmd(connect_server, repo, monkeypatch):  # AC32
++    monkeypatch.chdir(repo)
++    cli.main(["connect", "--workspace", "personal"])
++    assert sent_body(connect_server)["test_cmd"] is None
++
++
++def test_connect_no_origin(connect_server, repo, monkeypatch):  # AC33
++    git(repo, "switch", "-q", "-c", "dev")
++    monkeypatch.chdir(repo)
++    cli.main(["connect", "--workspace", "personal"])
++    body = sent_body(connect_server)
++    assert body["remote_url"] is None
++    assert body["default_branch"] == "dev"
++
++
++def test_connect_from_worktree(connect_server, repo, monkeypatch):  # AC34
++    worktree = repo / ".claude" / "worktrees" / "x"
++    git(repo, "worktree", "add", "-q", "-b", "factory/x", str(worktree))
++    monkeypatch.chdir(worktree)
++    cli.main(["connect", "--workspace", "personal"])
++    body = sent_body(connect_server)
++    assert (body["path"], body["name"]) == (os.path.realpath(repo), "repo")
++    assert body["default_branch"] == "main"
++
++
++def test_connect_from_subdirectory(connect_server, repo, monkeypatch):  # AC35
++    sub = repo / "src" / "pkg"
++    sub.mkdir(parents=True)
++    monkeypatch.chdir(sub)
++    cli.main(["connect", "--workspace", "personal"])
++    assert sent_body(connect_server)["path"] == os.path.realpath(repo)
++
++
++def test_connect_outside_repo(connect_server, tmp_path, monkeypatch, capsys):  # AC36
++    nowhere = tmp_path / "nowhere"
++    nowhere.mkdir()
++    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))  # never find a repo above it
++    monkeypatch.chdir(nowhere)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["connect", "--workspace", "personal"])
++    assert e.value.code == 1
++    assert capsys.readouterr().err == f"fctl: not inside a git repository: {os.getcwd()}\n"
++    assert connect_server.requests == []
++
++
++def test_connect_detached_head(connect_server, repo, monkeypatch, capsys):  # AC37
++    git(repo, "switch", "-q", "--detach")
++    monkeypatch.chdir(repo)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["connect", "--workspace", "personal"])
++    assert e.value.code == 1
++    assert capsys.readouterr().err == DETACHED
++    assert connect_server.requests == []
++
++
++def test_connect_requires_workspace(connect_server, repo, monkeypatch, capsys):  # AC38
++    monkeypatch.chdir(repo)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["connect"])
++    assert e.value.code == 2
++    assert capsys.readouterr().err.startswith("usage: fctl connect")
++    assert connect_server.requests == []
+diff --git a/tests/test_projects.py b/tests/test_projects.py
+new file mode 100644
+index 0000000..f43a2dd
+--- /dev/null
++++ b/tests/test_projects.py
+@@ -0,0 +1,377 @@
++import re
++from contextlib import closing
++from datetime import datetime
++from pathlib import Path
++
++import pytest
++from conftest import git
++
++import claude_factories
++from claude_factories import db
++
++PKG = Path(claude_factories.__file__).parent
++H = {"X-Requested-By": "fctl"}
++SKILL = ".claude/skills/factory/SKILL.md"
++TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
++
++
++def body(**overrides):
++    return {"path": "/code/api", "workspace": "personal", "name": "api",
++            "remote_url": "git@github.com:me/api.git", "default_branch": "main",
++            "test_cmd": "pytest -q"} | overrides
++
++
++def connect(client, **overrides):
++    r = client.post("/api/projects/connect", json=body(**overrides), headers=H)
++    assert r.status_code == 200, r.text
++    return r.json()
++
++
++def sql(query, args=()):
++    with closing(db.connect()) as conn, conn:
++        return conn.execute(query, args).fetchall()
++
++
++def workspace_id(name):
++    return sql("SELECT id FROM workspaces WHERE name = ?", (name,))[0][0]
++
++
++def project_workspace(project_id):
++    return sql("SELECT workspace_id FROM projects WHERE id = ?", (project_id,))[0][0]
++
++
++def add_task(project_id, status, updated_at="2026-01-01T00:00:00Z"):
++    sql("INSERT INTO tasks (project_id, title, status, position, created_at, updated_at)"
++        " VALUES (?, 't', ?, 1, ?, ?)", (project_id, status, updated_at, updated_at))
++
++
++def table(html):
++    """The page's table as one {header: cell text} dict per body row."""
++    rows = [[re.sub(r"<[^>]+>", "", cell).strip()
++             for cell in re.findall(r"<t[hd]\b[^>]*>(.*?)</t[hd]>", tr, re.S)]
++            for tr in re.findall(r"<tr>(.*?)</tr>", html, re.S)]
++    return [dict(zip(rows[0], row)) for row in rows[1:]]
++
++
++def commit_skill(repo):
++    (repo / SKILL).parent.mkdir(parents=True)
++    (repo / SKILL).write_text("# factory\n")
++    git(repo, "add", SKILL)
++    git(repo, "commit", "-q", "-m", "Add factory")
++
++
++def local(iso):
++    return datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M")
++
++
++# --- GET /api/workspaces -------------------------------------------------------
++
++
++def test_workspaces_empty(client):  # AC1
++    r = client.get("/api/workspaces")
++    assert (r.status_code, r.json()) == (200, [])
++
++
++def test_workspaces_with_counts_by_name(client):  # AC2
++    connect(client, path="/w1", workspace="work")
++    connect(client, path="/p1", workspace="personal")
++    connect(client, path="/p2", workspace="personal")
++    sql("INSERT INTO workspaces (name, created_at) VALUES ('empty', ?)", (db.now(),))
++    r = client.get("/api/workspaces")
++    assert r.status_code == 200
++    assert r.json() == [
++        {"id": workspace_id("empty"), "name": "empty", "projects": 0},
++        {"id": workspace_id("personal"), "name": "personal", "projects": 2},
++        {"id": workspace_id("work"), "name": "work", "projects": 1},
++    ]
++
++
++# --- POST /api/projects/connect --------------------------------------------------
++
++
++def test_connect_creates_workspace_and_project(client):  # AC3
++    r = client.post("/api/projects/connect", json=body(), headers=H)
++    assert r.status_code == 200
++    pid = r.json()["id"]
++    assert r.json() == {"id": pid, "created": True, "url": f"http://127.0.0.1:4545/projects/{pid}"}
++    assert [name for (name,) in sql("SELECT name FROM workspaces")] == ["personal"]
++    [row] = sql("SELECT id, workspace_id, path, name, remote_url, default_branch, test_cmd,"
++                " factory_version, created_at FROM projects")
++    assert row[:8] == (pid, workspace_id("personal"), "/code/api", "api",
++                       "git@github.com:me/api.git", "main", "pytest -q", None)
++    assert TIMESTAMP.fullmatch(row[8])
++
++
++def test_connect_existing_workspace(client):  # AC4
++    a = connect(client, path="/a")
++    b = connect(client, path="/b")
++    assert sql("SELECT COUNT(*) FROM workspaces") == [(1,)]
++    assert project_workspace(a["id"]) == project_workspace(b["id"]) == workspace_id("personal")
++
++
++def test_connect_rerun_updates(client):  # AC5
++    first = connect(client)
++    created_at = sql("SELECT created_at FROM projects")[0][0]
++    second = connect(client, name="api2", remote_url="git@x:y.git", default_branch="trunk",
++                     test_cmd="make test")
++    assert second["id"] == first["id"]
++    assert second["created"] is False
++    assert sql("SELECT name, remote_url, default_branch, test_cmd, created_at FROM projects") == [
++        ("api2", "git@x:y.git", "trunk", "make test", created_at)]
++
++
++def test_connect_null_test_cmd_keeps_stored(client):  # AC6
++    connect(client)
++    connect(client, test_cmd=None)
++    assert sql("SELECT test_cmd FROM projects") == [("pytest -q",)]
++
++
++def test_connect_rerun_moves_workspace(client):  # AC7
++    pid = connect(client)["id"]
++    connect(client, workspace="work")
++    assert project_workspace(pid) == workspace_id("work")
++    connect(client, workspace="personal")
++    assert project_workspace(pid) == workspace_id("personal")
++    assert sql("SELECT COUNT(*) FROM workspaces") == [(2,)]
++
++
++def test_connect_strips_workspace(client):  # AC8
++    connect(client, path="/a")
++    pid = connect(client, path="/b", workspace=" personal ")["id"]
++    assert project_workspace(pid) == workspace_id("personal")
++    assert sql("SELECT COUNT(*) FROM workspaces") == [(1,)]
++
++
++@pytest.mark.parametrize("field, value", [
++    ("path", "code/api"), ("workspace", "  "), ("name", " "),
++    ("default_branch", ""), ("default_branch", "--output=/tmp/x"),
++])
++def test_connect_invalid_field(client, field, value):  # AC9
++    r = client.post("/api/projects/connect", json=body(**{field: value}), headers=H)
++    assert r.status_code == 422
++    assert isinstance(r.json()["detail"], str)
++    assert sql("SELECT (SELECT COUNT(*) FROM workspaces), (SELECT COUNT(*) FROM projects)") == [(0, 0)]
++
++
++# --- GET /api/projects?path= and factory state ----------------------------------
++
++
++def test_find_project_keys(client):  # AC10
++    pid = connect(client)["id"]
++    r = client.get("/api/projects", params={"path": "/code/api"})
++    assert r.status_code == 200
++    assert r.json() == {"id": pid, "name": "api", "default_branch": "main", "factory": "none"}
++
++
++def test_find_project_unknown(client):  # AC11
++    r = client.get("/api/projects", params={"path": "/nope"})
++    assert (r.status_code, r.json()) == (404, {"detail": "no project at /nope"})
++
++
++def factory(client, path):
++    connect(client, path=str(path))
++    r = client.get("/api/projects", params={"path": str(path)})
++    assert r.status_code == 200
++    return r.json()["factory"]
++
++
++def test_factory_ready(client, repo):  # AC12
++    commit_skill(repo)
++    assert factory(client, repo) == "ready"
++
++
++@pytest.mark.parametrize("how", ["untracked", "other branch"])
++def test_factory_uncommitted(client, repo, how):  # AC13
++    if how == "other branch":
++        git(repo, "switch", "-q", "-c", "other")
++        commit_skill(repo)
++    else:
++        (repo / SKILL).parent.mkdir(parents=True)
++        (repo / SKILL).write_text("# factory\n")
++    assert (repo / SKILL).is_file()
++    assert factory(client, repo) == "uncommitted"
++
++
++def test_factory_none(client, repo):  # AC14
++    assert factory(client, repo) == "none"
++
++
++def test_factory_missing_path(client, tmp_path):  # AC15
++    assert factory(client, tmp_path / "gone") == "none"
++
++
++# --- Workspace page ----------------------------------------------------------------
++
++HEADERS = ["Project", "Path", "Backlog", "In progress", "Review", "Done", "Factory", "Last activity"]
++
++
++def test_workspace_page(client):  # AC16
++    zeta = connect(client, path="/z", name="zeta")["id"]
++    alpha = connect(client, path="/a", name="alpha")["id"]
++    connect(client, path="/o", name="other", workspace="work")
++    r = client.get(f"/workspaces/{workspace_id('personal')}")
++    assert r.status_code == 200
++    assert r.template.name == "workspace.html"
++    assert (PKG / "templates" / "workspace.html").read_text().startswith('{% extends "base.html" %}')
++    assert "<h1>personal</h1>" in r.text
++    assert '<a href="/">' in r.text
++    rows = table(r.text)
++    assert [list(row) for row in rows] == [HEADERS, HEADERS]
++    assert [(row["Project"], row["Path"]) for row in rows] == [("alpha", "/a"), ("zeta", "/z")]
++    assert f'<a href="/projects/{alpha}">alpha</a>' in r.text
++    assert f'<a href="/projects/{zeta}">zeta</a>' in r.text
++
++
++def test_workspace_page_counts(client):  # AC17
++    a = connect(client, path="/a", name="a")["id"]
++    b = connect(client, path="/b", name="b")["id"]
++    for status in ["backlog", "backlog", "review", "done"]:
++        add_task(a, status)
++    add_task(b, "backlog")
++    rows = table(client.get(f"/workspaces/{workspace_id('personal')}").text)
++    counts = [{k: row[k] for k in ["Backlog", "In progress", "Review", "Done"]} for row in rows]
++    assert counts == [{"Backlog": "2", "In progress": "0", "Review": "1", "Done": "1"},
++                      {"Backlog": "1", "In progress": "0", "Review": "0", "Done": "0"}]
++
++
++def test_workspace_page_factory_state(client, repo):  # AC18
++    commit_skill(repo)
++    connect(client, path=str(repo), name="a-ready")
++    connect(client, path="/nowhere", name="b-none")
++    rows = table(client.get(f"/workspaces/{workspace_id('personal')}").text)
++    assert [(row["Project"], row["Factory"]) for row in rows] == [("a-ready", "ready"),
++                                                                 ("b-none", "none")]
++
++
++def test_workspace_page_last_activity(client):  # AC19
++    tasks_later = connect(client, path="/a", name="a")["id"]
++    created_later = connect(client, path="/b", name="b")["id"]
++    no_tasks = connect(client, path="/c", name="c")["id"]
++    for pid, created in [(tasks_later, "2026-01-01T00:00:00Z"),
++                         (created_later, "2026-05-05T08:09:00Z"),
++                         (no_tasks, "2026-02-02T10:20:00Z")]:
++        sql("UPDATE projects SET created_at = ? WHERE id = ?", (created, pid))
++    add_task(tasks_later, "backlog", "2026-03-04T05:06:07Z")
++    add_task(tasks_later, "done", "2025-12-31T00:00:00Z")
++    add_task(created_later, "done", "2026-01-01T00:00:00Z")
++    html = client.get(f"/workspaces/{workspace_id('personal')}").text
++    expected = ["2026-03-04T05:06:07Z", "2026-05-05T08:09:00Z", "2026-02-02T10:20:00Z"]
++    assert [row["Last activity"] for row in table(html)] == [local(iso) for iso in expected]
++    for iso in expected:
++        assert f'<time datetime="{iso}">{local(iso)}</time>' in html
++
++
++def test_workspace_page_empty(client):  # AC20
++    sql("INSERT INTO workspaces (name, created_at) VALUES ('empty', ?)", (db.now(),))
++    r = client.get(f"/workspaces/{workspace_id('empty')}")
++    assert r.status_code == 200
++    assert "<table" not in r.text
++    assert ("No projects yet. Run <code>fctl connect --workspace empty</code> inside a repo."
++            in r.text)
++
++
++def test_workspace_page_unknown(client):  # AC21
++    assert client.get("/workspaces/999").status_code == 404
++
++
++def test_workspace_page_has_new_workspace_form(client):  # AC22
++    connect(client)
++    html = client.get(f"/workspaces/{workspace_id('personal')}").text
++    [form] = re.findall(r'<form hx-post="/workspaces">(.*?)</form>', html, re.S)
++    [field] = re.findall(r"<input\b[^>]*>", form)
++    for attr in ['type="text"', 'name="name"', " required "]:
++        assert attr in field
++    assert "<button>+ Workspace</button>" in form
++
++
++# --- + Workspace -------------------------------------------------------------------
++
++
++def test_new_workspace(client):  # AC23
++    r = client.post("/workspaces", data={"name": "work"}, headers=H)
++    assert r.status_code == 204
++    assert r.headers["HX-Redirect"] == f"/workspaces/{workspace_id('work')}"
++
++
++def test_new_workspace_existing_name(client):  # AC24
++    connect(client)
++    r = client.post("/workspaces", data={"name": "personal"}, headers=H)
++    assert r.status_code == 204
++    assert r.headers["HX-Redirect"] == f"/workspaces/{workspace_id('personal')}"
++    assert sql("SELECT COUNT(*) FROM workspaces") == [(1,)]
++
++
++@pytest.mark.parametrize("name", ["", "   "])
++def test_new_workspace_blank(client, name):  # AC25
++    r = client.post("/workspaces", data={"name": name}, headers=H)
++    assert r.status_code == 422
++    assert sql("SELECT COUNT(*) FROM workspaces") == [(0,)]
++
++
++# --- Project page and moving -----------------------------------------------------
++
++
++def test_project_page(client):  # AC26
++    pid = connect(client)["id"]
++    connect(client, path="/other", workspace="work")
++    personal, work = workspace_id("personal"), workspace_id("work")
++    r = client.get(f"/projects/{pid}")
++    assert r.status_code == 200
++    assert r.template.name == "project.html"
++    assert (PKG / "templates" / "project.html").read_text().startswith('{% extends "base.html" %}')
++    html = r.text
++    assert f'<h1>api · <a href="/workspaces/{personal}">personal</a></h1>' in html
++    assert "/code/api" in html
++    [form] = re.findall(rf'<form hx-post="/projects/{pid}/workspace">(.*?)</form>', html, re.S)
++    [select] = re.findall(r'<select name="workspace_id">(.*?)</select>', form, re.S)
++    assert re.findall(r"<option .*?</option>", select) == [
++        f'<option value="{personal}" selected>personal</option>',
++        f'<option value="{work}">work</option>',
++    ]
++
++
++def test_project_page_unknown(client):  # AC27
++    assert client.get("/projects/999").status_code == 404
++
++
++def test_move_project(client):  # AC28
++    pid = connect(client)["id"]
++    connect(client, path="/other", name="other", workspace="work")
++    personal, work = workspace_id("personal"), workspace_id("work")
++    r = client.post(f"/projects/{pid}/workspace", data={"workspace_id": str(work)}, headers=H)
++    assert r.status_code == 204
++    assert r.headers["HX-Redirect"] == f"/projects/{pid}"
++    assert project_workspace(pid) == work
++    assert [row["Project"] for row in table(client.get(f"/workspaces/{work}").text)] == ["api", "other"]
++    assert "No projects yet." in client.get(f"/workspaces/{personal}").text
++
++
++@pytest.mark.parametrize("target, value, status", [
++    ("unknown project", "work", 404),
++    ("unknown workspace", "999", 404),
++    ("non-integer", "abc", 422),
++])
++def test_move_project_invalid(client, target, value, status):  # AC29
++    pid = connect(client)["id"]
++    connect(client, path="/other", workspace="work")
++    personal = workspace_id("personal")
++    url = "/projects/999/workspace" if target == "unknown project" else f"/projects/{pid}/workspace"
++    ws = str(workspace_id("work")) if value == "work" else value
++    r = client.post(url, data={"workspace_id": ws}, headers=H)
++    assert r.status_code == status
++    assert project_workspace(pid) == personal
++
++
++# --- Index -------------------------------------------------------------------------
++
++
++def test_index_lists_workspaces(client):  # AC30
++    assert "No projects yet." in client.get("/").text
++    connect(client, path="/a")
++    connect(client, path="/b")
++    connect(client, path="/c", workspace="work")
++    html = client.get("/").text
++    assert "No projects yet." not in html
++    for name, count in [("personal", "2 projects"), ("work", "1 project")]:
++        assert re.search(rf'<a href="/workspaces/{workspace_id(name)}">{name}</a>\s*'
++                         rf'<span class="muted">{count}</span>', html)
