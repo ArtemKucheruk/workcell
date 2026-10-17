@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager, closing
 from datetime import datetime
 from itertools import takewhile
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote, urlencode
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
@@ -27,7 +27,7 @@ from typing import Literal, get_args
 import jinja2
 from markdown_it import MarkdownIt
 from markupsafe import Markup
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import db
@@ -1020,9 +1020,94 @@ ORDER BY created_at, kind, id
 """
 
 
+# at most 18 digits: int() refuses a 4300+ digit string, and no file has 10**18 lines (security review)
+HUNK = re.compile(r"@@ -(\d{1,18})(?:,\d+)? \+(\d{1,18})(?:,\d+)? @@")
+
+
+def diff_rows(patch: str) -> list[dict]:
+    """008 Q5: one round_files.patch → display rows (hunk, ctx, add, del, note), with old and new
+    line numbers and the text without its sign or one trailing \\r. Header lines get no row."""
+    rows, old, new, in_hunk = [], 0, 0, False
+    lines = patch.split("\n")
+    if lines[-1] == "":  # the empty string after the final \n
+        lines.pop()
+    for line in lines:
+        line = line.removesuffix("\r")
+        if line.startswith("diff --git "):  # 005's merged typechange sections
+            in_hunk = False
+        elif m := HUNK.match(line):
+            old, new, in_hunk = int(m[1]), int(m[2]), True
+            rows.append({"kind": "hunk", "old": None, "new": None, "text": line})
+        elif not in_hunk:
+            continue
+        elif line.startswith("+"):
+            rows.append({"kind": "add", "old": None, "new": new, "text": line[1:]})
+            new += 1
+        elif line.startswith("-"):
+            rows.append({"kind": "del", "old": old, "new": None, "text": line[1:]})
+            old += 1
+        elif line.startswith("\\"):
+            rows.append({"kind": "note", "old": None, "new": None, "text": line})
+        else:
+            rows.append({"kind": "ctx", "old": old, "new": new, "text": line[1:]})
+            old, new = old + 1, new + 1
+    return rows
+
+
+def review_files(round_id: int, target: tuple[str, str, str]) -> list[dict]:
+    """008: the round's files in rowid order, each with its rows, its inline comments placed under
+    their line (Q2), the inline form on the row matching `target` (path, side, line) as strings (Q1),
+    and the comments whose line isn't in the diff."""
+    comments = query(
+        "SELECT id, author, path, line, side, body_md FROM comments WHERE round_id = ? AND path IS NOT NULL"
+        " ORDER BY id", (round_id,),
+    )
+    at: dict[tuple, list] = {}
+    for c in comments:
+        at.setdefault((c["path"], c["side"], c["line"]), []).append(c)
+    files, formed = [], False
+    # ponytail: every row of every file renders (up to 5 MB of patch, slow to draw); collapse files
+    # over N lines if big rounds get common
+    for f in query(
+        "SELECT path, old_path, change, binary, additions, deletions, patch FROM round_files WHERE round_id = ?"
+        " ORDER BY rowid", (round_id,),
+    ):
+        rows = diff_rows(f["patch"]) or [{"kind": "note", "old": None, "new": None,
+                                          "text": "Binary file not shown." if f["binary"] else "No content changes."}]
+        for r in rows:
+            sides = [(side, r[side]) for side in ("old", "new") if r[side] is not None]
+            r["comments"] = sorted(
+                (c for side, num in sides for c in at.pop((f["path"], side, num), [])), key=lambda c: c["id"]
+            )
+            matches = [(side, str(num)) for side, num in sides if (f["path"], side, str(num)) == target]
+            r["form"] = matches[0] if matches and not formed else None  # one form, even if anchors repeat
+            formed = formed or bool(matches)
+        name = f["path"].rpartition("/")[2]
+        files.append(dict(f) | {
+            "rows": rows, "lang": name.rpartition(".")[2].lower() if "." in name else None,
+            # still in `at` = no row took it: its line isn't in the diff
+            "orphans": [c for c in comments if c["path"] == f["path"] and (c["path"], c["side"], c["line"]) in at],
+        })
+    return files
+
+
+def file_tree(files: list[dict]) -> dict:
+    """008 Q6: {"dir/": {...}, "name": file} in patch order; a directory sits where its first file is."""
+    root: dict = {}
+    for f in files:
+        *dirs, name = f["path"].split("/")
+        node = root
+        for d in dirs:
+            node = node.setdefault(d + "/", {})
+        node[name] = f
+    return root
+
+
 @app.get("/tasks/{task_id}/review", response_class=HTMLResponse)
-def review_page(request: Request, task_id: int, n: str = Query("latest", alias="round")):
-    """§8.2's Conversation tab. `round` picks only the header's files and +/− (Q4)."""
+def review_page(request: Request, task_id: int, n: str = Query("latest", alias="round"), tab: str = "",
+                path: str = "", side: str = "", line: str = ""):
+    """§8.2's Conversation tab, or with `tab=files` §8.3's Files changed for the picked round (008).
+    `path`, `side`, and `line` open the inline comment form under that line (008 Q1)."""
     task = one_or_404(
         "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
         " t.branch, t.worktree_path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
@@ -1030,7 +1115,10 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
     )
     rounds = round_summaries(task_id)
     # AC11: with no rounds, `latest` is a page without a selector, not round_or_404's 404
-    picked = round_or_404(task_id, n)["n"] if rounds or n != "latest" else None
+    found = round_or_404(task_id, n) if rounds or n != "latest" else None
+    picked = found["n"] if found else None
+    tab = "files" if tab == "files" else "conversation"  # 008 Q4
+    files = review_files(found["id"], (path, side, line)) if tab == "files" and found else []
     posted: dict[int, dict] = {}  # round n → {reviewer: verdict row}, for the bodies (Q5, Q6)
     for v in query(
         "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
@@ -1045,11 +1133,24 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
         "task": task, "rounds": rounds, "selected": next((r for r in rounds if r["n"] == picked), None),
         "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
         "timeline": query(TIMELINE, {"task": task_id}),
+        "tab": tab, "files": files, "tree": file_tree(files),
     })
 
 
 @app.post("/tasks/{task_id}/comments")
 async def add_comment_form(request: Request, task_id: int):
-    """Q9: a conversation comment from me on the latest round; post_comment validates and writes."""
-    post_comment(task_id, CommentBody(author="me", body_md=await form_field(request, "body_md")))
-    return hx_redirect(f"/tasks/{task_id}/review")
+    """007 Q9: a conversation comment from me on the latest round, or 008 Q3: an inline one on the
+    sent `round`, `path`, `side`, and `line` (blank = absent). post_comment validates and writes."""
+    fields = {k: await form_field(request, k) for k in ("round", "path", "side", "line")}
+    try:
+        body = CommentBody(author="me", body_md=await form_field(request, "body_md"),
+                           **{k: v for k, v in fields.items() if v})
+    except ValidationError as e:  # 008 Q11: a 422 with the messages, never the input
+        raise HTTPException(422, [f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()])
+    created = post_comment(task_id, body)
+    if body.path is None:
+        return hx_redirect(f"/tasks/{task_id}/review")
+    c = query("SELECT r.n, c.path, c.side, c.line FROM comments c JOIN rounds r ON r.id = c.round_id"
+              " WHERE c.id = ?", (created["id"],))[0]
+    anchor = quote(f"{c['path']}:{c['side']}:{c['line']}")
+    return hx_redirect(f"/tasks/{task_id}/review?{urlencode({'round': c['n'], 'tab': 'files'})}#{anchor}")
