@@ -234,7 +234,7 @@ def connect_project(body: ConnectBody, request: Request):
 def find_project(path: str):
     found = query("SELECT id, name, path, default_branch FROM projects WHERE path = ?", (path,))
     if not found:
-        raise HTTPException(404, f"no project at {path}")
+        raise HTTPException(404, f"no project at {path}; in that repo, run fctl connect --workspace <name>")
     p = found[0]
     factory = factory_state(p["path"], p["default_branch"])
     return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
@@ -538,14 +538,19 @@ def run_task(task_id: int, request: Request):
     task = one_or_404(
         "SELECT t.id, t.title, t.status, t.worktree_path, p.path, p.default_branch, p.test_cmd"
         " FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
-        (task_id,),
+        (task_id,), f"no task #{task_id}",
     )
     with closing(db.connect()) as conn:
         refuse_if_running(conn)
     if task["status"] in ("review", "done"):
         raise HTTPException(409, f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
-    if factory_state(task["path"], task["default_branch"]) != "ready":
-        raise HTTPException(409, f"factory isn't committed on {task['default_branch']}")
+    branch = task["default_branch"]
+    state = factory_state(task["path"], branch)  # the 409s name the next step (015 ux review, MVP §3.2)
+    if state == "uncommitted":
+        raise HTTPException(409, f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}")
+    if state == "none":
+        raise HTTPException(409, f"factory isn't committed on {branch}: "
+                                 f"Create factory on the project board, then commit it on {branch}")
     wt, env = worktree(task), run_env(request)
     if not subscription_auth(wt, env):
         raise HTTPException(409, "not on subscription auth")
