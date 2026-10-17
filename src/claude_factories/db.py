@@ -3,9 +3,15 @@
 import os
 import sqlite3
 from contextlib import closing
+from datetime import UTC, datetime
 from pathlib import Path
 
 SCHEMA = Path(__file__).with_name("schema.sql")
+
+
+def now() -> str:
+    """UTC ISO 8601 with seconds and a Z, e.g. 2026-10-17T12:22:23Z."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def data_dir() -> Path:

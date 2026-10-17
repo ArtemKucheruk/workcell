@@ -1,5 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
 <header><h1>Claude Factories</h1></header>
-<main><p>No projects yet.</p></main>
+<main>
+{% if workspaces %}
+<h2>Workspaces</h2>
+<ul>
+  {% for w in workspaces %}
+  <li><a href="/workspaces/{{ w.id }}">{{ w.name }}</a> <span class="muted">{{ w.projects }} project{{ "" if w.projects == 1 else "s" }}</span></li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>No projects yet.</p>
+{% endif %}
+</main>
 {% endblock %}

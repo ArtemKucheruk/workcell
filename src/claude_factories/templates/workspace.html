@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ workspace.name }} · Claude Factories{% endblock %}
+{% block content %}
+<header>
+  <p><a href="/">Claude Factories</a></p>
+  <h1>{{ workspace.name }}</h1>
+</header>
+<main>
+{% if projects %}
+<table>
+  <thead>
+    <tr><th scope="col">Project</th><th scope="col">Path</th><th scope="col">Backlog</th><th scope="col">In progress</th><th scope="col">Review</th><th scope="col">Done</th><th scope="col">Factory</th><th scope="col">Last activity</th></tr>
+  </thead>
+  <tbody>
+    {% for p in projects %}
+    <tr>
+      <td><a href="/projects/{{ p.id }}">{{ p.name }}</a></td>
+      <td class="muted">{{ p.path }}</td>
+      <td class="num">{{ p.backlog }}</td>
+      <td class="num">{{ p.in_progress }}</td>
+      <td class="num">{{ p.review }}</td>
+      <td class="num">{{ p.done }}</td>
+      <td>{{ p.factory }}</td>
+      <td><time datetime="{{ p.last_activity }}">{{ p.last_activity | local_time }}</time></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No projects yet. Run <code>fctl connect --workspace {{ workspace.name }}</code> inside a repo.</p>
+{% endif %}
+<form hx-post="/workspaces">
+  <input type="text" name="name" required pattern=".*\S.*" title="A name that isn't blank" aria-label="New workspace name" placeholder="New workspace">
+  <button>+ Workspace</button>
+</form>
+</main>
+{% endblock %}

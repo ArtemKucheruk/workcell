@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -43,6 +44,47 @@ def api(method: str, path: str, body=None):
         _fail(f'can\'t reach {base} — is "fctl serve" running?')
 
 
+def _git(*args: str) -> str | None:
+    """Run git; its stripped stdout, or None if it fails."""
+    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def main_checkout() -> str:
+    """docs/claude-code.md §7.4 step 1: the main checkout, also from a worktree or a subdirectory."""
+    common = _git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if common and os.path.basename(common) == ".git":
+        root = os.path.dirname(common)
+    else:  # a bare repo or a separate git dir
+        root = common and _git("rev-parse", "--show-toplevel")
+    if not root:
+        _fail(f"not inside a git repository: {os.getcwd()}")
+    return os.path.realpath(root)
+
+
+def default_branch(main: str) -> str:
+    """origin/HEAD, else the main checkout's current branch (not the worktree's)."""
+    ref = _git("-C", main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    branch = ref.removeprefix("origin/") if ref else _git("-C", main, "branch", "--show-current")
+    if not branch:
+        _fail("can't tell the default branch: no origin/HEAD and HEAD is detached")
+    return branch
+
+
+def connect(args):
+    main = main_checkout()
+    body = {
+        "path": main,
+        "workspace": args.workspace,
+        "name": os.path.basename(main),
+        "remote_url": _git("-C", main, "remote", "get-url", "origin"),
+        "default_branch": default_branch(main),
+        "test_cmd": args.test_cmd,
+    }
+    project = api("POST", "/api/projects/connect", body)
+    print(f"Connected {body['name']} ({args.workspace.strip()}) → {project['url']}")
+
+
 def serve(args):
     import uvicorn  # heavy imports stay out of every other command
 
@@ -59,5 +101,9 @@ def main(argv=None):
     p = commands.add_parser("serve", help="start the app on 127.0.0.1")
     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
     p.set_defaults(func=serve)
+    p = commands.add_parser("connect", help="register the current git repo as a project")
+    p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
+    p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
+    p.set_defaults(func=connect)
     args = parser.parse_args(argv)
     args.func(args)

@@ -9,6 +9,13 @@
   <link rel="stylesheet" href="/static/github-dark.min.css" media="(prefers-color-scheme: dark)">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/highlight.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 1.5rem; line-height: 1.4; }
+    table { border-collapse: collapse; margin-block: 1rem; }
+    th, td { padding: .35rem .75rem; text-align: left; border-bottom: 1px solid GrayText; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .muted { color: GrayText; }
+  </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>
 {% block content %}{% endblock %}
