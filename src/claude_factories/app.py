@@ -10,13 +10,13 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, FiniteFloat
 
@@ -27,7 +27,9 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 SKILL = ".claude/skills/factory/SKILL.md"
 COLUMNS = ("backlog", "in_progress", "review", "done")
-REVIEWERS = ("security", "ux", "ui", "code")
+Reviewer = Literal["security", "ux", "ui", "code"]
+REVIEWERS = get_args(Reviewer)
+NOSNIFF = {"X-Content-Type-Options": "nosniff"}  # agent-written text, never sniffed as HTML
 MAX_PATCH = 5 * 1024 * 1024  # Q5: UTF-8 bytes of the patch alone
 STAGE_STATUS = {  # docs/data-model-and-api.md §5.2
     "spec": "in_progress", "build": "in_progress", "agent_review": "in_progress",
@@ -480,21 +482,170 @@ def submit_round(task_id: int, body: RoundBody, request: Request):
     return submitted | {"url": f"{request.base_url}tasks/{task_id}/review?round={submitted['round']}"}
 
 
-@app.get("/api/tasks/{task_id}/rounds/{n}/diff")
-def round_diff(task_id: int, n: str):
-    """Q7: the round's files' patches joined in rowid order; `latest` is the highest n."""
+def round_or_404(task_id: int, n: str) -> sqlite3.Row:
+    """005 Q7, 006 Q1: the task's round `n`, or the highest with `latest`; the bare 404 for an unknown
+    task first."""
     one_or_404("SELECT 1 FROM tasks WHERE id = ?", (task_id,))
     if n == "latest":
-        found = query("SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,))
+        found = query("SELECT id, n, build_md FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,))
         missing = f"#{task_id} has no rounds"
     else:  # compared as text, so 'abc', '01', or a huge number simply match nothing
-        found = query("SELECT id FROM rounds WHERE task_id = ? AND CAST(n AS TEXT) = ?", (task_id, n))
+        found = query("SELECT id, n, build_md FROM rounds WHERE task_id = ? AND CAST(n AS TEXT) = ?", (task_id, n))
         missing = f"#{task_id} has no round {n}"
     if not found:
         raise HTTPException(404, missing)
-    patches = query("SELECT patch FROM round_files WHERE round_id = ? ORDER BY rowid", (found[0]["id"],))
-    return Response("".join(p["patch"] for p in patches), media_type="text/x-diff",
-                    headers={"X-Content-Type-Options": "nosniff"})  # agent-written text, never HTML
+    return found[0]
+
+
+@app.get("/api/tasks/{task_id}/rounds/{n}/diff")
+def round_diff(task_id: int, n: str):
+    """Q7: the round's files' patches joined in rowid order."""
+    patches = query("SELECT patch FROM round_files WHERE round_id = ? ORDER BY rowid",
+                    (round_or_404(task_id, n)["id"],))
+    return Response("".join(p["patch"] for p in patches), media_type="text/x-diff", headers=NOSNIFF)
+
+
+# --- Agent API: verdicts, comments, decisions (§6.3), context (§6.2) -----------
+# None of these touch the task row or write events (§7.5, Q2).
+
+
+class VerdictBody(BaseModel):
+    verdict: Literal["PASS", "CHANGES"]
+    body_md: str = ""
+
+
+class CommentBody(BaseModel):
+    round: int | Literal["latest"] = "latest"
+    author: Literal["me"] | Reviewer
+    path: str | None = None
+    line: int | None = Field(None, ge=1, lt=2**63)  # SQLite INTEGER bounds
+    side: Literal["old", "new"] | None = None
+    body_md: str
+
+
+class DecisionBody(BaseModel):
+    decision: Literal["APPROVE", "ESCALATE"]  # my APPROVE / CHANGES_REQUESTED go through 009's routes
+    body_md: str = ""
+
+
+@app.put("/api/tasks/{task_id}/rounds/{n}/verdicts/{reviewer}")
+def put_verdict(task_id: int, n: str, reviewer: Reviewer, body: VerdictBody):
+    """Q2: one row per (round, reviewer); posting again replaces verdict, body, and created_at."""
+    found = round_or_404(task_id, n)
+    with closing(db.connect()) as conn, conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO verdicts (round_id, reviewer, verdict, body_md, created_at) VALUES (?, ?, ?, ?, ?)",
+            (found["id"], reviewer, body.verdict, body.body_md, db.now()),
+        )
+        done = conn.execute("SELECT COUNT(*) FROM verdicts WHERE round_id = ?", (found["id"],)).fetchone()[0]
+    return {"round": found["n"], "reviewer": reviewer, "verdict": body.verdict, "complete": f"{done}/{len(REVIEWERS)}"}
+
+
+@app.post("/api/tasks/{task_id}/comments", status_code=201)
+def post_comment(task_id: int, body: CommentBody):
+    """Q3: inline (path and line, side defaulting to new) or conversation (all three NULL)."""
+    if (body.path is None) != (body.line is None):
+        raise HTTPException(422, "path and line go together")
+    if body.side is not None and body.path is None:
+        raise HTTPException(422, "side needs a path")
+    if not body.body_md.strip():
+        raise HTTPException(422, "body_md must not be blank")
+    found = round_or_404(task_id, str(body.round))
+    if body.path is not None and not query(
+        "SELECT 1 FROM round_files WHERE round_id = ? AND path = ?", (found["id"], body.path)
+    ):
+        raise HTTPException(422, f"{body.path} is not in round {found['n']}")
+    side = None if body.path is None else body.side or "new"
+    with closing(db.connect()) as conn, conn:
+        comment_id = conn.execute(
+            "INSERT INTO comments (task_id, round_id, author, path, line, side, body_md, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, found["id"], body.author, body.path, body.line, side, body.body_md, db.now()),
+        ).lastrowid
+    return {"id": comment_id}
+
+
+@app.post("/api/tasks/{task_id}/decision", status_code=201)
+def post_decision(task_id: int, body: DecisionBody):
+    """Q4: the approver's decision on the latest round. Every POST adds a row; readers take the latest."""
+    found = round_or_404(task_id, "latest")
+    with closing(db.connect()) as conn, conn:
+        decision_id = conn.execute(
+            "INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at)"
+            " VALUES (?, ?, 'approver', ?, ?, ?)",
+            (task_id, found["id"], body.decision, body.body_md, db.now()),
+        ).lastrowid
+    return {"id": decision_id}
+
+
+def context_md(task: sqlite3.Row, rounds: list[sqlite3.Row], feedback: sqlite3.Row | None = None) -> str:
+    """Q5, Q6: the task as markdown blocks joined by one blank line. A block is a heading, then its
+    body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is."""
+    blocks = []
+
+    def add(heading: str, body: str | None = None):
+        blocks.append(heading + (f"\n{body.rstrip()}" if body and body.strip() else ""))
+
+    def add_comments(round_id: int, only_me: bool):
+        found = query(
+            "SELECT author, path, line, side, body_md FROM comments"
+            " WHERE round_id = ? AND (? = 0 OR author = 'me') ORDER BY id",
+            (round_id, only_me),
+        )
+        if found:
+            add("## Comments")
+        for c in found:
+            where = "" if c["path"] is None else f" on {c['path']}:{c['line']} ({c['side']})"
+            add(f"### {c['author']}{where}", c["body_md"])
+
+    status = task["status"] + (f" · {task['stage']}" if task["stage"] else "")
+    add(f"# #{task['id']} {task['title']}", f"Status: {status}")
+    add("## Description", task["description_md"])
+    add("## Spec", "_No spec yet._" if task["spec_md"] is None else task["spec_md"])
+    for r in rounds:
+        add(f"## Round {r['n']} — build notes", r["build_md"])
+        add("## Verdicts")
+        verdicts = {v["reviewer"]: v for v in query(
+            "SELECT reviewer, verdict, body_md FROM verdicts WHERE round_id = ?", (r["id"],)
+        )}
+        for who in REVIEWERS:
+            v = verdicts.get(who)
+            add(f"### {who}: {v['verdict'] if v else 'pending'}", v and v["body_md"])
+        add_comments(r["id"], only_me=False)
+        decisions = query("SELECT actor, decision, body_md FROM decisions WHERE round_id = ? ORDER BY id", (r["id"],))
+        if decisions:
+            add("## Decisions")
+        for d in decisions:
+            add(f"### {d['actor']}: {d['decision']}", d["body_md"])
+    if feedback:
+        add(f"## Feedback on round {feedback['n']}", feedback["body_md"])
+        add_comments(feedback["round_id"], only_me=True)
+    return "\n\n".join(blocks) + "\n"
+
+
+@app.get("/api/tasks/{task_id}/context")
+def task_context(task_id: int, n: str | None = Query(None, alias="round"), feedback: bool = False):
+    """§6.2: everything (no query), one round (`?round=`), or my latest feedback (`?feedback=1`)."""
+    if n is not None and feedback:
+        raise HTTPException(422, "give round or feedback, not both")
+    task = one_or_404(
+        "SELECT id, title, status, stage, description_md, spec_md FROM tasks WHERE id = ?", (task_id,)
+    )
+    mine = None
+    if feedback:  # Q6: my latest CHANGES_REQUESTED
+        found = query(
+            "SELECT d.round_id, r.n, d.body_md FROM decisions d JOIN rounds r ON r.id = d.round_id"
+            " WHERE d.task_id = ? AND d.actor = 'me' AND d.decision = 'CHANGES_REQUESTED' ORDER BY d.id DESC LIMIT 1",
+            (task_id,),
+        )
+        if not found:
+            raise HTTPException(404, f"#{task_id} has no feedback")
+        mine, rounds = found[0], []
+    elif n is not None:
+        rounds = [round_or_404(task_id, n)]
+    else:
+        rounds = query("SELECT id, n, build_md FROM rounds WHERE task_id = ? ORDER BY n", (task_id,))
+    return Response(context_md(task, rounds, mine), media_type="text/markdown", headers=NOSNIFF)
 
 
 # --- Pages and htmx forms (docs/ui.md §8) ------------------------------------
