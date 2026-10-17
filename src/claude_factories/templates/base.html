@@ -41,6 +41,17 @@
     #timeline time { color: GrayText; font-variant-numeric: tabular-nums; margin-right: .5rem; }
     #timeline li > :not(time) { margin: .25rem 0 0 1rem; }
     .comment-box { display: grid; gap: .5rem; max-width: 48rem; }
+    /* §8.2: [Request changes] [Approve] on the title row. The forms are display: contents, so their
+       buttons and the Summary place in this grid while staying inside their forms. */
+    .review-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: .5rem; align-items: center; }
+    .review-header > * { grid-column: 1 / -1; }
+    .review-header > h1 { grid-column: 1; grid-row: 2; }
+    .review-header > form { display: contents; }
+    .review-header .request-changes { grid-column: 2; grid-row: 2; }
+    .review-header .approve { grid-column: 3; grid-row: 2; }
+    .review-header > form > .form-error { grid-column: 1 / -1; grid-row: 3; text-align: end; }  /* Approve's, under the buttons */
+    .review-header .summary { grid-column: 1 / -1; display: grid; gap: .5rem; max-width: 48rem; margin-top: .75rem; }
+    #commit pre { overflow-x: auto; padding: .5rem .75rem; border: 1px solid GrayText; border-radius: 6px; }
     .form-error { margin: 0; font-weight: bold; color: light-dark(#cf222e, #f85149); }  /* the escalated red */
     /* Files changed (docs/ui.md §8.3) */
     .tabs { display: flex; gap: 1rem; border-bottom: 1px solid GrayText; margin-block: 1rem; }

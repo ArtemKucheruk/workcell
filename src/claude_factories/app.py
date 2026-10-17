@@ -838,6 +838,83 @@ def post_decision(task_id: int, body: DecisionBody):
     return {"id": decision_id}
 
 
+# --- My review actions (docs/MVP.md §3.6, §3.7; docs/data-model-and-api.md §6.3) --------
+
+
+class ApproveBody(BaseModel):
+    body_md: str = ""  # Q9: optional; neither the page nor fctl approve sends one
+
+
+class ChangesBody(BaseModel):
+    body_md: str  # Q9: required, and not blank
+
+
+def commit_hint(task) -> str:
+    """Q4, Q5: §3.7's commands for me to run, every value shell-quoted. A standalone task (no branch or
+    worktree) gets the commit line alone."""
+    commit = f"git add -A && git commit -m {shlex.quote(task['title'])}"
+    if not (task["branch"] and task["worktree_path"]):
+        return commit
+    wt, root = task["worktree_path"], task["path"]
+    return "\n".join([
+        f"cd {shlex.quote(wt)}",
+        commit,
+        f"git push -u origin {shlex.quote(task['branch'])}     # then open a PR, or merge locally",
+        f"cd {shlex.quote(root)} && git worktree remove {shlex.quote(os.path.relpath(wt, root))}",
+    ])
+
+
+def decide_review(task_id: int, decision: str, body_md: str, status: str, stage: str | None) -> sqlite3.Row:
+    """Q2, Q3, Q10: in one transaction, refuse unless in review with a round, then my decision on the
+    latest round, the move (position kept, Q8), and the event (actor me, Q7). Returns the task as it was."""
+    with closing(db.connect()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")  # the check and the writes together, so a double click can't act twice
+        conn.row_factory = sqlite3.Row
+        task = conn.execute(
+            "SELECT t.status, t.title, t.branch, t.worktree_path, p.path FROM tasks t"
+            " JOIN projects p ON p.id = t.project_id WHERE t.id = ?", (task_id,),
+        ).fetchone()
+        if not task:
+            raise HTTPException(404)
+        if task["status"] != "review":
+            raise HTTPException(409, f"#{task_id} is not in review")
+        latest = conn.execute("SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,)).fetchone()
+        if not latest:
+            raise HTTPException(404, f"#{task_id} has no rounds")
+        now = db.now()
+        conn.execute(
+            "INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at)"
+            " VALUES (?, ?, 'me', ?, ?, ?)",
+            (task_id, latest["id"], decision, body_md, now),
+        )
+        conn.execute(
+            "UPDATE tasks SET status = ?, stage = ?, done_at = ?, updated_at = ? WHERE id = ?",
+            (status, stage, now if status == "done" else None, now, task_id),
+        )
+        conn.execute(
+            "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
+            " VALUES (?, 'me', 'review', ?, ?, ?)",
+            (task_id, status, stage, now),
+        )
+    return task
+
+
+@app.post("/api/tasks/{task_id}/approve")
+def approve(task_id: int, body: ApproveBody):
+    """§3.7: my APPROVE → done, and the commands I run myself. The app never runs git."""
+    task = decide_review(task_id, "APPROVE", body.body_md, "done", None)
+    return {"status": "done", "commit_hint": commit_hint(task)}
+
+
+@app.post("/api/tasks/{task_id}/request-changes", status_code=202)
+def request_changes(task_id: int, body: ChangesBody):
+    """§3.6: my CHANGES_REQUESTED → in_progress · rework (Q1: standalone too)."""
+    if not body.body_md.strip():
+        raise HTTPException(422, "body_md must not be blank")
+    decide_review(task_id, "CHANGES_REQUESTED", body.body_md, "in_progress", "rework")
+    return {"status": "in_progress", "stage": "rework", "run_id": None}  # 013 spawns the rework run
+
+
 def context_md(task: sqlite3.Row, rounds: list[sqlite3.Row], feedback: sqlite3.Row | None = None) -> str:
     """Q5, Q6: the task as markdown blocks joined by one blank line. A block is a heading, then its
     body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is."""
@@ -1177,7 +1254,7 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
     `path`, `side`, and `line` open the inline comment form under that line (008 Q1)."""
     task = one_or_404(
         "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
-        " t.branch, t.worktree_path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+        " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
         (task_id,), f"Task #{task_id} not found",
     )
     rounds = round_summaries(task_id)
@@ -1201,7 +1278,22 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
         "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
         "timeline": query(TIMELINE, {"task": task_id}),
         "tab": tab, "files": files, "tree": file_tree(files),
+        # Q6: from the task row, so it survives a reload and also follows fctl approve or a drag to Done
+        "commit_hint": commit_hint(task) if task["status"] == "done" else None,
     })
+
+
+@app.post("/tasks/{task_id}/approve")
+def approve_form(task_id: int):
+    """Q12: the page's Approve sends no summary."""
+    approve(task_id, ApproveBody())
+    return hx_redirect(f"/tasks/{task_id}/review")
+
+
+@app.post("/tasks/{task_id}/request-changes")
+async def request_changes_form(request: Request, task_id: int):
+    request_changes(task_id, ChangesBody(body_md=await form_field(request, "body_md")))
+    return hx_redirect(f"/tasks/{task_id}/review")
 
 
 @app.post("/tasks/{task_id}/comments")
