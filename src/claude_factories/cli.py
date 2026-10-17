@@ -11,6 +11,10 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_URL = "http://127.0.0.1:4545"
+# The app's values, repeated here for argparse `choices`: this module must not import app.py.
+REVIEWERS = ("security", "ux", "ui", "code")
+STAGES = ("spec", "build", "agent_review", "approval", "rework", "human_review", "escalated")
+DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; my APPROVE and CHANGES_REQUESTED come in 009
 
 
 def _fail(message: str):
@@ -154,6 +158,53 @@ def diff(args):
     sys.stdout.write(api("GET", f"/api/tasks/{args.id}/rounds/{n}/diff"))
 
 
+def show(args):
+    query = f"?round={args.round}" if args.round is not None else "?feedback=1" if args.feedback else ""
+    sys.stdout.write(api("GET", f"/api/tasks/{args.id}/context{query}"))
+
+
+def spec(args):
+    text = stdin_text()
+    if not text.strip():  # Q9: a hand-typed `fctl spec 12` can't wipe the spec
+        _fail("spec is empty; pass it on stdin")
+    api("PATCH", f"/api/tasks/{args.id}", {"spec_md": text})
+    print(f"Spec saved on #{args.id}")
+
+
+def stage(args):
+    task = api("PATCH", f"/api/tasks/{args.id}", {"stage": args.stage})
+    print(f"#{args.id}: {task['status']} · {task['stage']}")
+
+
+def verdict(args):
+    body = {"verdict": args.verdict, "body_md": stdin_text()}
+    r = api("PUT", f"/api/tasks/{args.id}/rounds/latest/verdicts/{args.reviewer}", body)
+    print(f"Round {r['round']} of #{args.id}: {r['reviewer']}={r['verdict']} ({r['complete']})")
+
+
+def comment(args):
+    body = {"round": "latest", "author": args.reviewer, "path": args.path, "line": args.line, "side": "new",
+            "body_md": stdin_text()}
+    r = api("POST", f"/api/tasks/{args.id}/comments", body)
+    print(f"Comment #{r['id']} on #{args.id} {args.path}:{args.line}")
+
+
+def decide(args):
+    r = api("POST", f"/api/tasks/{args.id}/decision", {"decision": args.decision, "body_md": stdin_text()})
+    print(f"Decision #{r['id']} on #{args.id}: {args.decision}")
+
+
+def round_status(args):
+    """docs/claude-code.md §7.2: the latest round's verdicts, for the orchestrator's WAIT FOR ALL."""
+    rounds = api("GET", f"/api/tasks/{args.id}")["rounds"]
+    if not rounds:
+        _fail(f"#{args.id} has no rounds")
+    last = rounds[-1]
+    verdicts = " ".join(f"{who}={last['verdicts'][who]}" for who in REVIEWERS)
+    done = sum(last["verdicts"][who] != "pending" for who in REVIEWERS)
+    print(f"round {last['n']}: {verdicts} ({done}/{len(REVIEWERS)})")
+
+
 def serve(args):
     import uvicorn  # heavy imports stay out of every other command
 
@@ -188,5 +239,36 @@ def main(argv=None):
     p.add_argument("id", type=int, help="the task")
     p.add_argument("--round", type=int, help="the round's number (default: the latest)")
     p.set_defaults(func=diff)
+    p = commands.add_parser("show", help="print a task as markdown: everything, one round, or my feedback")
+    p.add_argument("id", type=int, help="the task")
+    view = p.add_mutually_exclusive_group()
+    view.add_argument("--round", type=int, help="only this round")
+    view.add_argument("--feedback", action="store_true", help="only my latest change request")
+    p.set_defaults(func=show)
+    p = commands.add_parser("spec", help="save a task's spec (stdin)")
+    p.add_argument("id", type=int, help="the task")
+    p.set_defaults(func=spec)
+    p = commands.add_parser("stage", help="move a task to a stage (orchestrator)")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("stage", choices=STAGES, help="the stage to move to")
+    p.set_defaults(func=stage)
+    p = commands.add_parser("verdict", help="post a reviewer's verdict on the latest round (stdin: findings)")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("reviewer", choices=REVIEWERS, help="the reviewer posting it")
+    p.add_argument("verdict", choices=("PASS", "CHANGES"), help="the verdict")
+    p.set_defaults(func=verdict)
+    p = commands.add_parser("comment", help="post a reviewer's line comment on the latest round (stdin)")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("reviewer", choices=REVIEWERS, help="the reviewer posting it")
+    p.add_argument("--path", required=True, help="a file in the round's diff")
+    p.add_argument("--line", type=int, required=True, help="the line in the new file")
+    p.set_defaults(func=comment)
+    p = commands.add_parser("decide", help="post the approver's decision on the latest round (stdin)")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("decision", choices=DECISIONS, help="the decision")
+    p.set_defaults(func=decide)
+    p = commands.add_parser("round", help="print the latest round's verdicts, e.g. (3/4)")
+    p.add_argument("id", type=int, help="the task")
+    p.set_defaults(func=round_status)
     args = parser.parse_args(argv)
     args.func(args)

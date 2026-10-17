@@ -32,7 +32,7 @@ approver; sonnet for ux, ui, and code.
 | `fctl diff <id> [--round N]` | reviewers, approver | `GET /api/tasks/{id}/rounds/{n}/diff` |
 | `fctl spec <id>` (stdin) | spec-writer | `PATCH /api/tasks/{id}` `spec_md` |
 | `fctl verdict <id> <reviewer> PASS\|CHANGES` (stdin) | reviewers | `PUT …/rounds/latest/verdicts/{reviewer}` |
-| `fctl comment <id> --path P --line L` (stdin) | reviewers | `POST /api/tasks/{id}/comments` |
+| `fctl comment <id> <reviewer> --path P --line L` (stdin) | reviewers | `POST /api/tasks/{id}/comments` |
 | `fctl decide <id> APPROVE\|ESCALATE` (stdin) | approver | `POST /api/tasks/{id}/decision` |
 | `fctl stage <id> <stage>` | orchestrator | `PATCH /api/tasks/{id}` `stage` |
 | `fctl round <id>` | orchestrator | `GET /api/tasks/{id}` → prints `round 2: security=PASS ux=PASS ui=pending code=PASS (3/4)` |
@@ -86,7 +86,7 @@ Post exactly one verdict, most severe finding first, each with file:line and the
   fctl verdict <id> security PASS|CHANGES <<'EOF'
   …
   EOF
-Optional line comments: fctl comment <id> --path <file> --line <n> <<'EOF' … EOF
+Optional line comments: fctl comment <id> security --path <file> --line <n> <<'EOF' … EOF
 Do not edit code. Write nothing else.
 ```
 The builder template says: work only in your cwd, run `{{ test_cmd }}` against the spec's
