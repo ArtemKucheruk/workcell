@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Claude Factories{% endblock %}</title>
+  <link rel="stylesheet" href="/static/github.min.css" media="(prefers-color-scheme: light)">
+  <link rel="stylesheet" href="/static/github-dark.min.css" media="(prefers-color-scheme: dark)">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/highlight.min.js"></script>
+</head>
+<body hx-headers='{"X-Requested-By": "fctl"}'>
+{% block content %}{% endblock %}
+</body>
+</html>
