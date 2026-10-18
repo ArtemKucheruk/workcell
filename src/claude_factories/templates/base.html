@@ -94,6 +94,14 @@
       user-select: none; border-right: 1px solid GrayText; }
     .code-view code { font: inherit; }  /* the gutter's line height, so numbers line up */
     .code-view code.hljs { display: inline; padding: 0; overflow: visible; }
+    /* Dashboard (docs/ui.md §8 item 1) */
+    .tiles { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .75rem; }
+    .tiles a { display: grid; gap: .25rem; height: 100%; box-sizing: border-box; padding: .5rem .75rem;
+      border: 1px solid GrayText; border-radius: 6px; text-decoration: none; }
+    .tiles a:hover span, .tiles a:focus-visible span { text-decoration: underline; }
+    .tiles strong { font-size: 1.75rem; font-variant-numeric: tabular-nums; color: CanvasText; }
+    .tiles a[aria-current="page"] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; font-weight: bold; }
+    #open-tasks tbody td:first-child { padding-left: 1.5rem; }
   </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>

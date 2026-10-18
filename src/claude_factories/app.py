@@ -12,7 +12,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager, closing
 from datetime import datetime
-from itertools import takewhile
+from itertools import groupby, takewhile
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
@@ -1122,10 +1122,67 @@ def task_context(task_id: int, n: str | None = Query(None, alias="round"), feedb
 # --- Pages and htmx forms (docs/ui.md §8) ------------------------------------
 
 
+def days_ago(n: int) -> str:
+    """SQL for now − n days in db.now()'s format, so stored timestamps compare as strings (Q2)."""
+    return f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{n} days')"
+
+
+# Q1: the dashboard's tiles, each the ?show= key of its filtered list
+TILES = {
+    "backlog": "Backlog", "in_progress": "In progress", "review": "Review", "done": "Done",
+    "waiting": "Waiting on me", "escalated": "Escalated", "running": "Running now",
+    "done_week": "Done this week", "runs_week": "Runs this week",
+}
+# The tasks each tile counts and lists, as a WHERE on tasks t. runs_week counts runs instead.
+TILE_TASKS = {status: f"t.status = '{status}'" for status in COLUMNS} | {
+    "waiting": "t.stage = 'human_review'",
+    "escalated": "t.stage = 'escalated'",
+    # one_active_run allows one running run, so tasks with one = running runs
+    "running": "t.id IN (SELECT task_id FROM runs WHERE status = 'running')",
+    "done_week": f"t.done_at >= {days_ago(7)}",
+}
+
+
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    # ponytail: workspace list until the dashboard (job 017) replaces it
-    return templates.TemplateResponse(request, "index.html", {"workspaces": workspaces()})
+def index(request: Request, show: str = ""):
+    """docs/ui.md §8 item 1. Every SQL fragment below is a constant; `show` only picks one."""
+    counts = query(
+        "SELECT " + ", ".join(f"COUNT(*) FILTER (WHERE {where}) AS {key}" for key, where in TILE_TASKS.items())
+        + f", (SELECT COUNT(*) FROM runs WHERE started_at >= {days_ago(7)}) AS runs_week FROM tasks t"
+    )[0]
+    listed = None
+    if show == "runs_week":  # Q3
+        listed = query(
+            "SELECT r.id, r.status, r.started_at, t.id AS task_id, t.title, p.id AS project_id, p.name AS project"
+            " FROM runs r JOIN tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id"
+            f" WHERE r.started_at >= {days_ago(7)} ORDER BY r.started_at DESC, r.id DESC"
+        )
+    elif show in TILE_TASKS:  # Q4
+        listed = query(
+            "SELECT t.id, t.title, t.status, t.stage, p.id AS project_id, p.name AS project"
+            f" FROM tasks t JOIN projects p ON p.id = t.project_id WHERE {TILE_TASKS[show]}"
+            " ORDER BY t.updated_at DESC, t.id DESC"
+        )
+    else:  # Q7: an unknown key is ignored
+        show = ""
+    rows = query(  # Q5
+        "SELECT w.id AS workspace_id, w.name AS workspace, p.id, p.name,"
+        " COUNT(*) FILTER (WHERE t.status = 'backlog') AS backlog,"
+        " COUNT(*) FILTER (WHERE t.status = 'in_progress') AS in_progress,"
+        " COUNT(*) FILTER (WHERE t.status = 'review') AS review"
+        " FROM tasks t JOIN projects p ON p.id = t.project_id JOIN workspaces w ON w.id = p.workspace_id"
+        " WHERE t.status != 'done' GROUP BY p.id ORDER BY w.name, p.name, p.id"
+    )
+    open_tasks = [(ws, list(projects)) for ws, projects in groupby(rows, lambda r: (r["workspace_id"], r["workspace"]))]
+    done = query(  # Q6: the JOIN drops tasks with no rounds
+        "SELECT t.id, t.title, t.done_at, p.id AS project_id, p.name AS project, COUNT(*) AS rounds"
+        " FROM tasks t JOIN rounds r ON r.task_id = t.id JOIN projects p ON p.id = t.project_id"
+        f" WHERE t.done_at >= {days_ago(30)} GROUP BY t.id ORDER BY t.done_at DESC, t.id DESC"
+    )
+    return templates.TemplateResponse(request, "index.html", {
+        "tiles": TILES, "counts": counts, "show": show, "listed": listed,
+        "open_tasks": open_tasks, "done": done, "workspaces": workspaces(),
+    })
 
 
 @app.get("/workspaces/{workspace_id}", response_class=HTMLResponse)
