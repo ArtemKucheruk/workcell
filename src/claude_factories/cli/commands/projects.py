@@ -1,8 +1,10 @@
 import os
+import sys
 import urllib.parse
 
 from ..client import api
 from ..git import default_branch, git, main_checkout
+from ..output import fail, stdin_text
 
 
 def connect(args):
@@ -22,3 +24,18 @@ def connect(args):
 def project_at(main: str) -> dict:
     """The connected project whose main checkout is `main`; 404 `no project at …` if none."""
     return api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
+
+
+def context(args):
+    """033 Q5: the stored context exactly; an empty one prints nothing."""
+    project = project_at(main_checkout())
+    sys.stdout.write(api("GET", f"/api/projects/{project['id']}/context")["context_md"])
+
+
+def context_set(args):
+    text = stdin_text()
+    if not text.strip():  # 033 Q5: a hand-typed `fctl context set` can't wipe the context; the board editor can
+        fail("context is empty; pass it on stdin")
+    project = project_at(main_checkout())
+    saved = api("PUT", f"/api/projects/{project['id']}/context", {"context_md": text})
+    print(f"Context saved on {project['name']} ({saved['bytes']} bytes)")

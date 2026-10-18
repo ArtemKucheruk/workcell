@@ -23,6 +23,10 @@ links to the fctl reference (item 7) and shows the login runs will use, from
 3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header has **Code**,
    factory state or **Create factory**, **+ New task**, and **Run next**. Cards move between
    columns by drag and drop (native HTML5, no library). Clicking a card opens the task detail.
+   Below the columns, a collapsed **Project context** section edits the project's context
+   (`GET`/`PUT /api/projects/{id}/context`): a textarea, a live UTF-8 byte count against the
+   16 KB cap (`over the limit` disables Save), and **Save**. It loads when first opened, so
+   the 3 s poll never touches a draft. A rendered preview of `context_html` is a follow-up.
 4. **Task detail** (`/tasks/{id}`)
    - Header: title, status · stage, branch, Run / Stop / Retry, run status.
    - Spec (rendered markdown).

@@ -534,3 +534,148 @@ test('AC31: a failed first load shows only the alert; a failed later poll keeps 
   expect(screen.queryByRole('alert')).toBeNull()
   expect(cardEl(14)).toBeTruthy()
 })
+
+// --- Project context (033) -------------------------------------------------------------
+
+const CONTEXT = '/api/projects/3/context'
+/** GET or PUT /api/projects/3/context's body; `bytes` counts `context_md` unless given. */
+const context = (context_md, extra = {}) => ({
+  context_md, context_html: '', bytes: new TextEncoder().encode(context_md).length, max_bytes: 16384, ...extra,
+})
+const contextLoads = (fetch) => fetched(fetch).filter((url) => url === CONTEXT).length
+const summary = () => screen.getByText('Project context', { selector: 'summary' })
+const contextBox = () => screen.getByRole('textbox', { name: 'Project context' })
+const typeContext = (value) => fireEvent.change(contextBox(), { target: { value } })
+
+/** Opens the collapsed section and waits for its textarea; the section's <details>. */
+async function openContext() {
+  fireEvent.click(summary())
+  await screen.findByRole('textbox', { name: 'Project context' })
+  return summary().closest('details')
+}
+
+test('033 AC23: loading the board fetches no project context until Project context is opened', async () => {
+  const { fetch } = await open(board(), { [`GET ${CONTEXT}`]: [200, context('')] })
+  await act(() => Promise.resolve())
+  expect(summary().closest('details').open).toBe(false)
+  expect(contextLoads(fetch)).toBe(0)
+  fireEvent.click(summary())
+  await waitFor(() => expect(contextLoads(fetch)).toBe(1))
+})
+
+test('033 AC24: opening fetches the context once and shows it in a labeled textarea with its size', async () => {
+  const { fetch } = await open(board(), { [`GET ${CONTEXT}`]: [200, context('# Stack\n- Python 3.12\n')] })
+  const details = await openContext()
+  expect(contextBox().tagName).toBe('TEXTAREA')
+  expect(contextBox().value).toBe('# Stack\n- Python 3.12\n')
+  expect(within(details).getByText('22 / 16384 bytes')).toBeTruthy()
+  for (let i = 0; i < 2; i++) { // close, then open again
+    fireEvent.click(summary())
+    await act(() => new Promise((resolve) => setTimeout(resolve, 10)))
+  }
+  expect(details.open).toBe(true)
+  expect(contextLoads(fetch)).toBe(1)
+  expect(sends(fetch, 'GET', CONTEXT)).toHaveLength(1)
+})
+
+test('033 AC25: the section never renders context_html', async () => {
+  await open(board(), { [`GET ${CONTEXT}`]: [200, context('# Stack', { context_html: '<h1>Stack</h1>\n' })] })
+  const details = await openContext()
+  expect(screen.queryByRole('heading', { name: 'Stack' })).toBeNull()
+  expect(details.querySelector('h1')).toBeNull()
+  expect(contextBox().value).toBe('# Stack')
+})
+
+test('033 AC26: typing updates the size live in UTF-8 bytes against the response max_bytes', async () => {
+  await open(board(), { [`GET ${CONTEXT}`]: [200, context('', { max_bytes: 10 })] })
+  const details = await openContext()
+  expect(within(details).getByText('0 / 10 bytes')).toBeTruthy()
+  typeContext('é')
+  expect(within(details).getByText('2 / 10 bytes')).toBeTruthy()
+  typeContext('aé')
+  expect(within(details).getByText('3 / 10 bytes')).toBeTruthy()
+})
+
+test('033 AC27: over max_bytes the size says over the limit and Save is disabled', async () => {
+  await open(board(), { [`GET ${CONTEXT}`]: [200, context('', { max_bytes: 4 })] })
+  const details = await openContext()
+  const save = within(details).getByRole('button', { name: 'Save' })
+  typeContext('ééé')
+  expect(within(details).getByText('6 / 4 bytes · over the limit')).toBeTruthy()
+  expect(save.disabled).toBe(true)
+  typeContext('éé')
+  expect(within(details).getByText('4 / 4 bytes')).toBeTruthy()
+  expect(save.disabled).toBe(false)
+})
+
+test('033 AC28: Save puts the draft; on 200 the size shows the response bytes and the text stays', async () => {
+  const { fetch } = await open(board(), {
+    [`GET ${CONTEXT}`]: [200, context('')],
+    [`PUT ${CONTEXT}`]: [200, context('# Stack\n', { bytes: 99 })],
+  })
+  const details = await openContext()
+  typeContext('# Stack\n')
+  fireEvent.click(within(details).getByRole('button', { name: 'Save' }))
+  expect(await within(details).findByText('99 / 16384 bytes')).toBeTruthy()
+  expect(sent(fetch, 'PUT', CONTEXT)).toEqual({ context_md: '# Stack\n' })
+  expect(contextBox().value).toBe('# Stack\n')
+  expect(within(details).queryByRole('alert')).toBeNull()
+})
+
+test('033 AC29: a refused Save shows its detail inside the section and keeps the draft', async () => {
+  for (const [status, detail] of [[413, 'context over 16 KB'], [404, 'Project #3 not found']]) {
+    const { unmount } = await open(board(), {
+      [`GET ${CONTEXT}`]: [200, context('old')],
+      [`PUT ${CONTEXT}`]: [status, { detail }],
+    })
+    const details = await openContext()
+    typeContext('draft é')
+    fireEvent.click(within(details).getByRole('button', { name: 'Save' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(detail)
+    expect(alert.closest('details')).toBe(details)
+    expect(contextBox().value).toBe('draft é')
+    expect(within(details).getByText('8 / 16384 bytes')).toBeTruthy()
+    unmount()
+  }
+})
+
+test('033 AC30: a failed load shows its detail inside the section', async () => {
+  await open(board(), { [`GET ${CONTEXT}`]: [500, { detail: 'boom' }] })
+  fireEvent.click(summary())
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe('boom')
+  expect(alert.closest('details')).toBe(summary().closest('details'))
+  expect(screen.queryByRole('textbox', { name: 'Project context' })).toBeNull()
+})
+
+test("033 AC31: the board's 3 s poll neither refetches the context nor touches an unsaved draft", async () => {
+  vi.useFakeTimers()
+  const fetch = mockFetch({ [`GET ${BOARD}`]: [200, board()], [`GET ${CONTEXT}`]: [200, context('# Stack\n')] })
+  renderAt('/projects/3')
+  await advance(0)
+  fireEvent.click(summary())
+  await advance(0)
+  typeContext('# Stack\n- unsaved é')
+  await advance(3000)
+  expect(loads(fetch)).toBe(2)
+  expect(contextLoads(fetch)).toBe(1)
+  expect(contextBox().value).toBe('# Stack\n- unsaved é')
+  expect(screen.getByText('20 / 16384 bytes')).toBeTruthy()
+})
+
+test('033 AC31: with project id = workspace id, two polls keep one Project context section that takes input', async () => {
+  vi.useFakeTimers()
+  const page = board({}, { project: { ...PROJECT, workspace_id: 3 }, workspaces: [{ id: 3, name: 'personal', projects: 1 }] })
+  const fetch = mockFetch({ [`GET ${BOARD}`]: [200, page], [`GET ${CONTEXT}`]: [200, context('# Stack\n')] })
+  renderAt('/projects/3')
+  await advance(0)
+  fireEvent.click(summary())
+  await advance(0)
+  await advance(6000)
+  expect(loads(fetch)).toBe(3)
+  expect(screen.getAllByText('Project context', { selector: 'summary' })).toHaveLength(1)
+  fireEvent.input(contextBox(), { target: { value: '# Stack\n- é' } })
+  expect(contextBox().value).toBe('# Stack\n- é')
+  expect(screen.getByText('12 / 16384 bytes')).toBeTruthy()
+})

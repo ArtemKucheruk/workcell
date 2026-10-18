@@ -29,3 +29,6 @@ def init() -> None:
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA.read_text())
+        # 033 Q1: CREATE TABLE IF NOT EXISTS skips a factory.db made before projects.context_md
+        if "context_md" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+            conn.execute("ALTER TABLE projects ADD COLUMN context_md TEXT NOT NULL DEFAULT ''")

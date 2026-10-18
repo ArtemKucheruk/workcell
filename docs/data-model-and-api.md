@@ -17,7 +17,8 @@ CREATE TABLE projects (
   default_branch TEXT NOT NULL,           -- worktrees branch from here
   test_cmd TEXT,                          -- used in templates and the run allowlist
   factory_version INTEGER,                -- NULL = factory never written
-  created_at TEXT NOT NULL);
+  created_at TEXT NOT NULL,
+  context_md TEXT NOT NULL DEFAULT '');   -- project context: stack and conventions, atop fctl show
 
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12
@@ -143,6 +144,15 @@ POST /api/projects/3/factory                                      (Create factor
 → {"overwrite":false}
 ← 200 {"written":[".claude/skills/factory/SKILL.md",".claude/agents/builder.md", "…"],
        "skipped":[], "commit_hint":"git add .claude/skills/factory .claude/agents && git commit -m \"Add factory\""}
+
+GET  /api/projects/3/context                                      (fctl context, board editor)
+← 200 {"context_md":"# Stack\n- Python 3.12\n","context_html":"<h1>Stack</h1>\n<ul>…","bytes":22,"max_bytes":16384}
+
+PUT  /api/projects/3/context                                      (fctl context set, board editor)
+→ {"context_md":"# Stack\n- Python 3.12\n"}
+← 200 {"context_md":"…","context_html":"…","bytes":22,"max_bytes":16384}
+  # 413 {"detail":"context over 16 KB"} over 16384 UTF-8 bytes; "" clears it
+  # 404 {"detail":"Project #99 not found"} for an unknown id, on GET too
 ```
 
 ### 6.2 Tasks & runs
@@ -165,6 +175,7 @@ GET  /api/tasks/12                                                (fctl round, t
 
 GET  /api/tasks/12/context?round=1 | ?feedback=1                  (fctl show) → text/markdown
 ← 200 "# #12 Rate-limit login endpoint\n## Spec\n…\n## Round 1 — build notes\n…\n## Verdicts\n…"
+  # with no query, a non-blank project context comes first: "## Project context\n…\n\n# #12 …"
 
 PATCH /api/tasks/12                                               (fctl spec / fctl stage / board drag)
 → {"spec_md":"## Acceptance criteria\n- 6th failed login within 60s → 429\n…"}

@@ -1,10 +1,13 @@
 import json
 import os
+import urllib.parse
 
 import pytest
 from conftest import git
 
 from claude_factories.cli.main import main
+
+from ..conftest import PROJECT, Terminal, fctl, reply, requests
 
 CONNECTED = {"id": 3, "created": True, "url": "http://127.0.0.1:4545/projects/3"}
 DETACHED = "fctl: can't tell the default branch: no origin/HEAD and HEAD is detached\n"
@@ -103,3 +106,58 @@ def test_connect_requires_workspace(connect_server, repo, monkeypatch, capsys): 
     assert e.value.code == 2
     assert capsys.readouterr().err.startswith("usage: fctl connect")
     assert connect_server.requests == []
+
+
+# --- fctl context, fctl context set (033) --------------------------------------------
+
+
+def lookup(repo):
+    return ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None)
+
+
+def saved(text):
+    return reply({"context_md": text, "context_html": "", "bytes": len(text.encode()), "max_bytes": 16384})
+
+
+def test_context_prints_it(server, repo, monkeypatch, capsys):  # 033 AC18
+    server.replies = [reply(PROJECT), saved("# Stack\n- Python 3.12")]
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "context")
+    assert requests(server) == [lookup(repo), ("GET", "/api/projects/3/context", None)]
+    assert capsys.readouterr().out == "# Stack\n- Python 3.12"
+
+
+def test_context_empty(server, repo, monkeypatch, capsys):  # 033 AC19
+    server.replies = [reply(PROJECT), saved("")]
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "context")
+    assert capsys.readouterr() == ("", "")
+
+
+def test_context_set(server, repo, monkeypatch, capsys):  # 033 AC20
+    text = "# Stack\n- Python 3.12 — uv\n\n"
+    server.replies = [reply(PROJECT), saved(text)]
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "context", "set", stdin=text)
+    assert requests(server) == [lookup(repo), ("PUT", "/api/projects/3/context", {"context_md": text})]
+    assert server.requests[1][2]["X-Requested-By"] == "fctl"
+    assert capsys.readouterr().out == f"Context saved on api ({len(text.encode())} bytes)\n"
+
+
+@pytest.mark.parametrize("stdin", ["  \n", Terminal()])
+def test_context_set_blank(server, repo, monkeypatch, capsys, stdin):  # 033 AC21
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        fctl(monkeypatch, "context", "set", stdin=stdin)
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: context is empty; pass it on stdin\n"
+    assert server.requests == []
+
+
+def test_context_set_too_large(server, repo, monkeypatch, capsys):  # 033 AC22
+    server.replies = [reply(PROJECT), reply({"detail": "context over 16 KB"}, 413)]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        fctl(monkeypatch, "context", "set", stdin="x" * 16385)
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: 413 context over 16 KB\n"

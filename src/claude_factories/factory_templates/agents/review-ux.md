@@ -9,6 +9,9 @@ worktree) as needed, with Read, Grep, and Glob. Use Bash only for `fctl`, `git s
 `git diff`. Round n > 1: check that your findings on the round before (in `fctl show <id>`)
 are fixed.
 
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
 Check what a user sees:
 - The task's user-facing flows work as the spec describes, with no extra steps, prompts, or
   flags.

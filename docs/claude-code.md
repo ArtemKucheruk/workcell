@@ -22,13 +22,15 @@ approver; sonnet for ux, ui, and code.
 | `fctl serve [--host 127.0.0.1] [--port 4545]` | me | starts the app |
 | `fctl setup` | me, once | writes the 2 global skills |
 | `fctl connect --workspace W [--test-cmd C]` | `/factory-connect` | `POST /api/projects/connect` |
+| `fctl context` | me | `GET /api/projects/{id}/context` → prints `context_md` as stored |
+| `fctl context set` (stdin) | me | `PUT /api/projects/{id}/context`; refuses blank stdin (clear it on the board) |
 | `fctl task add "title" [--run]` | me | `POST /api/projects/{id}/tasks` (+ `/run`) |
 | `fctl run <id>` / `fctl run next` | me | `POST /api/tasks/{id}/run`, `/api/projects/{id}/run-next` |
 | `fctl rework <id> "note"` | me | `POST /api/tasks/{id}/request-changes` |
 | `fctl approve <id>` | me | `POST /api/tasks/{id}/approve` |
 | `fctl submit --new --title T` (stdin: description) | `/factory-submit` | `POST /api/projects/{id}/tasks` with `submit` |
 | `fctl submit <id>` (stdin: build notes) | builder | `POST /api/tasks/{id}/rounds` |
-| `fctl show <id> [--round N \| --feedback]` | all agents | `GET /api/tasks/{id}/context` |
+| `fctl show <id> [--round N \| --feedback]` | all agents | `GET /api/tasks/{id}/context`; with no flag, the project context comes first as `## Project context` |
 | `fctl diff <id> [--round N]` | reviewers, approver | `GET /api/tasks/{id}/rounds/{n}/diff` |
 | `fctl spec <id>` (stdin) | spec-writer | `PATCH /api/tasks/{id}` `spec_md` |
 | `fctl verdict <id> <reviewer> PASS\|CHANGES` (stdin) | reviewers | `PUT …/rounds/latest/verdicts/{reviewer}` |
@@ -92,6 +94,11 @@ Do not edit code. Write nothing else.
 The builder template says: work only in your cwd, run `{{ test_cmd }}` against the spec's
 acceptance criteria, end every round with `fctl submit <id> <<'EOF' <build notes> EOF`, and
 never commit.
+
+All 7 agent templates take the stack and conventions from the project context:
+"Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code."
+The spec-writer and approver still read the docs the request or spec relies on.
 
 ### 7.4 Submit for review, end to end
 In a Claude Code session in `~/code/api-server`, where I fixed a bug in my main checkout,

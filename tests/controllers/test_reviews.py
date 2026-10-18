@@ -413,3 +413,54 @@ def test_context_errors(client, ctx, no_rounds):  # AC28
     assert context(client, 999).status_code == 404
     r = context(client, task, "?round=1&feedback=1")
     assert (r.status_code, r.json()) == (422, {"detail": "give round or feedback, not both"})
+
+
+# --- 033: the project context atop the full view -------------------------------------
+
+PROJECT_CONTEXT = "# Stack\n- Python 3.12, uv\n\n## Conventions\n- SQL only in repositories/\n  \n\n"
+
+
+def set_project_context(client, project_id, text):
+    r = client.put(f"/api/projects/{project_id}/context", json={"context_md": text}, headers=H)
+    assert r.status_code == 200, r.text
+
+
+def test_context_starts_with_project_context(client, project, ctx):  # 033 AC13
+    task = ctx[0]
+    without = context(client, task).text
+    set_project_context(client, project, PROJECT_CONTEXT)
+    head = f"## Project context\n{PROJECT_CONTEXT.rstrip()}\n\n"
+    text = context(client, task).text
+    assert text.startswith(head + f"# #{task} Rate-limit login endpoint\n")
+    assert text == head + without
+
+
+@pytest.mark.parametrize("blank", ["", " \n\t\n"])
+def test_context_blank_project_context(client, project, ctx, blank):  # 033 AC14
+    set_project_context(client, project, blank)
+    text = context(client, ctx[0]).text
+    assert "## Project context" not in text
+    assert text == round_1(ctx[0]).removesuffix("\n") + ROUND_2
+
+
+def test_context_views_without_project_context(client, project, ctx):  # 033 AC15
+    task, _, r2 = ctx
+    add_decision(task, r2, "me", "CHANGES_REQUESTED", "Make it configurable.")
+    set_project_context(client, project, PROJECT_CONTEXT)
+    for query in ("?round=1", "?round=latest", "?feedback=1"):
+        r = context(client, task, query)
+        assert r.status_code == 200, query
+        assert "## Project context" not in r.text and "Python 3.12" not in r.text, query
+        assert r.text.startswith(f"# #{task} "), query
+
+
+def test_context_from_own_project(client, project):  # 033 AC16
+    body = {"path": "/code/web", "workspace": "personal", "name": "web", "default_branch": "main"}
+    other = client.post("/api/projects/connect", json=body, headers=H).json()["id"]
+    set_project_context(client, project, "Stack A\n")
+    set_project_context(client, other, "Stack B\n")
+    a, b = add_task(project, title="a"), add_task(other, title="b")
+    text = context(client, a).text
+    assert text.startswith(f"## Project context\nStack A\n\n# #{a} a\n")
+    assert "Stack B" not in text
+    assert context(client, b).text.startswith(f"## Project context\nStack B\n\n# #{b} b\n")

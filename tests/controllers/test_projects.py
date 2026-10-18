@@ -3,6 +3,7 @@ import re
 import pytest
 from conftest import git, sql
 
+from claude_factories.lib.markdown import render
 from claude_factories.server.deps import get_git
 
 H = {"X-Requested-By": "fctl"}
@@ -207,3 +208,94 @@ def test_move_project_refused(client, target, body, status):  # 020 AC31
     if status == 404:
         assert r.json() == {"detail": "Not Found"}
     assert project_workspace(pid) == workspace_id("personal")
+
+
+# --- GET and PUT /api/projects/{id}/context (033) ---------------------------------
+
+
+def put_context(client, pid, body, headers=H):
+    return client.put(f"/api/projects/{pid}/context", json=body, headers=headers)
+
+
+def stored_context(pid):
+    return sql("SELECT context_md FROM projects WHERE id = ?", (pid,))[0][0]
+
+
+def test_context_fresh(client):  # 033 AC1
+    pid = connect(client)["id"]
+    r = client.get(f"/api/projects/{pid}/context")
+    assert (r.status_code, r.json()) == (200, {"context_md": "", "context_html": "", "bytes": 0, "max_bytes": 16384})
+
+
+def test_context_put_then_get(client):  # 033 AC3
+    pid = connect(client)["id"]
+    text = "# Stack\n- Python 3.12\n"
+    r = put_context(client, pid, {"context_md": text})
+    assert r.status_code == 200
+    assert r.json() == {"context_md": text, "context_html": render(text), "bytes": len(text.encode()),
+                        "max_bytes": 16384}
+    assert client.get(f"/api/projects/{pid}/context").json() == r.json()
+
+
+def test_context_html_escapes_raw_html(client):  # 033 AC4
+    pid = connect(client)["id"]
+    put_context(client, pid, {"context_md": "<script>alert(1)</script>"})
+    html = client.get(f"/api/projects/{pid}/context").json()["context_html"]
+    assert "&lt;script&gt;" in html
+    assert "<script>" not in html
+
+
+@pytest.mark.parametrize("text", ["x" * 16384, "é" * 8192])
+def test_context_at_cap(client, text):  # 033 AC5
+    pid = connect(client)["id"]
+    r = put_context(client, pid, {"context_md": text})
+    assert (r.status_code, r.json()["bytes"]) == (200, 16384)
+    assert stored_context(pid) == text
+
+
+@pytest.mark.parametrize("text", [
+    "x" * 16385,  # 033 AC6
+    "é" * 8193,  # 033 AC7: 8193 characters, 16386 bytes
+])
+def test_context_over_cap(client, text):  # 033 AC6, AC7
+    pid = connect(client)["id"]
+    put_context(client, pid, {"context_md": "keep"})
+    r = put_context(client, pid, {"context_md": text})
+    assert (r.status_code, r.json()) == (413, {"detail": "context over 16 KB"})
+    assert stored_context(pid) == "keep"
+
+
+def test_context_cleared(client):  # 033 AC8
+    pid = connect(client)["id"]
+    put_context(client, pid, {"context_md": "# Stack\n"})
+    r = put_context(client, pid, {"context_md": ""})
+    assert (r.status_code, r.json()["context_md"]) == (200, "")
+    got = client.get(f"/api/projects/{pid}/context").json()
+    assert (got["context_md"], got["bytes"]) == ("", 0)
+
+
+def test_context_unknown_project(client):  # 033 AC9
+    for r in (client.get("/api/projects/99/context"), put_context(client, 99, {"context_md": "x"})):
+        assert (r.status_code, r.json()) == (404, {"detail": "Project #99 not found"})
+
+
+def test_context_needs_fctl_header(client):  # 033 AC10
+    pid = connect(client)["id"]
+    put_context(client, pid, {"context_md": "keep"})
+    assert put_context(client, pid, {"context_md": "x"}, headers={}).status_code == 403
+    assert stored_context(pid) == "keep"
+
+
+@pytest.mark.parametrize("body", [{}, {"context_md": 123}, {"context_md": None}, {"context_md": ["x"]}])
+def test_context_invalid_body(client, body):  # 033 AC11
+    pid = connect(client)["id"]
+    put_context(client, pid, {"context_md": "keep"})
+    assert put_context(client, pid, body).status_code == 422
+    assert stored_context(pid) == "keep"
+
+
+def test_connect_rerun_keeps_context(client):  # 033 AC12
+    pid = connect(client)["id"]
+    put_context(client, pid, {"context_md": "# Stack\n"})
+    connect(client, name="api2")
+    assert stored_context(pid) == "# Stack\n"

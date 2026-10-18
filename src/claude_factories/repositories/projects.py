@@ -73,3 +73,14 @@ class ProjectsRepo:
 
     def for_code(self, project_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT id, name, path FROM projects WHERE id = ?", (project_id,)).fetchone()
+
+    def context(self, project_id: int) -> str | None:
+        """None if there is no such project."""
+        row = self.conn.execute("SELECT context_md FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return None if row is None else row[0]
+
+    def set_context(self, project_id: int, context_md: str) -> bool:
+        """False if there is no such project."""
+        return self.conn.execute(
+            "UPDATE projects SET context_md = ? WHERE id = ?", (context_md, project_id)
+        ).rowcount > 0

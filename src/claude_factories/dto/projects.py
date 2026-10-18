@@ -32,3 +32,14 @@ class MoveBody(BaseModel):
 class MoveOut(BaseModel):
     id: int
     workspace_id: int
+
+
+class ContextBody(BaseModel):
+    context_md: str
+
+
+class ContextOut(BaseModel):
+    context_md: str
+    context_html: str
+    bytes: int
+    max_bytes: int
