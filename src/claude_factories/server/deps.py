@@ -12,6 +12,10 @@ from .. import db
 from ..adapters.claude import Claude, SubprocessClaude
 from ..adapters.git import Git, SubprocessGit
 from ..repositories.projects import ProjectsRepo
+from ..repositories.reviews import ReviewsRepo
+from ..repositories.rounds import RoundsRepo
+from ..repositories.runs import RunsRepo
+from ..repositories.tasks import TasksRepo
 from ..repositories.workspaces import WorkspacesRepo
 
 
@@ -35,6 +39,22 @@ def get_projects(conn: Conn) -> ProjectsRepo:
     return ProjectsRepo(conn)
 
 
+def get_tasks(conn: Conn) -> TasksRepo:
+    return TasksRepo(conn)
+
+
+def get_rounds(conn: Conn) -> RoundsRepo:
+    return RoundsRepo(conn)
+
+
+def get_reviews(conn: Conn) -> ReviewsRepo:
+    return ReviewsRepo(conn)
+
+
+def get_runs(conn: Conn) -> RunsRepo:
+    return RunsRepo(conn)
+
+
 def get_git() -> Git:
     return SubprocessGit()
 
@@ -45,4 +65,8 @@ def get_claude() -> Claude:
 
 Workspaces = Annotated[WorkspacesRepo, Depends(get_workspaces)]
 Projects = Annotated[ProjectsRepo, Depends(get_projects)]
+Tasks = Annotated[TasksRepo, Depends(get_tasks)]
+Rounds = Annotated[RoundsRepo, Depends(get_rounds)]
+Reviews = Annotated[ReviewsRepo, Depends(get_reviews)]
+Runs = Annotated[RunsRepo, Depends(get_runs)]
 GitAdapter = Annotated[Git, Depends(get_git)]

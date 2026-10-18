@@ -1,8 +1,10 @@
+import re
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from claude_factories.domain.errors import Conflict, NotFound, TooLarge
+from claude_factories.domain.errors import Conflict, Invalid, NotFound, TooLarge
 from claude_factories.server.app import create_app
 
 HOST_ERROR = {"detail": "Host must be 127.0.0.1 or localhost"}
@@ -59,16 +61,27 @@ def routes(found):
             yield r
 
 
-def test_moved_routes_served_from_controllers():  # 034 AC7
+MOVED_035 = [  # 035 AC1
+    ("GET", "/api/projects/{project_id}/tasks"), ("POST", "/api/projects/{project_id}/tasks"),
+    ("GET", "/api/tasks/{task_id}"), ("PATCH", "/api/tasks/{task_id}"), ("GET", "/api/tasks/{task_id}/context"),
+    ("POST", "/api/tasks/{task_id}/rounds"), ("GET", "/api/tasks/{task_id}/rounds/{n}/diff"),
+    ("PUT", "/api/tasks/{task_id}/rounds/{n}/verdicts/{reviewer}"), ("POST", "/api/tasks/{task_id}/comments"),
+    ("POST", "/api/tasks/{task_id}/decision"), ("POST", "/api/tasks/{task_id}/approve"),
+]
+TEXT_035 = {("GET", "/api/tasks/{task_id}/context"), ("GET", "/api/tasks/{task_id}/rounds/{n}/diff")}
+
+
+def test_moved_routes_served_from_controllers():  # 034 AC7, 035 AC1
     modules = {(m, r.path): r.endpoint.__module__
                for r in routes(create_app().routes) for m in getattr(r, "methods", ())}
     for key in [("GET", "/api/workspaces"), ("POST", "/api/projects/connect"), ("GET", "/api/projects"),
-                ("POST", "/api/projects/{project_id}/factory")]:
+                ("POST", "/api/projects/{project_id}/factory"), *MOVED_035]:
         assert modules[key].startswith("claude_factories.controllers."), key
 
 
 @pytest.mark.parametrize("error, status, detail", [
     (NotFound("x"), 404, "x"), (NotFound(), 404, "Not Found"), (Conflict("y"), 409, "y"), (TooLarge("z"), 413, "z"),
+    (Invalid("w"), 422, "w"),  # 035 AC3
 ])
 def test_domain_errors_as_json(error, status, detail):  # 034 AC11
     app = create_app()
@@ -99,3 +112,17 @@ def test_not_found_page_outside_api():  # 034 AC12
     assert r.template.name == "error.html"
     assert "<h1>Gone</h1>" in r.text
     assert (r.status_code, r.text) == (same.status_code, same.text)
+
+
+def test_035_response_models_from_dto():  # 035 AC2
+    found = {(m, r.path): r for r in routes(create_app().routes) for m in getattr(r, "methods", ())}
+    json_routes = [key for key in MOVED_035 if key not in TEXT_035] + [("POST", "/api/tasks/{task_id}/request-changes")]
+    assert len(json_routes) == 10
+    for key in json_routes:
+        model = found[key].response_model
+        assert model is not None, key
+        classes = re.findall(r"[\w.]+\.[A-Z]\w*", repr(model))  # list[…], unions, and <class '…'> alike
+        assert classes, (key, model)
+        assert all(c.startswith("claude_factories.dto.") for c in classes), (key, model)
+    for key in TEXT_035:  # Q6: text, no model
+        assert found[key].response_model is None, key

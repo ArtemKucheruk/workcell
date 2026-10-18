@@ -366,7 +366,7 @@ src/claude_factories/
 ├── adapters/       subprocesses, each a Protocol plus its implementation, run with argument lists
 │   ├── git.py      git
 │   └── claude.py   the claude CLI
-├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / TooLarge
+├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge
 ├── lib/            pure parsers and renderers: patch split, diff rows, run log, markdown, slug
 ├── db/             connection, now(), and schema.sql, applied at startup
 ├── config.py       env and limits: data_dir(), MAX_PATCH, MAX_VIEW
@@ -390,7 +390,7 @@ Rules:
 
 - Only server/ and controllers/ import fastapi (or starlette). Handlers raise domain errors,
   and server/ maps them to `{"detail": …}`: `NotFound` → 404, `Conflict` → 409,
-  `TooLarge` → 413.
+  `Invalid` → 422, `TooLarge` → 413.
 - SQL lives only in repositories/ and db/.
 - Handlers get repositories and adapters as arguments. Controllers get them through
   `Depends` on the providers in `server/deps.py`, so tests can swap in fakes with

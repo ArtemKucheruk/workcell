@@ -93,6 +93,9 @@ def test_mvp_code_layout_section():  # AC1
     entries = {line.lstrip("│├└─ ").split()[0] for line in tree.strip().splitlines()[1:]}
     assert entries >= {"server/", "controllers/", "pages/", "handlers/", "dto/", "repositories/", "adapters/",
                        "git.py", "claude.py", "domain/", "lib/", "db/", "config.py", "cli/"}
+    [domain] = [line for line in tree.splitlines() if line.startswith("├── domain/")]  # 035 AC4
+    assert "Invalid" in domain.split()
+    assert "`Invalid` → 422" in body
 
 
 def test_conventions_point_at_layout():  # AC2
@@ -116,10 +119,40 @@ def test_tree_follows_the_rules():  # AC16
 
 def test_checked_files():  # AC16
     files = checked()
-    for rel in ("server/app.py", "handlers/factory.py", "repositories/projects.py"):
+    for rel in ("server/app.py", "handlers/factory.py", "repositories/projects.py",
+                "handlers/tasks.py", "repositories/rounds.py", "lib/patch.py"):  # 035 AC15
         assert PKG / rel in files
     assert PKG / "app.py" not in files
     assert not [f for f in files if f.is_relative_to(PKG / "cli")]
+
+
+MOVED_OUT_OF_APP = {  # 035 AC14
+    "list_tasks", "create_task", "get_task", "patch_task", "submit_round", "insert_round", "split_patch",
+    "parse_section", "unquote", "safe_path", "round_or_404", "round_diff", "put_verdict", "post_comment",
+    "post_decision", "approve", "decide_review", "commit_hint", "context_md", "task_context", "round_summaries",
+    "latest_run", "RoundBody", "TaskBody", "TaskPatch", "VerdictBody", "CommentBody", "DecisionBody",
+    "ApproveBody", "ChangesBody",
+}
+
+
+def top_level_names(tree: ast.Module) -> set[str]:
+    """Every name a module's top level binds: defs, classes, assignments, and imports."""
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names |= {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names |= {(a.asname or a.name).split(".")[0] for a in node.names}
+    return names
+
+
+def test_moved_code_left_app():  # 035 AC14
+    names = top_level_names(ast.parse((PKG / "app.py").read_text()))
+    assert "request_changes" in names  # it reads the real module
+    assert names & MOVED_OUT_OF_APP == set()
 
 
 # --- The checks, on samples ----------------------------------------------------------

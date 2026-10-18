@@ -14,6 +14,9 @@ class ProjectsRepo:
             "SELECT id, name, path, default_branch FROM projects WHERE path = ?", (path,)
         ).fetchone()
 
+    def exists(self, project_id: int) -> bool:
+        return self.conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is not None
+
     def add(self, workspace_id: int, name: str, path: str, remote_url: str | None, default_branch: str,
             test_cmd: str | None) -> int:
         return self.conn.execute(
