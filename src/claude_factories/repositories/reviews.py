@@ -99,10 +99,3 @@ class ReviewsRepo:
             "SELECT id, author, path, line, side, body_md FROM comments WHERE round_id = ? AND path IS NOT NULL"
             " ORDER BY id", (round_id,),
         ).fetchall()
-
-    def comment_anchor(self, comment_id: int) -> sqlite3.Row:
-        """008 Q3: where an inline comment sits: its round n, path, side, and line."""
-        return self.conn.execute(
-            "SELECT r.n, c.path, c.side, c.line FROM comments c JOIN rounds r ON r.id = c.round_id WHERE c.id = ?",
-            (comment_id,),
-        ).fetchone()

@@ -188,8 +188,7 @@ python3 -m http.server -b 127.0.0.1 -d factory
 
 The stack is Python 3.12 with [uv](https://docs.astral.sh/uv/), FastAPI, and stdlib
 `sqlite3`. The `fctl` CLI imports only the stdlib. The frontend in `frontend/` is a Vite +
-React SPA with Tailwind v4, built with Node 22 and npm. It replaces the Jinja2 pages one
-page at a time, and until then both work.
+React SPA with Tailwind v4, built with Node 22 and npm.
 
 You don't need the global install to work on the app itself:
 
@@ -219,7 +218,7 @@ against a fake backend on 127.0.0.1.
 ## Layout
 
 ```
-src/claude_factories/   app (FastAPI), fctl CLI, schema.sql, templates/, vendored static/
+src/claude_factories/   app (FastAPI), fctl CLI, schema.sql
 tests/
 docs/                   the design, which is the source of truth for what to build
 FACTORY.md              the bootstrap factory's design

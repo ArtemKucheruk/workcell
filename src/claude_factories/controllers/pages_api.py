@@ -1,5 +1,6 @@
-"""docs/data-model-and-api.md §6.4: /api/auth and one view-model per SPA page. Each route calls the Jinja
-page's handler and maps its dict onto dto/pages.py (020 Q2): rows become objects, markdown gets `*_html`."""
+"""docs/data-model-and-api.md §6.4: /api/auth and one view-model per SPA page. Each route calls its page
+handler in handlers/pages.py and maps the dict onto dto/pages.py (020 Q2): rows become objects, markdown gets
+`*_html`."""
 
 from fastapi import APIRouter, Query
 
