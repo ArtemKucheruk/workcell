@@ -146,19 +146,35 @@ python3 -m http.server -b 127.0.0.1 -d factory
 
 ## Developing the app
 
-The stack is Python 3.12 with [uv](https://docs.astral.sh/uv/), FastAPI, stdlib `sqlite3`,
-and Jinja2 with htmx. There is no frontend build. The `fctl` CLI imports only the stdlib.
+The stack is Python 3.12 with [uv](https://docs.astral.sh/uv/), FastAPI, and stdlib
+`sqlite3`. The `fctl` CLI imports only the stdlib. The frontend in `frontend/` is a Vite +
+React SPA with Tailwind v4, built with Node 22 and npm. It replaces the Jinja2 pages one
+page at a time, and until then both work.
 
 You don't need the global install to work on the app itself:
 
 ```sh
 uv sync                  # creates .venv with runtime and dev dependencies
-uv run fctl serve        # runs the app from .venv
+uv run fctl serve        # runs the backend from .venv on 127.0.0.1:4545
 uv run pytest -q         # tests
 ```
 
+The frontend, with the backend running:
+
+```sh
+npm --prefix frontend ci         # installs the frontend's dependencies
+npm --prefix frontend run dev    # dev server on http://localhost:5173
+npm --prefix frontend test       # frontend tests
+npm --prefix frontend run build && node frontend/server.js   # the built app on http://127.0.0.1:3000
+```
+
+Both the dev server and `frontend/server.js` send `/api` to `FCTL_API_URL`
+(default `http://127.0.0.1:4545`). `server.js` also reads `HOST` (default `127.0.0.1`) and
+`PORT` (default `3000`).
+
 Each test gets a temp `FCTL_HOME` and a fake `claude` on `PATH`. Tests never call the real
-`claude`, the network, or `~/.claude*`.
+`claude`, the network, or `~/.claude*`. Frontend tests mock `fetch`, and `server.test.js` runs
+against a fake backend on 127.0.0.1.
 
 ## Layout
 

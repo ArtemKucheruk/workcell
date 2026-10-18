@@ -1,0 +1,37 @@
+import { expect, test, vi } from 'vitest'
+import { api } from './client.js'
+
+function ok(body) {
+  const fetch = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }))
+  vi.stubGlobal('fetch', fetch)
+  return fetch
+}
+
+test('AC10: mutating methods send X-Requested-By and JSON; GET sends no X-Requested-By', async () => {
+  for (const method of ['POST', 'PATCH', 'PUT', 'DELETE']) {
+    const fetch = ok({ id: 1 })
+    expect(await api('/api/x', { method, body: { name: 'work' } })).toEqual({ id: 1 })
+    const [url, init] = fetch.mock.calls[0]
+    expect([url, init.method, init.body]).toEqual(['/api/x', method, '{"name":"work"}'])
+    expect(init.headers).toEqual({ 'X-Requested-By': 'fctl', 'Content-Type': 'application/json' })
+  }
+  const fetch = ok([1, 2])
+  expect(await api('/api/y')).toEqual([1, 2])
+  expect(fetch.mock.calls[0][1].headers).not.toHaveProperty('X-Requested-By')
+})
+
+test('AC11: errors carry the detail as message and the status', async () => {
+  const fail = (status, body) =>
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(body, { status })))
+  fail(409, '{"detail":"run #41 active"}')
+  const error = await api('/api/x', { method: 'POST' }).catch((e) => e)
+  expect(error).toBeInstanceOf(Error)
+  expect([error.message, error.status]).toEqual(['run #41 active', 409])
+
+  fail(422, JSON.stringify({ detail: [{ loc: ['body', 'name'], msg: 'Field required' }, { msg: 'too short' }] }))
+  await expect(api('/api/x', { method: 'POST' })).rejects.toThrow(/^Field required; too short$/)
+
+  fail(500, 'Internal Server Error')
+  const plain = await api('/api/x').catch((e) => e)
+  expect([plain.message, plain.status]).toEqual(['HTTP 500', 500])
+})
