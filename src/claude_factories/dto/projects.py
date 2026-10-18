@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConnectBody(BaseModel):
@@ -23,3 +23,12 @@ class ProjectOut(BaseModel):
     name: str
     default_branch: str
     factory: Literal["ready", "uncommitted", "none"]
+
+
+class MoveBody(BaseModel):
+    workspace_id: int = Field(ge=-2**63, lt=2**63)  # SQLite INTEGER bounds: a 404, not an OverflowError's 500
+
+
+class MoveOut(BaseModel):
+    id: int
+    workspace_id: int

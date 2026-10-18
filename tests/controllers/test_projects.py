@@ -178,3 +178,32 @@ def test_git_adapter_through_depends(client):  # 034 AC14
     assert state() == "ready"
     client.app.dependency_overrides.clear()
     assert state() == "none"
+
+
+# --- PATCH /api/projects/{id} (020) -----------------------------------------------
+
+
+def test_move_project(client):  # 020 AC30
+    pid = connect(client)["id"]
+    work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
+    r = client.patch(f"/api/projects/{pid}", json={"workspace_id": work}, headers=H)
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work})
+    assert project_workspace(pid) == work
+
+
+@pytest.mark.parametrize("target, body, status", [
+    ("unknown project", None, 404), ("unknown workspace", {"workspace_id": 999}, 404),
+    ("project", {"workspace_id": 2**63}, 422), ("project", {}, 422), ("project", {"workspace_id": "x"}, 422),
+    ("no header", None, 403),
+])
+def test_move_project_refused(client, target, body, status):  # 020 AC31
+    pid = connect(client)["id"]
+    work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
+    url = f"/api/projects/{999 if target == 'unknown project' else pid}"
+    r = client.patch(url, json={"workspace_id": work} if body is None else body,
+                     headers={} if target == "no header" else H)
+    assert r.status_code == status, r.text
+    assert r.headers["content-type"] == "application/json"
+    if status == 404:
+        assert r.json() == {"detail": "Not Found"}
+    assert project_workspace(pid) == workspace_id("personal")

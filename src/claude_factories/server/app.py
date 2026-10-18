@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import db
-from ..controllers import factory, projects, reviews, rounds, runs, tasks, workspaces
+from ..controllers import factory, pages_api, projects, reviews, rounds, runs, tasks, workspaces
 from ..controllers.pages import code, dashboard, templates
 from ..controllers.pages import projects as project_pages
 from ..controllers.pages import tasks as task_pages
@@ -76,7 +76,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(UnicodeEncodeError, unencodable)
     app.add_exception_handler(DomainError, domain_error)
     app.mount("/static", StaticFiles(directory=PKG / "static"), name="static")
-    for module in (workspaces, projects, factory, tasks, rounds, reviews, runs,
+    for module in (workspaces, projects, factory, tasks, rounds, reviews, runs, pages_api,
                    dashboard, workspace_pages, project_pages, code, task_pages):
         app.include_router(module.router)
     return app
