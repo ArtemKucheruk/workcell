@@ -1,4 +1,5 @@
 import { NotFound } from '../components/NotFound.jsx'
+import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
 import { WorkspacePage } from '../pages/workspace/WorkspacePage.jsx'
 import { Layout } from './Layout.jsx'
@@ -10,6 +11,7 @@ export const routes = [
     children: [
       { path: '/', element: <DashboardPage /> },
       { path: '/workspaces/:id', element: <WorkspacePage /> },
+      { path: '/projects/:id', element: <BoardPage /> },
       { path: '*', element: <NotFound /> },
     ],
   },

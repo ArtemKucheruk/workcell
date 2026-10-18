@@ -4,3 +4,5 @@ export const dashboardPage = (show) =>
   api(`/api/pages/dashboard${show ? `?${new URLSearchParams({ show })}` : ''}`)
 
 export const workspacePage = (id) => api(`/api/pages/workspaces/${encodeURIComponent(id)}`)
+
+export const boardPage = (id) => api(`/api/pages/projects/${encodeURIComponent(id)}`)
