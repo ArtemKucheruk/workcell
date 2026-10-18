@@ -36,6 +36,15 @@ if sys.argv[1:] == ["auth", "status"]:
     print({auth!r})
     sys.exit({auth_code!r})
 record("run")
+if {long!r}:  # 013: one line, a `sleep 60` child in this process group, then 60 s of sleep
+    import subprocess, time
+    print({system!r}, flush=True)
+    child = subprocess.Popen(["sleep", "60"])
+    path = os.path.join(os.environ["FAKE_CLAUDE_RECORDS"], "child")
+    with open(path + ".tmp", "w") as f:
+        f.write(str(child.pid))
+    os.replace(path + ".tmp", path)
+    time.sleep(60)
 lines = {lines!r}
 if lines is None:
     sid = sys.argv[sys.argv.index("--session-id") + 1]
@@ -55,10 +64,10 @@ def fake(tmp_path, monkeypatch):
     records.mkdir()
     monkeypatch.setenv("FAKE_CLAUDE_RECORDS", str(records))
 
-    def install(auth=AUTH_OK, auth_code=0, lines=None, code=0, delete_self=False):
+    def install(auth=AUTH_OK, auth_code=0, lines=None, code=0, delete_self=False, long=False):
         claude = tmp_path / "bin" / "claude"
         claude.write_text(FAKE.format(python=sys.executable, auth=auth, auth_code=auth_code, lines=lines,
-                                      code=code, delete_self=delete_self, system=SYSTEM))
+                                      code=code, delete_self=delete_self, system=SYSTEM, long=long))
         claude.chmod(0o755)
 
     def recorded(name):

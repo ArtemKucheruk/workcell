@@ -31,7 +31,7 @@
     <div class="summary">
       <label for="summary">Summary</label>
       <textarea name="body_md" required id="summary" rows="2" placeholder="What should change? Required for Request changes."{{ off }}></textarea>
-      <p class="form-error" role="alert"></p>
+      <p class="form-error" role="alert">{{ refused }}</p>{# 013: a refused rework spawn #}
     </div>
     <button class="request-changes"{{ off }}>Request changes</button>
   </form>
