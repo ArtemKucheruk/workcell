@@ -4,7 +4,7 @@ import os
 import pytest
 from conftest import commit, sql, write
 
-from claude_factories import cli
+from claude_factories.cli.git import capture
 
 H = {"X-Requested-By": "fctl"}
 OLD = "2026-01-01T00:00:00Z"
@@ -58,7 +58,7 @@ def add_decision(task_id, round_id, actor, decision):
 def captured(repo, monkeypatch) -> str:
     """The patch `fctl submit` would send from repo (§7.4 capture)."""
     monkeypatch.chdir(repo)
-    return cli.capture()[1]
+    return capture()[1]
 
 
 @pytest.fixture
