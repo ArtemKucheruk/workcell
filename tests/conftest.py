@@ -6,13 +6,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from claude_factories import db
-from claude_factories.app import app
+from claude_factories.app import LOGIN, app
 
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
     """Every test gets its own FCTL_HOME and HOME (so nothing touches the real ~/.claude), a
-    do-nothing fake `claude` first on PATH, and git without the user's config (Q17)."""
+    do-nothing fake `claude` first on PATH, and git without the user's config (Q17). 014: an empty
+    claude_login() cache, since tests swap fakes."""
+    LOGIN.clear()
     monkeypatch.setenv("FCTL_HOME", str(tmp_path / "fctl-home"))
     (tmp_path / "home").mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
