@@ -19,7 +19,7 @@ approver; sonnet for ux, ui, and code.
 ### 7.2 Commands
 | Command | Used by | Calls |
 |---|---|---|
-| `fctl serve [--port 4545]` | me | starts the app |
+| `fctl serve [--host 127.0.0.1] [--port 4545]` | me | starts the app |
 | `fctl setup` | me, once | writes the 2 global skills |
 | `fctl connect --workspace W [--test-cmd C]` | `/factory-connect` | `POST /api/projects/connect` |
 | `fctl task add "title" [--run]` | me | `POST /api/projects/{id}/tasks` (+ `/run`) |

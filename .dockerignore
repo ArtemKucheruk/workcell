@@ -1,0 +1,6 @@
+# An allowlist: only the Dockerfile's COPY sources go into the build context.
+*
+!pyproject.toml
+!uv.lock
+!src
+**/__pycache__

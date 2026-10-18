@@ -1,0 +1,29 @@
+# docs/MVP.md §4.6. Publishes nothing: copy compose.override.example.yaml to
+# compose.override.yaml, which publishes both servers on 127.0.0.1 only (§4.5).
+services:
+  backend:
+    build: .
+    volumes:
+      - fctl-home:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4545/api/workspaces')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  frontend:
+    build: ./frontend
+    environment:
+      HOST: "0.0.0.0"
+      FCTL_API_URL: "http://backend:4545"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  fctl-home:
