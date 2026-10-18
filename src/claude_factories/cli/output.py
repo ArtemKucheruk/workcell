@@ -1,0 +1,24 @@
+import sys
+
+
+def fail(message: str):
+    print(f"fctl: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def print_run(task_id: int, run_id: int):
+    """Q9: the task page, where the run log shows."""
+    from .client import base_url  # ponytail: lazy, since client imports fail() from here; no cycle at import time
+
+    print(f"Run #{run_id} on #{task_id} → {base_url()}/tasks/{task_id}")
+
+
+def stdin_text() -> str:
+    """Q9: a heredoc or a pipe, sent unchanged; nothing from a terminal, so a hand-typed command
+    doesn't wait for Ctrl-D."""
+    return "" if sys.stdin.isatty() else sys.stdin.read()
+
+
+def summary(r: dict) -> str:
+    files = f"{r['files_changed']} file" + ("" if r["files_changed"] == 1 else "s")
+    return f"{files}, +{r['additions']} −{r['deletions']} → {r['url']}"
