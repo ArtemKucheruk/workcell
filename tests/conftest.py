@@ -6,7 +6,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from claude_factories import db
-from claude_factories.app import LOGIN, app
+from claude_factories.app import LOGIN
+from claude_factories.server.app import create_app
 
 
 @pytest.fixture(autouse=True)
@@ -74,5 +75,5 @@ def repo(tmp_path):
 @pytest.fixture
 def client():
     # base_url sets Host: 127.0.0.1:4545, which passes the Host check
-    with TestClient(app, base_url="http://127.0.0.1:4545") as c:
+    with TestClient(create_app(), base_url="http://127.0.0.1:4545") as c:
         yield c

@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from claude_factories import db
-from claude_factories.app import app
+from claude_factories import config, db
+from claude_factories.server.app import create_app
 
 NOW = "2026-10-17T00:00:00Z"
 
 
 def start_app():
-    with TestClient(app, base_url="http://127.0.0.1:4545"):
+    with TestClient(create_app(), base_url="http://127.0.0.1:4545"):
         pass
 
 
@@ -27,7 +27,7 @@ def test_startup_creates_data_dir(tmp_path, monkeypatch):  # AC8
 def test_data_dir_defaults_to_home(tmp_path, monkeypatch):  # AC9
     monkeypatch.delenv("FCTL_HOME")
     monkeypatch.setenv("HOME", str(tmp_path))
-    assert db.data_dir() == tmp_path / ".claude-factories"
+    assert config.data_dir() == tmp_path / ".claude-factories"
 
 
 def test_schema_has_every_table_and_index():  # AC10

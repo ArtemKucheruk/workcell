@@ -29,11 +29,11 @@ def setup(args):
 def serve(args):
     import uvicorn  # heavy imports stay out of every other command
 
-    from .. import db
-    from ..app import app
+    from ..config import data_dir
+    from ..server.app import create_app
 
-    print(f"Claude Factories → http://127.0.0.1:{args.port} (data: {db.data_dir()})", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=args.port)
+    print(f"Claude Factories → http://127.0.0.1:{args.port} (data: {data_dir()})", flush=True)
+    uvicorn.run(create_app(), host="127.0.0.1", port=args.port)
 
 
 def main(argv=None):

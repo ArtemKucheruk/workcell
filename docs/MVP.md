@@ -352,6 +352,57 @@ Single user and no auth still need these, because the API can start processes th
 - **Takeover.** The session lives in the container, so §4.4's takeover command becomes
   `docker compose exec -w <worktree> backend claude --resume <session-id>`.
 
+### 4.7 Code layout
+The backend under `src/claude_factories/` is split into layers:
+
+```
+src/claude_factories/
+├── server/         create_app(), lifespan, the §4.5 middleware, domain error → HTTP mapping, deps.py providers
+├── controllers/    one APIRouter per resource: reads the request, calls a handler
+│   └── pages/      the Jinja page routes, until the SPA replaces them
+├── handlers/       use cases as plain functions, one module per resource
+├── dto/            pydantic request and response models, one module per resource
+├── repositories/   all SQL, one class per table group, wrapping a connection
+├── adapters/       subprocesses, each a Protocol plus its implementation, run with argument lists
+│   ├── git.py      git
+│   └── claude.py   the claude CLI
+├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / TooLarge
+├── lib/            pure parsers and renderers: patch split, diff rows, run log, markdown, slug
+├── db/             connection, now(), and schema.sql, applied at startup
+├── config.py       env and limits: data_dir(), MAX_PATCH, MAX_VIEW
+└── cli/            fctl, stdlib only (§4.2)
+```
+
+Rules:
+- Imports go one way. Imports inside a package are always fine. Across packages:
+
+  | Package | May import |
+  |---|---|
+  | server/ | controllers, repositories, adapters, db, config, domain |
+  | controllers/ | handlers, dto, domain, `server.deps` (not `server.app`) |
+  | handlers/ | repositories, adapters, dto, domain, lib, config |
+  | repositories/ | db, domain, config |
+  | adapters/ | domain, config |
+  | dto/ | domain |
+  | db/ | config |
+  | lib/ | domain |
+  | domain/, config.py | nothing |
+
+- Only server/ and controllers/ import fastapi (or starlette). Handlers raise domain errors,
+  and server/ maps them to `{"detail": …}`: `NotFound` → 404, `Conflict` → 409,
+  `TooLarge` → 413.
+- SQL lives only in repositories/ and db/.
+- Handlers get repositories and adapters as arguments. Controllers get them through
+  `Depends` on the providers in `server/deps.py`, so tests can swap in fakes with
+  `app.dependency_overrides`.
+- One handler call is one transaction. A request gets one connection, which commits when
+  the handler returns and rolls back if it raises, before the response goes out.
+- tests/ mirrors `src/claude_factories/`, for example `tests/controllers/test_projects.py`.
+  Each test subdirectory has an `__init__.py`.
+- `tests/test_architecture.py` reads every module with `ast` and fails on a wrong import
+  direction, fastapi outside server/ and controllers/, or SQL outside repositories/ and db/.
+  A new edge changes this section and that test together.
+
 ---
 
 ## 9. MVP scope vs Later
