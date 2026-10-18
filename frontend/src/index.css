@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* 024 Q10: highlight.js's themes by the system's scheme, as base.html loads them */
+@import "highlight.js/styles/github.css" (prefers-color-scheme: light);
+@import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);
 
 @layer base {
   a { @apply text-blue-700 hover:underline dark:text-blue-400; }
@@ -24,4 +27,20 @@
   .markdown code { @apply rounded bg-gray-100 px-1 text-[0.9em] dark:bg-gray-800; }
   .markdown pre { @apply overflow-x-auto rounded-md bg-gray-100 p-3 text-sm dark:bg-gray-800; }
   .markdown pre code { @apply bg-transparent p-0 text-inherit; }
+}
+
+/* 024: the review diff, after review.html. Lines don't wrap; the file's box scrolls, comments stay in view. */
+@layer components {
+  .diff-table { @apply min-w-full font-mono text-[0.85rem]; }
+  .diff-table td { @apply border-0 px-2 py-0 align-top whitespace-pre; }
+  .diff-table td.num, .diff-table td.sign { @apply w-[1%] text-right text-gray-600 select-none dark:text-gray-400; }
+  .diff-table td.num a { @apply text-inherit; }
+  .diff-table tr:is(.hunk, .note) td { @apply py-0.5 text-gray-600 dark:text-gray-400; }
+  .diff-table tr.hunk { @apply bg-blue-50 dark:bg-blue-950/40; }
+  /* Q10: GitHub's diff tints; highlight.js colors only the text, so the rows stay tinted */
+  .diff-table tr.add { @apply bg-[#e6ffec] dark:bg-[#2ea04326]; }
+  .diff-table tr.del { @apply bg-[#ffebe9] dark:bg-[#f851491a]; }
+  .diff-table tr.comments td { @apply border-y border-gray-200 p-2 font-sans whitespace-normal dark:border-gray-800; }
+  .diff-table tr.comments td > * { @apply sticky left-2 max-w-[min(48rem,80vw)]; }
+  .diff-table .comment + .comment { @apply mt-3; }
 }

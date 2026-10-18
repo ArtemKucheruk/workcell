@@ -3,34 +3,16 @@ import { Link, useParams } from 'react-router'
 import { taskPage } from '../../api/pages.js'
 import { runLog, runTask, stopRun } from '../../api/runs.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
+import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { StatusLine } from '../../components/StatusLine.jsx'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
-const LABELS = { backlog: 'Backlog', in_progress: 'In progress', review: 'Review', done: 'Done' }
-// Q9: task.html's chip labels and §8.1's legend; the board's differ (`co`, no space)
-const SHORT = { security: 'sec', ux: 'ux', ui: 'ui', code: 'code' }
-const SYMBOL = { PASS: '✓', CHANGES: '✗', pending: '·' }
-
 const muted = 'text-gray-600 dark:text-gray-400'
 const blank = (md) => !md?.trim()
-
-/** Q8: `<Status> · <stage>`, with human_review and escalated in task.html's words. */
-function StatusLine({ task }) {
-  const label = LABELS[task.status] ?? task.status
-  if (task.stage === 'escalated') {
-    return (
-      <span>
-        {`${label} · `}
-        <strong className="text-red-700 dark:text-red-400">⚠ NEEDS YOU — escalated</strong>
-      </span>
-    )
-  }
-  const stage = task.stage === 'human_review' ? 'waiting on you' : task.stage
-  return <span>{stage ? `${label} · ${stage}` : label}</span>
-}
 
 /**
  * Q3: Stop while the latest run runs, whatever the status; else Run for backlog, Retry for in_progress with a run.
@@ -78,23 +60,6 @@ function Takeover({ page }) {
   }
   if (page.run?.status === 'running' && page.task.worktree_path) return <p className={muted}>Stop the run to take over.</p>
   return null
-}
-
-/** Q1: a verdict with a body opens it as a native popover; pending or bodiless ones are plain text. */
-function Chip({ n, who, verdict, posted }) {
-  const text = `${SHORT[who] ?? who} ${SYMBOL[verdict] ?? verdict}`
-  const title = `${who}: ${verdict}`
-  if (blank(posted?.body_md)) return <span title={title}>{text}</span>
-  return (
-    <button
-      type="button"
-      popoverTarget={`verdict-${n}-${who}`}
-      title={title}
-      className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-blue-700 dark:hover:text-blue-400"
-    >
-      {text}
-    </button>
-  )
 }
 
 /**
