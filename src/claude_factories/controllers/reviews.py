@@ -8,6 +8,7 @@ from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, Com
 from ..handlers import reviews as handler
 from ..server.deps import ClaudeAdapter, GitAdapter, Reviews, Rounds, Tasks, transaction
 from .rounds import NOSNIFF
+from .runs import agent_url
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ def approve(task_id: int, body: ApproveBody, tasks: Tasks, rounds: Rounds, revie
 def request_changes(task_id: int, body: ChangesBody, request: Request, git: GitAdapter,
                     claude: ClaudeAdapter) -> ChangesOut:
     """036 Q10: the handler commits my decision before any spawn, so it takes transaction()."""
-    return handler.rework(transaction, git, claude, task_id, body, str(request.base_url))
+    return handler.rework(transaction, git, claude, task_id, body, agent_url(request))
 
 
 @router.get("/api/tasks/{task_id}/context")

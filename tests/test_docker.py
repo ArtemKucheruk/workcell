@@ -188,3 +188,77 @@ def test_readme_docker_quick_start():  # AC19
     readme = read("README.md")
     assert "cp compose.override.example.yaml compose.override.yaml && docker compose up --build" in readme
     assert "http://127.0.0.1:3000" in readme
+
+
+# --- 028: runs inside the backend container --------------------------------------
+
+
+def env(steps) -> dict[str, str]:
+    """Every ENV's KEY=value pairs, later ones winning, as Docker applies them."""
+    return {k: v for kw, args in steps if kw == "ENV" for k, v in re.findall(r"(\w+)=(\S+)", args)}
+
+
+def test_dockerfile_node():  # 028 AC7
+    steps = instructions("Dockerfile")
+    assert [args for kw, args in steps if kw == "FROM"][0] == "python:3.12-slim"
+    node = [args.split()[1] for kw, args in steps if kw == "COPY" and args.startswith("--from=node:22-slim ")]
+    assert set(node) == {"/usr/local/bin/node", "/usr/local/lib/node_modules"}
+
+
+def test_dockerfile_claude_pinned():  # 028 AC8
+    steps = instructions("Dockerfile")
+    last_node = max(i for i, (kw, args) in enumerate(steps) if kw == "COPY" and "--from=node:" in args)
+    installs = [i for i, (kw, args) in enumerate(steps) if kw == "RUN" and "@anthropic-ai/claude-code" in args]
+    assert len(installs) == 1 and installs[0] > last_node
+    assert re.search(r"\bnpm install -g @anthropic-ai/claude-code@\d+\.\d+\.\d+(\s|$)", steps[installs[0]][1])
+    assert env(steps)["DISABLE_AUTOUPDATER"] == "1"
+
+
+def test_dockerfile_home_and_in_docker():  # 028 AC9
+    steps = instructions("Dockerfile")
+    assert (env(steps)["FCTL_IN_DOCKER"], env(steps)["HOME"]) == ("1", "/home/fctl")
+    assert any(kw == "RUN" and re.search(r"mkdir\b.*-m 1777\s+/home/fctl(\s|$)", args) for kw, args in steps)
+
+
+def test_dockerfile_path_keeps_app_fctl():  # 028 AC10
+    assert env(instructions("Dockerfile"))["PATH"].startswith("/app/.venv/bin:")
+
+
+def test_dockerfile_python_downloads_only_off_for_build():  # 028 AC11
+    steps = instructions("Dockerfile")
+    assert "UV_PYTHON_DOWNLOADS" not in env(steps)
+    [sync] = [args for kw, args in steps if kw == "RUN" and "uv sync" in args]
+    assert re.search(r"(^|\s)UV_PYTHON_DOWNLOADS=never\s+uv sync\b", sync)
+
+
+def test_compose_backend_init():  # 028 AC12
+    assert re.search(r"^\s+init:\s*true\s*(#.*)?$", services("compose.yaml")["backend"], re.M)
+
+
+def test_compose_backend_home_volume():  # 028 AC13
+    assert items(blocks(services("compose.yaml")["backend"], 4)["volumes"]) == ["fctl-home:/data",
+                                                                               "backend-home:/home/fctl"]
+    assert {"fctl-home", "backend-home"} <= set(blocks(blocks(read("compose.yaml"))["volumes"], 2))
+
+
+def test_compose_backend_image_name():  # 028 AC14
+    backend = services("compose.yaml")["backend"]
+    assert re.search(r"^\s+image:\s*claude-factories-backend\s*(#.*)?$", backend, re.M)
+    assert re.search(r"^\s+build:\s*\.\s*$", backend, re.M)
+
+
+def test_override_custom_image_recipe():  # 028 AC15
+    backend = read("compose.override.example.yaml").split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
+    comments = [line.strip() for line in backend.splitlines() if line.lstrip().startswith("#")]
+    assert any("FROM claude-factories-backend" in c for c in comments)
+    assert any(c.startswith("# image: ") for c in comments)
+    assert "# build: !reset null" in comments
+
+
+def test_readme_docker_runs():  # 028 AC16; Q11: this claude has `auth login`, no `login`
+    readme = read("README.md")
+    assert "docker compose exec backend claude auth login" in readme
+    assert "docker compose exec backend claude auth status" in readme
+    assert "docker compose exec -w" in readme and "backend-home" in readme
+    assert "Runs don't work inside Docker yet" not in readme
+    assert "| `FCTL_IN_DOCKER` |" in readme

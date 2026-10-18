@@ -21,14 +21,20 @@ async def lifespan(app):
 router = APIRouter(lifespan=lifespan)
 
 
+def agent_url(request: Request) -> str:
+    """028 Q5: an agent's FCTL_URL is loopback plus the port this request arrived on. Agents run next to
+    the server, so it reaches it whatever Host a proxy (frontend/server.js) or a port mapping set."""
+    return f"http://127.0.0.1:{request.scope['server'][1]}"
+
+
 @router.post("/api/tasks/{task_id}/run", status_code=202)
 def run_task(task_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunStarted:
-    return handler.start(transaction, git, claude, task_id, str(request.base_url))
+    return handler.start(transaction, git, claude, task_id, agent_url(request))
 
 
 @router.post("/api/projects/{project_id}/run-next", status_code=202)
 def run_next(project_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunNextOut:
-    return handler.run_next(transaction, git, claude, project_id, str(request.base_url))
+    return handler.run_next(transaction, git, claude, project_id, agent_url(request))
 
 
 @router.post("/api/runs/{run_id}/stop")

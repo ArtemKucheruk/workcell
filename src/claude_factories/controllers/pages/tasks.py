@@ -13,6 +13,7 @@ from ...dto.reviews import ApproveBody, ChangesBody, CommentBody
 from ...handlers import pages as handler
 from ...handlers import reviews as reviews_handler
 from ...server.deps import ClaudeAdapter, GitAdapter, Reviews, Rounds, Runs, Tasks, transaction
+from ..runs import agent_url
 from . import form_field, hx_redirect, templates
 
 router = APIRouter()
@@ -48,7 +49,7 @@ async def request_changes_form(request: Request, task_id: int, git: GitAdapter, 
     body = ChangesBody(body_md=await form_field(request, "body_md"))
     try:
         await run_in_threadpool(reviews_handler.rework, transaction, git, claude, task_id, body,
-                                str(request.base_url))  # the spawn blocks
+                                agent_url(request))  # the spawn blocks
     except DomainError as e:
         if not getattr(e, "recorded", False):  # nothing written: the page's alert shows the detail
             raise

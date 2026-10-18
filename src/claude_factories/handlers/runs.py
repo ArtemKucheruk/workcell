@@ -67,7 +67,8 @@ def worktree(tx, git: Git, task) -> str:
 
 def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStarted:
     """Q2's order: 404, run active, status (Q1), factory (Q12), worktree (Q4), auth; then the run row,
-    the move, and the event in one transaction, then the spawn (§4.4). `base_url` becomes FCTL_URL (Q8)."""
+    the move, and the event in one transaction, then the spawn (§4.4). `base_url` becomes FCTL_URL: the
+    controller's loopback URL on the server's own port (028 Q5)."""
     with tx() as conn:
         task = TasksRepo(conn).for_run(task_id)
     if task is None:

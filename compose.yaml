@@ -3,8 +3,11 @@
 services:
   backend:
     build: .
+    image: claude-factories-backend   # what a custom image builds FROM (compose.override.example.yaml)
+    init: true   # Docker's init is PID 1: it reaps what a stopped run leaves and forwards SIGTERM (028 Q8)
     volumes:
       - fctl-home:/data
+      - backend-home:/home/fctl   # HOME: the claude login, ~/.claude.json, uv and npm caches (028 Q4)
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4545/api/workspaces')"]
       interval: 5s
@@ -27,3 +30,4 @@ services:
 
 volumes:
   fctl-home:
+  backend-home:

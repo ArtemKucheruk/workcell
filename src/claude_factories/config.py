@@ -9,3 +9,8 @@ MAX_VIEW = 1024 * 1024  # 016 Q5: over this many bytes, the code page doesn't sh
 
 def data_dir() -> Path:
     return Path(os.environ.get("FCTL_HOME") or Path.home() / ".claude-factories")
+
+
+def in_docker() -> bool:
+    """028 Q6: the backend image sets FCTL_IN_DOCKER=1; only that exact value counts."""
+    return os.environ.get("FCTL_IN_DOCKER") == "1"
