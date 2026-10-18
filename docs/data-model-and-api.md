@@ -123,6 +123,14 @@ JSON over `http://127.0.0.1:4545`. Mutating calls need `X-Requested-By: fctl` (�
 GET  /api/workspaces
 ← 200 [{"id":2,"name":"personal","projects":3}]
 
+POST /api/workspaces                                              (+ Workspace)
+→ {"name":"work"}
+← 200 {"id":4,"name":"work"}                                      # an existing name returns its id
+
+PATCH /api/projects/3                                             (move to another workspace)
+→ {"workspace_id":4}
+← 200 {"id":3,"workspace_id":4}                                   # 404 if either id is unknown
+
 POST /api/projects/connect                                        (fctl connect)
 → {"path":"/Users/artem/code/api-server","workspace":"personal","name":"api-server",
    "remote_url":"git@github.com:artem/api-server.git","default_branch":"main","test_cmd":"pytest -q"}
@@ -210,6 +218,28 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 ← 200 {"status":"done","commit_hint":"cd .claude/worktrees/12-rate-limit-login && git add -A && …"}
 ```
 
-### 6.4 HTML routes
-`/` dashboard · `/workspaces/{id}` · `/projects/{id}` board · `/projects/{id}/code?path=` ·
-`/tasks/{id}` · `/tasks/{id}/review?round=&tab=files`
+### 6.4 SPA routes and page data
+The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
+`/projects/{id}` board · `/projects/{id}/code?path=` · `/tasks/{id}` ·
+`/tasks/{id}/review?round=&tab=files` · `/docs/fctl`. Any other path outside `/api` gets the
+SPA's not-found page.
+
+Each page loads one view-model from the backend. Markdown fields arrive rendered as `*_html`
+(raw HTML off, §4.5). Unknown ids get a JSON 404.
+```
+GET  /api/auth                                                    (every page header)
+← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true}
+
+GET  /api/pages/dashboard                       tiles, open tasks per workspace → project, rounds per task
+GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
+GET  /api/pages/projects/{id}                   board cards with stage, chips per round, +/−, waiting, escalated, stalled
+GET  /api/pages/tasks/{id}                      spec_html, rounds, decision, history, the active run and takeover command
+GET  /api/pages/tasks/{id}/review?round=        timeline; files with diff rows carrying side, old/new line, kind,
+                                                text, and the path:side:line anchor; inline comments
+GET  /api/pages/projects/{id}/code?path=        tree, README or file, branch
+← 404 {"detail":"Task #99 not found"}
+
+GET  /api/docs/fctl                                               (/docs/fctl)
+← 200 {"body_html":"<h2 id=\"fctl-serve\">fctl serve</h2>…",
+       "headings":[{"id":"fctl-serve","text":"fctl serve","level":2}]}
+```

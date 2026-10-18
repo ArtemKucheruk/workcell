@@ -3,9 +3,13 @@
 Part of the [MVP design](MVP.md). Section numbers continue from it.
 
 ## 8. UI
-Pages are rendered on the server. Light and dark follow the system setting. Live parts poll
-every 3 s. Every page header shows the login runs will use, from `claude auth status`:
-`Claude: Pro ✓` when it is a subscription, or a red `API key — runs disabled` otherwise.
+The UI is a React SPA served by the frontend server (§4.1). Each page loads its view-model
+from `/api/pages/*` (§6.4). Markdown arrives pre-rendered by the backend as `*_html` fields,
+with raw HTML off, so the SPA has no markdown library. highlight.js comes from npm. Live
+parts poll every 3 s with fetch. Light and dark follow the system setting. Every page header
+links to the fctl reference (item 7) and shows the login runs will use, from
+`GET /api/auth` (`claude auth status`): `Claude: Pro ✓` when it is a subscription, or a red
+`API key — runs disabled` otherwise.
 
 1. **Dashboard** (`/`)
    - Tiles: tasks per status, waiting on me (`human_review`), escalated, running now, done
@@ -29,8 +33,8 @@ every 3 s. Every page header shows the login runs will use, from `claude auth st
    - "Take over in terminal" command.
    - A link to Review.
 5. **Code review** (`/tasks/{id}/review`): GitHub-style (wireframes below).
-   - Round selector, defaulting to latest. The diff is rendered on the server as a table
-     with one row per line and anchor `path:side:line`, and highlight.js colors it.
+   - Round selector, defaulting to latest. The diff is a table built from the backend's diff
+     rows, with one row per line and anchor `path:side:line`, and highlight.js colors it.
    - Clicking a line number opens an inline comment form.
    - **Approve** and **Request changes** are enabled only in `review`. A summary box is
      required for Request changes.
@@ -39,6 +43,13 @@ every 3 s. Every page header shows the login runs will use, from `claude auth st
    - The landing view renders `README.md`.
    - Clicking a file opens a highlighted view with line numbers. Binary files and files
      over 1 MB show "not shown". The header shows the current branch.
+7. **fctl reference** (`/docs/fctl`)
+   - Linked from every page header. A table of contents is built from its headings.
+   - One anchored section per §7.2 command: synopsis, arguments and flags, stdin, output,
+     exit codes and errors, who calls it (me, a skill, or which agent), and an example.
+   - Install (`uv tool install`, `fctl setup`), `FCTL_URL` and `FCTL_HOME`, and using
+     `fctl` with Docker (§4.6).
+   - Its content comes from `GET /api/docs/fctl` (§6.4).
 
 ### 8.1 Board
 ```

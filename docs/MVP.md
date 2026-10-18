@@ -66,11 +66,23 @@ and what is waiting on me.
 ## 3. User flows
 
 ### 3.0 One-time install
+The app runs in Docker (§4.6). In the repo:
+```
+cp compose.override.example.yaml compose.override.yaml   # then edit the project roots and uid:gid
+docker compose up --build                                 # the app, from now on
+docker compose exec backend claude login                  # once, in a second terminal
+```
+The app opens at `http://127.0.0.1:3000`. `fctl` also goes on the host:
 ```
 uv tool install ~/personalProjects/claude-factories   # puts `fctl` on PATH
 fctl setup     # writes ~/.claude/skills/factory-connect and ~/.claude/skills/factory-submit
-fctl serve     # the one command: app on http://127.0.0.1:4545, data in ~/.claude-factories/
 ```
+The `/factory-connect` and `/factory-submit` skills run `fctl` on the host against the
+backend on `127.0.0.1:4545`.
+
+Without Docker, run `fctl serve` (backend on 127.0.0.1:4545, data in `~/.claude-factories/`)
+plus the frontend server: `npm --prefix frontend ci && npm --prefix frontend run build &&
+node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run it this way.
 
 ### 3.1 Connect a project
 1. In the repo, in my Claude Code session: `/factory-connect personal`
@@ -155,10 +167,15 @@ Review from the current working tree. The full example is in §7.4.
 
 ```
      Browser                         My Claude Code terminal
-        │ HTML + htmx (poll 3s)            │ /factory-connect, /factory-submit → fctl
+        │ fetch JSON (poll 3s)             │ /factory-connect, /factory-submit → fctl
+        ▼                                  │
+┌─ frontend/server.js (127.0.0.1:3000) ─┐  │
+│ built SPA (dist/)    /api/* proxy     │  │
+└───────┬───────────────────────────────┘  │
+        │ /api/* (HTTP)                    │ (HTTP)
         ▼                                  ▼
-┌──────────────────────── fctl serve  (127.0.0.1:4545, one process) ───────────────────────┐
-│  HTML pages   JSON API   run manager   template writer   git reader (tree, file, worktree) │
+┌─────────────────────────── fctl serve  (127.0.0.1:4545, backend) ─────────────────────────┐
+│  JSON API   run manager   template writer   git reader (tree, file, worktree)             │
 └────┬──────────────▲──────────┬────────────────┬──────────────────────┬────────────────────┘
      │ sqlite3      │ fctl     │ spawn / stop   │ write once           │ git subprocess
      ▼              │ (HTTP)   ▼                ▼                      ▼
@@ -170,8 +187,9 @@ Review from the current working tree. The full example is in §7.4.
                 └──────────────────────────────────┘
 ```
 
-- **Browser ↔ app.** The pages are rendered on the server. htmx swaps in fragments, and the
-  board, task, and run-log fragments poll every 3 s.
+- **Browser → frontend → backend.** The browser loads the SPA from the frontend server. The
+  SPA fetches JSON through the frontend's `/api` proxy, which forwards it to `fctl serve`.
+  The board, task, and run-log views poll every 3 s.
 - **App → Claude Code.** The app spawns a subprocess. stdout (`stream-json`) goes to
   `runs/<run-id>.jsonl`, and on exit the app reads the final `result` event for status,
   and `session_id`.
@@ -183,16 +201,31 @@ Review from the current working tree. The full example is in §7.4.
 
 ### 4.2 Stack
 Python 3.12 with FastAPI and uvicorn. Storage is stdlib `sqlite3`, with no ORM and one
-`schema.sql` that runs at startup. Pages use Jinja2 templates and htmx. markdown-it-py
-renders markdown with raw HTML turned off, and highlight.js (vendored) highlights code.
+`schema.sql` that runs at startup. markdown-it-py renders markdown with raw HTML turned off.
 The package is built with uv and has 4 runtime dependencies.
 
+The frontend lives in `frontend/`: a Vite + React SPA in plain JSX, styled with Tailwind v4
+and routed with react-router. highlight.js, installed from npm, highlights code. Tests run on
+vitest with @testing-library/react and jsdom. `frontend/server.js` serves the built SPA and
+proxies `/api` to the backend. It runs on `node:http` with no extra dependencies. The
+frontend needs Node 22 and npm.
+
 Why this stack: the app is mostly subprocess, git, SQLite, and text handling, which is
-boring and well supported in Python. Pages are rendered on the server, so there is no
-frontend build and no Node toolchain to maintain. FastAPI validates requests and serves
-`/docs` for free, which helps when writing agent prompts. SQLite fits one user and one
-writer process, and it is one file to back up. The `fctl` CLI ships in the same package but
-imports only the stdlib, so agents' calls start fast.
+boring and well supported in Python. FastAPI validates requests and serves `/docs` for free,
+which helps when writing agent prompts. SQLite fits one user and one writer process, and it
+is one file to back up. The `fctl` CLI ships in the same package but imports only the
+stdlib, so agents' calls start fast.
+
+Why this frontend:
+- The pages are interactive: drag and drop with inline 409s, the review page's round
+  selector, deep-linkable line anchors, inline comment forms, and the run-log tail. React
+  components hold that state more simply than htmx fragments plus per-page scripts.
+- Vite gives a fast dev server and a static build. Plain JSX skips a TypeScript toolchain.
+- Tailwind v4 keeps styles next to the markup, light/dark included.
+- highlight.js from npm replaces a vendored copy.
+- A dependency-free `node:http` server serves `dist/` and proxies `/api`, so the browser
+  talks to one origin and the backend stays a JSON API.
+- Node 22 is an LTS line, and npm ships with Node, so there is no extra package manager.
 
 ### 4.3 Decisions
 
@@ -279,15 +312,45 @@ claude -p "/factory 12" \
 
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.
-- The server binds `127.0.0.1` only.
+- Both servers, `fctl serve` and the frontend server, bind `127.0.0.1` by default.
+- Docker: inside their containers both bind `0.0.0.0`. `compose.yaml` publishes no ports,
+  and `compose.override.yaml` publishes them only on `127.0.0.1` (§4.6).
 - Every mutating request must carry `X-Requested-By: fctl`, and the `Host` must be
   `127.0.0.1` or `localhost`. That blocks CSRF from web pages and DNS rebinding. `fctl` and
-  htmx both send the header.
+  the SPA's fetch wrapper both send the header.
+- The frontend server (`frontend/server.js`) applies its own Host check: `127.0.0.1` or
+  `localhost`, else `403`. It proxies `/api/*` to `FCTL_API_URL` with `Host: 127.0.0.1`, and
+  passes the browser's `X-Requested-By` through without adding it. This follows the CSRF
+  rule above: the header has to come from the page's own code.
+- The frontend server serves files only inside `dist/`, falling back to `index.html`.
 - Markdown (READMEs, agent output) is rendered with raw HTML off. The code viewer escapes
   everything.
+- The SPA inserts HTML only from the backend's `*_html` fields and highlight.js output.
+  Everything else renders as text, because React escapes it.
 - The code page resolves paths inside the project root only: no `..`, and no symlinks that
   point outside it.
 - The server rejects patches over 5 MB with `413`.
+
+### 4.6 Containers
+`docker compose up` runs the app (§3.0).
+- **compose.yaml** has two services. `backend` runs `fctl serve --host 0.0.0.0` with
+  `FCTL_HOME` on a named volume. `frontend` runs `node server.js` with `HOST=0.0.0.0` and
+  `FCTL_API_URL=http://backend:4545`. Both have healthchecks. compose.yaml publishes no
+  ports.
+- **Override.** `compose.override.example.yaml` is copied to `compose.override.yaml`, which
+  is gitignored. It publishes `127.0.0.1:3000:3000` and `127.0.0.1:4545:4545`, so `fctl` on
+  the host keeps using 4545.
+- **Mounts.** The override mounts my project roots at the same absolute path, because
+  projects store host paths from `fctl connect`. The backend runs as my uid:gid, so worktree
+  files stay mine and git doesn't refuse them with "dubious ownership".
+- **Login.** Runs need a one-time `docker compose exec backend claude login`, and the
+  container's `~/.claude` sits on a named volume so the login survives restarts. My host
+  login can't be reused: macOS keeps it in the Keychain, which the container can't read.
+  §4.3's env stripping and auth check are unchanged.
+- **Image.** The backend image has git, uv, node, and the `claude` CLI. Anything else a
+  project's test command needs goes in a custom image, set in compose.override.yaml.
+- **Takeover.** The session lives in the container, so §4.4's takeover command becomes
+  `docker compose exec -w <worktree> backend claude --resume <session-id>`.
 
 ---
 

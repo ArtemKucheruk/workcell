@@ -14,17 +14,22 @@ beyond 127.0.0.1, or `~/.claude*`.
 
 Walk the web parts of the flows in a real browser (`playwright-cli`, headless):
 1. Pick a free port P (`python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])'`)
-   and a temp dir T. Start the app in the background: `cd W && FCTL_HOME=T/home uv run fctl serve --port P &`.
+   and a temp dir T. Start the backend in the background: `cd W && FCTL_HOME=T/home uv run fctl serve --port P &`.
    Point `fctl` at it with `FCTL_URL=http://127.0.0.1:P`.
+   If W has `frontend/`, pick a second free port Q and start the frontend server too:
+   `cd W/frontend && HOST=127.0.0.1 PORT=Q FCTL_API_URL=http://127.0.0.1:P node server.js &`.
+   Then the app is U = `http://127.0.0.1:Q/`; without `frontend/`, U = `http://127.0.0.1:P/`.
+   Never install or build: the builder left `node_modules/` and `dist/` in W.
 2. Drive the browser from T, never from W: it writes `.playwright-cli/` into the current dir.
-   Always pass `-s=<job-id>-ux`. E.g. `cd T && playwright-cli -s=<job-id>-ux open http://127.0.0.1:P/`,
+   Always pass `-s=<job-id>-ux`. E.g. `cd T && playwright-cli -s=<job-id>-ux open U`,
    then `snapshot`, `click <ref>`, `fill <ref> <text>`, `screenshot --filename=T/<step>.png`,
    `console`. Read screenshots where the snapshot isn't enough.
-3. Finish with `playwright-cli -s=<job-id>-ux close` and kill the server.
+3. Finish with `playwright-cli -s=<job-id>-ux close` and kill both servers.
 
 Check what a user sees:
 - The §3 flows work in the order the docs give, with no extra steps, prompts, or flags,
-  in the terminal and in the browser (clicks land, htmx swaps show the result, no dead ends).
+  in the terminal and in the browser (clicks land, each action's result shows on the page,
+  no dead ends).
 - `fctl` output matches the docs' examples, e.g. `Connected api-server (personal) → …` and
   `Review #17: 3 files, +38 −2 → …`.
 - Errors say what went wrong and what to do next, go to stderr, and exit non-zero. Success

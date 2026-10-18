@@ -26,7 +26,7 @@ Write only J/spec.md:
 
 ## Acceptance criteria
 - [ ] AC1: <behavior> → <expected result: status code, output, row, page content>
-Each one testable by `uv run pytest -q`, one behavior each.
+Each one testable by `uv run pytest -q` or `npm --prefix frontend test`, one behavior each.
 
 ## Files
 Files to create or change.
