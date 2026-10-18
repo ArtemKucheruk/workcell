@@ -9,6 +9,9 @@ and the templates, styles, and scripts in your cwd (the worktree), with Read, Gr
 Use Bash only for `fctl`, `git status`, and `git diff`. Round n > 1: check that your findings
 on the round before (in `fctl show <id>`) are fixed.
 
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
 Check each page or screen the task adds or changes:
 - Layout, labels, and content match the spec and the design docs.
 - Empty states (nothing yet) and error states (unknown id, failed action) are designed, not

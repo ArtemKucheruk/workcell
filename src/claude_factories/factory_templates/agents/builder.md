@@ -14,6 +14,9 @@ Read:
 - Rework: `fctl show <id> --feedback` holds my summary and line comments. They win over the
   reviewers.
 
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
 Do:
 1. Implement the spec in your cwd. Read the code around it first and follow its conventions.
 2. One test per acceptance criterion. Run the test command until it passes.

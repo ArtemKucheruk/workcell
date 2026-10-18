@@ -1,8 +1,11 @@
-"""Projects: connect, find by path, and move to another workspace (docs/data-model-and-api.md §6.1)."""
+"""Projects: connect, find by path, move to another workspace, and the project context
+(docs/data-model-and-api.md §6.1)."""
 
+from .. import config
 from ..adapters.git import Git
-from ..domain.errors import NotFound
-from ..dto.projects import ConnectBody, ConnectOut, ProjectOut
+from ..domain.errors import NotFound, TooLarge
+from ..dto.projects import ConnectBody, ConnectOut, ContextOut, ProjectOut
+from ..lib.markdown import render
 from ..repositories.projects import ProjectsRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_state
@@ -32,3 +35,25 @@ def find_project(projects: ProjectsRepo, git: Git, path: str) -> ProjectOut:
 def move_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, project_id: int, workspace_id: int) -> None:
     if not workspaces.exists(workspace_id) or not projects.move(project_id, workspace_id):
         raise NotFound()
+
+
+def context_out(context_md: str) -> ContextOut:
+    """033 Q3: the cap travels with the context, so the SPA doesn't repeat it."""
+    return ContextOut(context_md=context_md, context_html=render(context_md), bytes=len(context_md.encode()),
+                      max_bytes=config.MAX_CONTEXT)
+
+
+def get_context(projects: ProjectsRepo, project_id: int) -> ContextOut:
+    context_md = projects.context(project_id)
+    if context_md is None:
+        raise NotFound(f"Project #{project_id} not found")
+    return context_out(context_md)
+
+
+def put_context(projects: ProjectsRepo, project_id: int, context_md: str) -> ContextOut:
+    """033 Q4: the cap counts UTF-8 bytes, as MAX_PATCH does; exactly MAX_CONTEXT passes."""
+    if len(context_md.encode()) > config.MAX_CONTEXT:
+        raise TooLarge("context over 16 KB")
+    if not projects.set_context(project_id, context_md):
+        raise NotFound(f"Project #{project_id} not found")
+    return context_out(context_md)

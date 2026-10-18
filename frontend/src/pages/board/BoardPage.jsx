@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
-import { createFactory, moveProject } from '../../api/projects.js'
+import { createFactory, moveProject, projectContext, saveProjectContext } from '../../api/projects.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, moveTask } from '../../api/tasks.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
@@ -243,6 +243,85 @@ function MoveProject({ project, workspaces, onDone }) {
   )
 }
 
+/**
+ * 033 Q6: the project context editor, collapsed. It loads once, when first opened, so the board's poll never
+ * touches it; the size counts the draft's UTF-8 bytes against the API's cap. No preview yet (Q7).
+ */
+function ProjectContext({ projectId }) {
+  const [maxBytes, setMaxBytes] = useState(null) // null until loaded
+  const [draft, setDraft] = useState('')
+  const [bytes, setBytes] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function load(event) {
+    if (!event.currentTarget.open || maxBytes != null || loading) return
+    setLoading(true)
+    try {
+      const context = await projectContext(projectId)
+      setDraft(context.context_md)
+      setBytes(context.bytes)
+      setMaxBytes(context.max_bytes)
+      setError(null)
+    } catch (err) {
+      setError(err) // closing and reopening tries again
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function save(event) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      setBytes((await saveProjectContext(projectId, draft)).bytes)
+      setError(null)
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const over = maxBytes != null && bytes > maxBytes
+  return (
+    <details onToggle={load} className="mt-8">
+      <summary className="cursor-pointer font-medium">Project context</summary>
+      <div className="mt-2 grid gap-2">
+        <p className={`text-sm ${muted}`}>
+          Stack and conventions. Agents read it at the top of <code>fctl show</code>.
+        </p>
+        {loading && <p className={muted}>Loading…</p>}
+        {maxBytes != null && (
+          <form onSubmit={save} className="grid gap-2">
+            <textarea
+              aria-label="Project context"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value)
+                setBytes(new TextEncoder().encode(event.target.value).length)
+              }}
+              rows={12}
+              placeholder="Markdown, e.g. # Stack"
+              className={`${field} font-mono text-sm`}
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <button disabled={busy || over} className={button}>
+                Save
+              </button>
+              <span className={`text-sm tabular-nums ${over ? 'font-semibold text-red-700 dark:text-red-400' : muted}`}>
+                {`${bytes} / ${maxBytes} bytes${over ? ' · over the limit' : ''}`}
+              </span>
+            </div>
+          </form>
+        )}
+        {error && <ErrorMessage error={error} />}
+      </div>
+    </details>
+  )
+}
+
 /** docs/ui.md §8 item 3, §8.1. */
 export function BoardPage() {
   const { id } = useParams()
@@ -374,6 +453,8 @@ export function BoardPage() {
           )
         })}
       </div>
+      {/* another project's draft never carries over; prefixed, since a bare id can equal Move's workspace_id key */}
+      <ProjectContext key={`context-${project.id}`} projectId={project.id} />
       <MoveProject key={project.workspace_id} project={project} workspaces={page.workspaces} onDone={refresh} />
     </>
   )

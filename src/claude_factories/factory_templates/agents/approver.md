@@ -11,6 +11,9 @@ decisions, and my feedback if I left any. Read the latest round's patch with `fc
 and the repo's docs the spec relies on, with Read, Grep, and Glob. Use Bash only for `fctl`,
 `git status`, and `git diff`.
 
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
 ESCALATE if any of these hold:
 - A verdict on the latest round is still CHANGES (the round cap was hit).
 - Tests fail or didn't run (the build notes' test output, the code review).

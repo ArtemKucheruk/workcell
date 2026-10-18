@@ -1,10 +1,11 @@
-"""docs/data-model-and-api.md §6.1: connect a project, find one by path, and move one to another workspace."""
+"""docs/data-model-and-api.md §6.1: connect a project, find one by path, move one to another workspace, and
+get or put its context."""
 
 import os
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..dto.projects import ConnectBody, ConnectOut, MoveBody, MoveOut, ProjectOut
+from ..dto.projects import ConnectBody, ConnectOut, ContextBody, ContextOut, MoveBody, MoveOut, ProjectOut
 from ..handlers import projects as handler
 from ..server.deps import GitAdapter, Projects, Workspaces
 
@@ -36,3 +37,13 @@ def move_project(project_id: int, body: MoveBody, workspaces: Workspaces, projec
     """404 if either id is unknown, before any write."""
     handler.move_project(workspaces, projects, project_id, body.workspace_id)
     return MoveOut(id=project_id, workspace_id=body.workspace_id)
+
+
+@router.get("/api/projects/{project_id}/context")
+def get_context(project_id: int, projects: Projects) -> ContextOut:
+    return handler.get_context(projects, project_id)
+
+
+@router.put("/api/projects/{project_id}/context")
+def put_context(project_id: int, body: ContextBody, projects: Projects) -> ContextOut:
+    return handler.put_context(projects, project_id, body.context_md)

@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS projects (
   default_branch TEXT NOT NULL,           -- worktrees branch from here
   test_cmd TEXT,                          -- used in templates and the run allowlist
   factory_version INTEGER,                -- NULL = factory never written
-  created_at TEXT NOT NULL);
+  created_at TEXT NOT NULL,
+  context_md TEXT NOT NULL DEFAULT '');   -- stack and conventions, atop fctl show; db.init() adds it to old DBs
 
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12

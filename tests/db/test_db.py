@@ -79,3 +79,36 @@ def test_foreign_keys_on():  # AC14
             conn.execute(
                 "INSERT INTO projects (workspace_id, name, path, default_branch, created_at)"
                 " VALUES (999, 'p', '/p', 'main', ?)", (NOW,))
+
+
+BEFORE_033 = f"""
+CREATE TABLE workspaces (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);
+CREATE TABLE projects (
+  id INTEGER PRIMARY KEY,
+  workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+  name TEXT NOT NULL,
+  path TEXT NOT NULL UNIQUE,
+  remote_url TEXT,
+  default_branch TEXT NOT NULL,
+  test_cmd TEXT,
+  factory_version INTEGER,
+  created_at TEXT NOT NULL);
+INSERT INTO workspaces VALUES (1, 'w', '{NOW}');
+INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at) VALUES (1, 1, 'p', '/p', 'main', '{NOW}');
+"""
+
+
+def test_startup_adds_context_column():  # 033 AC2
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    start_app()
+    with closing(db.connect()) as conn:
+        column = [c for c in conn.execute("PRAGMA table_info(projects)") if c[1] == "context_md"]
+        assert [(name, kind, notnull, default) for _, name, kind, notnull, default, _ in column] == [
+            ("context_md", "TEXT", 1, "''")]
+        assert conn.execute("SELECT id, name, context_md FROM projects").fetchall() == [(1, "p", "")]
+    start_app()
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT id, context_md FROM projects").fetchall() == [(1, "")]

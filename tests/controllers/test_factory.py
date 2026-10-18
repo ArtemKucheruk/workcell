@@ -249,3 +249,14 @@ def test_review_code_checks_layout(client, repo):  # 034 AC3
     text = rendered(client, repo)[".claude/agents/review-code.md"]
     assert "layout and import rules" in text
     assert "§" not in text and "FACTORY.md" not in text
+
+
+PROJECT_CONTEXT = ("Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it; "
+                   "don't re-read docs for them. No such section → take them from the repo's docs and code.")
+
+
+def test_agents_take_stack_from_project_context(client, repo):  # 033 AC17
+    files = rendered(client, repo)
+    for agent in AGENTS:
+        text = " ".join(files[f".claude/agents/{agent}.md"].split())  # the paragraph wraps
+        assert PROJECT_CONTEXT in text, agent

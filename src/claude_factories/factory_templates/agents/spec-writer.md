@@ -11,6 +11,9 @@ Read:
 - `fctl show <id>`: the title and description are the request.
 - The repo's own docs, if any (README, docs/, design notes), and the code in your cwd.
 
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
 Read files with Read, Grep, and Glob. Use Bash only for `fctl`.
 
 Post the spec with `fctl spec <id>`:

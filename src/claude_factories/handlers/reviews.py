@@ -130,13 +130,17 @@ def rework(tx, git: Git, claude: Claude, task_id: int, body: ChangesBody, base_u
     return ChangesOut(status="in_progress", stage="rework", run_id=run_id)
 
 
-def context_md(reviews: ReviewsRepo, task, found: list, feedback=None) -> str:
+def context_md(reviews: ReviewsRepo, task, found: list, feedback=None, project_md: str | None = None) -> str:
     """006 Q5, Q6: the task as markdown blocks joined by one blank line. A block is a heading, then its
-    body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is."""
+    body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is.
+    033 Q2: a non-blank `project_md` comes first, as ## Project context."""
     blocks = []
 
     def add(heading: str, body: str | None = None):
         blocks.append(heading + (f"\n{body.rstrip()}" if body and body.strip() else ""))
+
+    if project_md and project_md.strip():
+        add("## Project context", project_md)
 
     def add_comments(round_id: int, only_me: bool):
         comments = reviews.comments(round_id, only_me)
@@ -187,4 +191,6 @@ def context(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id:
         found = [find_round(tasks, rounds, task_id, n)]
     else:
         found = rounds.all(task_id)
-    return context_md(reviews, task, found, mine)
+    # 033 Q2: only the full view carries the project context; --round and --feedback calls repeat often
+    full = n is None and not feedback
+    return context_md(reviews, task, found, mine, task["context_md"] if full else None)

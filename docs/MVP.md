@@ -323,13 +323,13 @@ Single user and no auth still need these, because the API can start processes th
   passes the browser's `X-Requested-By` through without adding it. This follows the CSRF
   rule above: the header has to come from the page's own code.
 - The frontend server serves files only inside `dist/`, falling back to `index.html`.
-- Markdown (READMEs, agent output) is rendered with raw HTML off. The code viewer escapes
-  everything.
+- Markdown (READMEs, agent output, project context) is rendered with raw HTML off. The code
+  viewer escapes everything.
 - The SPA inserts HTML only from the backend's `*_html` fields and highlight.js output.
   Everything else renders as text, because React escapes it.
 - The code page resolves paths inside the project root only: no `..`, and no symlinks that
   point outside it.
-- The server rejects patches over 5 MB with `413`.
+- The server rejects patches over 5 MB and project context over 16 KB with `413`.
 
 ### 4.6 Containers
 `docker compose up` runs the app (§3.0).
@@ -369,7 +369,7 @@ src/claude_factories/
 ├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge / Failed
 ├── lib/            pure parsers and renderers: patch split, diff rows, run log, markdown, slug
 ├── db/             connection, now(), and schema.sql, applied at startup
-├── config.py       env and limits: data_dir(), MAX_PATCH, MAX_VIEW
+├── config.py       env and limits: data_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT
 └── cli/            fctl, stdlib only (§4.2)
 ```
 

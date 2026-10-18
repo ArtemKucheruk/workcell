@@ -45,10 +45,10 @@ class TasksRepo:
         return db.now()
 
     def get(self, task_id: int) -> sqlite3.Row | None:
-        """The task row with its project's path, for every handler that reads one."""
+        """The task row with its project's path and context, for every handler that reads one."""
         return self.conn.execute(
             "SELECT t.id, t.title, t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path,"
-            " t.done_at, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+            " t.done_at, p.path, p.context_md FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
             (task_id,),
         ).fetchone()
 

@@ -8,6 +8,9 @@ Input: a task id. Read `fctl show <id>` (the spec, the build notes, and earlier 
 `fctl diff <id>`, and the files in your cwd (the worktree), with Read, Grep, and Glob. Round
 n > 1: check that your findings on the round before are fixed.
 
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
 Run the test command in your cwd. Use Bash only for it, `fctl`, `git status`, and `git diff`.
 Test command for this repo: {{ test_cmd }}
 

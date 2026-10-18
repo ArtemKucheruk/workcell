@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from .commands.agent import DECISIONS, REVIEWERS, STAGES, comment, decide, round_status, show, spec, stage, verdict
-from .commands.projects import connect
+from .commands.projects import connect, context, context_set
 from .commands.review import approve, rework
 from .commands.runs import run
 from .commands.submit import diff, submit
@@ -49,6 +49,11 @@ def main(argv=None):
     p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
     p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
     p.set_defaults(func=connect)
+    p = commands.add_parser("context", help="print the current repo's project context; `set` saves it")
+    context_commands = p.add_subparsers(dest="context_command")
+    p.set_defaults(func=context)
+    p = context_commands.add_parser("set", help="save the current repo's project context (stdin)")
+    p.set_defaults(func=context_set)
     p = commands.add_parser("task", help="manage tasks")
     task_commands = p.add_subparsers(dest="task_command", required=True)
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
