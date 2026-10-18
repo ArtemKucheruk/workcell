@@ -244,7 +244,7 @@ def connect_project(body: ConnectBody, request: Request):
 def find_project(path: str):
     found = query("SELECT id, name, path, default_branch FROM projects WHERE path = ?", (path,))
     if not found:
-        raise HTTPException(404, f"no project at {path}")
+        raise HTTPException(404, f"no project at {path}; in that repo, run fctl connect --workspace <name>")
     p = found[0]
     factory = factory_state(p["path"], p["default_branch"])
     return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
@@ -550,14 +550,19 @@ def run_task(task_id: int, request: Request):
     task = one_or_404(
         "SELECT t.id, t.title, t.status, t.worktree_path, p.path, p.default_branch, p.test_cmd"
         " FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
-        (task_id,),
+        (task_id,), f"no task #{task_id}",
     )
     with closing(db.connect()) as conn:
         refuse_if_running(conn)
     if task["status"] in ("review", "done"):
         raise HTTPException(409, f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
-    if factory_state(task["path"], task["default_branch"]) != "ready":
-        raise HTTPException(409, f"factory isn't committed on {task['default_branch']}")
+    branch = task["default_branch"]
+    state = factory_state(task["path"], branch)  # the 409s name the next step (015 ux review, MVP §3.2)
+    if state == "uncommitted":
+        raise HTTPException(409, f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}")
+    if state == "none":
+        raise HTTPException(409, f"factory isn't committed on {branch}: "
+                                 f"Create factory on the project board, then commit it on {branch}")
     wt, env = worktree(task), run_env(request)
     if not subscription_auth(wt, env):
         raise HTTPException(409, "not on subscription auth")
@@ -1376,6 +1381,45 @@ def file_tree(files: list[dict]) -> dict:
     return root
 
 
+PAGE_TASK = (  # the task row both task pages show; `path` is for Review's commit hint
+    "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
+    " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?"
+)
+
+
+def posted_verdicts(task_id: int) -> dict[int, dict]:
+    """007 Q5, Q6: round n → {reviewer: verdict row}, for the bodies."""
+    posted: dict[int, dict] = {}
+    for v in query(
+        "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
+        " WHERE r.task_id = ?", (task_id,),
+    ):
+        posted.setdefault(v["n"], {})[v["reviewer"]] = v
+    return posted
+
+
+def approver_decision(task_id: int) -> sqlite3.Row | None:
+    """007 Q7: only the approver's latest decision, by id."""
+    found = query(
+        "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
+        " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
+    )
+    return found[0] if found else None
+
+
+@app.get("/tasks/{task_id}", response_class=HTMLResponse)
+def task_page(request: Request, task_id: int):
+    """docs/ui.md §8 item 4 without run controls (014): header, description, spec, rounds with build
+    notes and verdict popovers, the approver's latest decision, and the status history."""
+    task = one_or_404(PAGE_TASK, (task_id,), f"Task #{task_id} not found")
+    return templates.TemplateResponse(request, "task.html", {
+        "task": task, "rounds": round_summaries(task_id), "posted": posted_verdicts(task_id),
+        "build": dict(query("SELECT n, build_md FROM rounds WHERE task_id = ?", (task_id,))),
+        "reviewers": REVIEWERS, "approver": approver_decision(task_id),
+        "history": [e for e in query(TIMELINE, {"task": task_id}) if e["kind"] == 0],  # Q8: events only
+    })
+
+
 @app.get("/tasks/{task_id}/review", response_class=HTMLResponse)
 def review_page(request: Request, task_id: int, n: str = Query("latest", alias="round"), tab: str = "",
                 path: str = "", side: str = "", line: str = ""):
@@ -1385,30 +1429,16 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
 
 
 def review_context(task_id: int, n: str, tab: str, path: str = "", side: str = "", line: str = "") -> dict:
-    task = one_or_404(
-        "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
-        " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
-        (task_id,), f"Task #{task_id} not found",
-    )
+    task = one_or_404(PAGE_TASK, (task_id,), f"Task #{task_id} not found")
     rounds = round_summaries(task_id)
     # AC11: with no rounds, `latest` is a page without a selector, not round_or_404's 404
     found = round_or_404(task_id, n) if rounds or n != "latest" else None
     picked = found["n"] if found else None
     tab = "files" if tab == "files" else "conversation"  # 008 Q4
     files = review_files(found["id"], (path, side, line)) if tab == "files" and found else []
-    posted: dict[int, dict] = {}  # round n → {reviewer: verdict row}, for the bodies (Q5, Q6)
-    for v in query(
-        "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
-        " WHERE r.task_id = ?", (task_id,),
-    ):
-        posted.setdefault(v["n"], {})[v["reviewer"]] = v
-    approver = query(  # Q7: only the approver's latest
-        "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
-        " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
-    )
     return {
         "task": task, "rounds": rounds, "selected": next((r for r in rounds if r["n"] == picked), None),
-        "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
+        "posted": posted_verdicts(task_id), "reviewers": REVIEWERS, "approver": approver_decision(task_id),
         "timeline": query(TIMELINE, {"task": task_id}),
         "tab": tab, "files": files, "tree": file_tree(files),
         # Q6: from the task row, so it survives a reload and also follows fctl approve or a drag to Done

@@ -12,6 +12,8 @@ NOTE = "Make the limit configurable via settings."
 WT = "/code/api/.claude/worktrees/12-rate-limit-login"
 BRANCH = "factory/12-rate-limit-login"
 PATCH = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"
+# 013 Q12: /code/api isn't a repo, so a factory task's rework spawn gets run_task's no-factory 409 (015 wording)
+NO_FACTORY = "factory isn't committed on main: Create factory on the project board, then commit it on main"
 
 
 def task_with_rounds(project_id, n=2, status="review", stage="human_review", **kw):
@@ -154,7 +156,7 @@ def test_request_changes(client, factory_task):  # AC10
     task, _ = factory_task
     r = rework(client, task)
     # 013 Q12: /code/api isn't a repo, so the rework spawn is refused after the move is recorded
-    assert (r.status_code, r.json()) == (409, {"detail": "factory isn't committed on main"})
+    assert (r.status_code, r.json()) == (409, {"detail": NO_FACTORY})
     status, stage, position, done_at, updated_at = row(task)
     assert (status, stage, position, done_at) == ("in_progress", "rework", 1.0, None)
     assert current(updated_at)
@@ -175,7 +177,7 @@ def test_request_changes_standalone(client, factory_task, standalone):  # AC12
     assert decisions(task) == [("me", "CHANGES_REQUESTED", r2, NOTE)]
     assert events(task) == [("me", "review", "in_progress", "rework")]
     r = rework(client, factory_task[0])  # 013: a factory task's spawn is tried, and refused here
-    assert (r.status_code, r.json()) == (409, {"detail": "factory isn't committed on main"})
+    assert (r.status_code, r.json()) == (409, {"detail": NO_FACTORY})
     assert sql("SELECT COUNT(*) FROM runs") == [(0,)]
 
 

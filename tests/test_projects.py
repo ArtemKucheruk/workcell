@@ -159,7 +159,7 @@ def test_find_project_keys(client):  # AC10
 
 def test_find_project_unknown(client):  # AC11
     r = client.get("/api/projects", params={"path": "/nope"})
-    assert (r.status_code, r.json()) == (404, {"detail": "no project at /nope"})
+    assert (r.status_code, r.json()) == (404, {"detail": "no project at /nope; in that repo, run fctl connect --workspace <name>"})
 
 
 def factory(client, path):
