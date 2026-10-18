@@ -31,24 +31,35 @@ TILES = {
     "waiting": "Waiting on me", "escalated": "Escalated", "running": "Running now",
     "done_week": "Done this week", "runs_week": "Runs this week",
 }
-LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": claude_login()'s answer}; the pages' only state
+LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": auth_status()'s answer}; the pages' only state
+
+
+def auth_status(claude: Claude) -> dict | None:
+    """MVP §4.3: `claude auth status`'s parsed claude.ai answer, or None, checked with the runs' stripped
+    env from the neutral data dir (014 Q1), cached 60 s (014 Q3) for the badge and /api/auth alike (020 Q3).
+    ponytail: no lock, so two cold requests may both run the check."""
+    now = monotonic()
+    if not LOGIN or now - LOGIN["at"] >= 60:
+        LOGIN.update(at=now, value=claude.auth_status(str(config.data_dir()), stripped_env()))
+    return LOGIN["value"]
 
 
 def claude_login(claude: Claude) -> tuple[str, bool]:
-    """docs/ui.md §8, MVP §4.3: the header's login and whether runs are allowed, checked with the runs'
-    stripped env from the neutral data dir (Q1), cached 60 s (Q3). Q2: the plan capitalized.
-    ponytail: no lock, so two cold renders may both run the check."""
-    now = monotonic()
-    if LOGIN and now - LOGIN["at"] < 60:
-        return LOGIN["value"]
-    info = claude.auth_status(str(config.data_dir()), stripped_env())
+    """docs/ui.md §8: the header's login and whether runs are allowed. 014 Q2: the plan capitalized."""
+    info = auth_status(claude)
     if info is None:
-        value = ("API key — runs disabled", False)
-    else:
-        plan = info.get("subscriptionType")
-        value = (f"Claude: {plan.capitalize() if isinstance(plan, str) and plan else 'subscription'} ✓", True)
-    LOGIN.update(at=now, value=value)
-    return value
+        return "API key — runs disabled", False
+    plan = info.get("subscriptionType")
+    return f"Claude: {plan.capitalize() if isinstance(plan, str) and plan else 'subscription'} ✓", True
+
+
+def auth(claude: Claude) -> dict:
+    """docs/data-model-and-api.md §6.4's /api/auth. 020 Q3: a non-claude.ai login's method is unknown, so null;
+    `plan` is the raw subscriptionType."""
+    info = auth_status(claude) or {}
+    plan = info.get("subscriptionType")
+    return {"auth_method": info.get("authMethod"), "plan": plan if isinstance(plan, str) else None,
+            "runs_enabled": bool(info)}
 
 
 def dashboard(tasks: TasksRepo, runs: RunsRepo, workspaces: WorkspacesRepo, show: str) -> dict:
