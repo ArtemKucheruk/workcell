@@ -147,10 +147,14 @@ What each one does:
   lists, never shell strings. It also checks env stripping and the subscription-only auth
   check (§4.3), and the allow/deny lists for runs (§4.4).
 - **ux** reviews the docs §3 flows and the CLI's ergonomics: `fctl` output, error messages,
-  and exit codes. If the job changes nothing a user sees, it writes `VERDICT: PASS` with
-  "nothing user-facing".
+  and exit codes. It clicks through the web parts in a real browser. If the job changes
+  nothing a user sees, it writes `VERDICT: PASS` with "nothing user-facing".
 - **ui** reviews pages against docs §8 and its wireframes, including empty and error states
-  and light/dark. If the job has no UI, it writes `VERDICT: PASS` with "no UI in this job".
+  and light/dark, by screenshotting them in a real browser. If the job has no UI, it writes
+  `VERDICT: PASS` with "no UI in this job".
+- ux and ui run the job's app with `fctl serve --port <free port>` and drive headless Chrome
+  with `playwright-cli` (`npm install -g @playwright/cli`), one `-s=<job-id>-<reviewer>`
+  session each, from a temp dir so its output stays out of the worktree.
   If the diff touches no `templates/` or `static/` file, the orchestrator skips it and
   writes that PASS file itself.
 - **code** checks the stack and conventions above, that every acceptance criterion has a

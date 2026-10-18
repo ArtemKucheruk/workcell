@@ -1,0 +1,407 @@
+diff --git a/src/claude_factories/cli.py b/src/claude_factories/cli.py
+index f1f8a8c..3b4dda1 100644
+--- a/src/claude_factories/cli.py
++++ b/src/claude_factories/cli.py
+@@ -9,12 +9,14 @@ import tempfile
+ import urllib.error
+ import urllib.parse
+ import urllib.request
++from pathlib import Path
+ 
+ DEFAULT_URL = "http://127.0.0.1:4545"
+ # The app's values, repeated here for argparse `choices`: this module must not import app.py.
+ REVIEWERS = ("security", "ux", "ui", "code")
+ STAGES = ("spec", "build", "agent_review", "approval", "rework", "human_review", "escalated")
+ DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; mine go through `fctl approve` and `fctl rework`
++SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
+ 
+ 
+ def _fail(message: str):
+@@ -81,6 +83,20 @@ def default_branch(main: str) -> str:
+     return branch
+ 
+ 
++def setup(args):
++    """docs/claude-code.md §7.1: install the global skills. fctl owns SKILL.md and overwrites it;
++    other files in those folders stay (Q2). No HTTP. Stops at the first failed write (Q4)."""
++    for name in SKILLS:
++        content = (Path(__file__).parent / "global_skills" / name / "SKILL.md").read_bytes()
++        dest = Path.home() / ".claude" / "skills" / name / "SKILL.md"  # Q1: CLAUDE_CONFIG_DIR ignored
++        try:
++            dest.parent.mkdir(parents=True, exist_ok=True)
++            dest.write_bytes(content)
++        except OSError as e:
++            _fail(f"can't write {dest}: {e.strerror}")
++        print(f"Wrote {dest}")
++
++
+ def connect(args):
+     main = main_checkout()
+     body = {
+@@ -95,10 +111,35 @@ def connect(args):
+     print(f"Connected {body['name']} ({args.workspace.strip()}) → {project['url']}")
+ 
+ 
++def project_at(main: str) -> dict:
++    """The connected project whose main checkout is `main`; 404 `no project at …` if none."""
++    return api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
++
++
+ def task_add(args):
+-    project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main_checkout()}))
++    project = project_at(main_checkout())
+     task = api("POST", f"/api/projects/{project['id']}/tasks", {"title": args.title})
+     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}")
++    if args.run:  # Q11: a refused run leaves the task in Backlog, its Added line already printed
++        print_run(task["id"], api("POST", f"/api/tasks/{task['id']}/run")["run_id"])
++
++
++def print_run(task_id: int, run_id: int):
++    """Q9: the task page, where the run log shows."""
++    print(f"Run #{run_id} on #{task_id} → {base_url()}/tasks/{task_id}")
++
++
++def run(args):
++    """docs/claude-code.md §7.2: `fctl run <id>` needs no repo; `fctl run next` takes the top of the
++    current repo's Backlog (Q10)."""
++    if args.target == "next":
++        r = api("POST", f"/api/projects/{project_at(main_checkout())['id']}/run-next")
++        print_run(r["task_id"], r["run_id"])
++    elif args.target.isdecimal():
++        task_id = int(args.target)
++        print_run(task_id, api("POST", f"/api/tasks/{task_id}/run")["run_id"])
++    else:
++        args.usage_error(f"target must be a task id or next, not {args.target!r}")
+ 
+ 
+ def capture() -> tuple[str, str]:
+@@ -144,7 +185,7 @@ def submit(args):
+     base_sha, patch = capture()
+     text = stdin_text()
+     if args.new:
+-        project = api("GET", "/api/projects?" + urllib.parse.urlencode({"path": main}))
++        project = project_at(main)
+         body = {"title": args.title, "description_md": text, "submit": {"base_sha": base_sha, "patch": patch}}
+         r = api("POST", f"/api/projects/{project['id']}/tasks", body)
+         print(f"Review #{r['task_id']}: {summary(r)}")
+@@ -233,6 +274,8 @@ def main(argv=None):
+     p = commands.add_parser("serve", help="start the app on 127.0.0.1")
+     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
+     p.set_defaults(func=serve)
++    p = commands.add_parser("setup", help="write the /factory-connect and /factory-submit skills to ~/.claude")
++    p.set_defaults(func=setup)
+     p = commands.add_parser("connect", help="register the current git repo as a project")
+     p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
+     p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
+@@ -241,7 +284,11 @@ def main(argv=None):
+     task_commands = p.add_subparsers(dest="task_command", required=True)
+     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
+     p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
++    p.add_argument("--run", action="store_true", help="then start a factory run on it")
+     p.set_defaults(func=task_add)
++    p = commands.add_parser("run", help="start a factory run on a task, or on the top of this repo's Backlog")
++    p.add_argument("target", help='a task id, or "next"')
++    p.set_defaults(func=run, usage_error=p.error)
+     p = commands.add_parser("submit", help="send this tree's changes for review, as a new task or a round")
+     p.add_argument("id", nargs="?", type=int, help="the task to add a round to (stdin: build notes)")
+     p.add_argument("--new", action="store_true", help="create a task straight in Review (stdin: description)")
+diff --git a/src/claude_factories/global_skills/factory-connect/SKILL.md b/src/claude_factories/global_skills/factory-connect/SKILL.md
+new file mode 100644
+index 0000000..3d8790a
+--- /dev/null
++++ b/src/claude_factories/global_skills/factory-connect/SKILL.md
+@@ -0,0 +1,27 @@
++---
++name: factory-connect
++description: Connect the current git repo to Claude Factories as a project in a workspace. Use as "/factory-connect <workspace>". Finds the repo's test command, then runs fctl connect.
++---
++
++# /factory-connect $ARGUMENTS
++
++Connect this repo to Claude Factories in the workspace `$ARGUMENTS`. Edit no files and run no
++git command that writes.
++
++1. The workspace is `$ARGUMENTS`. If that's empty, ask me for the workspace name and wait.
++   Run nothing until I answer.
++2. Find the one command that runs the whole test suite from the repo root. Look in
++   pyproject.toml, package.json scripts, a Makefile, the CI config (e.g. `.github/workflows/`),
++   and the README. Prefer what CI runs, e.g. `uv run pytest -q`, `npm test`, or `make test`.
++   Found none → ask me. If I have none either, connect without `--test-cmd` and tell me that
++   Create factory will need one.
++3. From the repo, run:
++   ```
++   fctl connect --workspace "<workspace>" --test-cmd "<test command>"
++   ```
++   Quote both values for the shell.
++4. Show me the line fctl prints, `Connected <name> (<workspace>) → <url>`. Running it again
++   updates the project, e.g. with a new test command.
++
++`can't reach … — is "fctl serve" running?` → ask me to start `fctl serve`. Don't start it
++yourself.
+diff --git a/src/claude_factories/global_skills/factory-submit/SKILL.md b/src/claude_factories/global_skills/factory-submit/SKILL.md
+new file mode 100644
+index 0000000..348a22f
+--- /dev/null
++++ b/src/claude_factories/global_skills/factory-submit/SKILL.md
+@@ -0,0 +1,44 @@
++---
++name: factory-submit
++description: Send this working tree's changes to Claude Factories for review, as a new task straight in Review or as the next round of one already submitted. Use as "/factory-submit", or "/factory-submit <task-id>" for a new round.
++---
++
++# /factory-submit $ARGUMENTS
++
++Submit the changes in this working tree to Claude Factories for my review.
++
++Never stage, commit, or stash. fctl captures the tree, tracked and untracked files alike,
++through a temp index and leaves the real one untouched.
++
++1. Read the changes: `git status`, `git diff HEAD`, and every untracked file `git status`
++   lists. Untracked files are submitted too, unless .gitignore'd. Read this conversation for
++   why the change was made.
++2. New review or next round?
++   - `$ARGUMENTS` is a task id N, or earlier in this session fctl printed `Review #N` for this
++     same change → the next round of task N: step 4.
++   - Otherwise → a new review: step 3.
++3. New review. Write a short title, e.g. `Fix open redirect after login`, and a markdown
++   description: what changed, why, and which tests you ran with what result, e.g.
++   `pytest -q (48 passed)`. Ran none → say so. Pass the description in a quoted heredoc, so
++   the shell expands nothing in it:
++   ```
++   fctl submit --new --title "<title>" <<'EOF'
++   <description>
++   EOF
++   ```
++   Show me the `Review #N: …` line it prints.
++4. Next round of task N. Write build notes: what changed since the last round, why, and which
++   tests you ran with what result. Then run, with N as `<id>`:
++   ```
++   fctl submit <id> <<'EOF'
++   <build notes>
++   EOF
++   ```
++   Show me the `Round <n> of #<id>: …` line it prints.
++
++If fctl fails:
++- `404 no project at <path>` → this repo isn't connected. Suggest `/factory-connect <workspace>`,
++  then `/factory-submit` again.
++- `can't reach … — is "fctl serve" running?` → ask me to start `fctl serve`. Don't start it
++  yourself.
++- `HEAD has no commit yet` → tell me; the repo needs one commit first. Don't make it yourself.
+diff --git a/tests/conftest.py b/tests/conftest.py
+index aa25860..c33c286 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -11,9 +11,11 @@ from claude_factories.app import app
+ 
+ @pytest.fixture(autouse=True)
+ def isolated(tmp_path, monkeypatch):
+-    """Every test gets its own FCTL_HOME, a do-nothing fake `claude` first on PATH, and git
+-    without the user's config (Q17)."""
++    """Every test gets its own FCTL_HOME and HOME (so nothing touches the real ~/.claude), a
++    do-nothing fake `claude` first on PATH, and git without the user's config (Q17)."""
+     monkeypatch.setenv("FCTL_HOME", str(tmp_path / "fctl-home"))
++    (tmp_path / "home").mkdir()
++    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+     monkeypatch.delenv("FCTL_URL", raising=False)
+     bin_dir = tmp_path / "bin"
+     bin_dir.mkdir()
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 1091d33..2dfb6a1 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,6 +1,7 @@
+ import io
+ import json
+ import os
++import re
+ import socket
+ import subprocess
+ import sys
+@@ -757,3 +758,186 @@ def test_approve_refused(server, capsys):  # 009 AC26
+         cli.main(["approve", "12"])
+     assert e.value.code == 1
+     assert capsys.readouterr().err == "fctl: 409 #12 is not in review\n"
++
++
++# --- fctl setup (015) ----------------------------------------------------------------
++
++
++def skill(name) -> Path:
++    return Path(os.environ["HOME"]) / ".claude" / "skills" / name / "SKILL.md"
++
++
++def frontmatter(text) -> tuple[str, str]:
++    """A SKILL.md's (frontmatter, body); it must start with a `---` block."""
++    assert text.startswith("---\n")
++    front, body = text[4:].split("\n---\n", 1)
++    return front, body
++
++
++def test_setup_writes_skills(server):  # 015 AC1
++    assert not (Path(os.environ["HOME"]) / ".claude").exists()
++    cli.main(["setup"])
++    assert skill("factory-connect").is_file()
++    assert skill("factory-submit").is_file()
++
++
++def test_setup_output(server, capsys):  # 015 AC2
++    cli.main(["setup"])
++    assert capsys.readouterr().out == f"Wrote {skill('factory-connect')}\nWrote {skill('factory-submit')}\n"
++
++
++def test_setup_is_offline(server, monkeypatch):  # 015 AC3
++    cli.main(["setup"])
++    with socket.socket() as s:
++        s.bind(("127.0.0.1", 0))
++        port = s.getsockname()[1]
++    monkeypatch.setenv("FCTL_URL", f"http://127.0.0.1:{port}")  # bound then closed: nothing listens
++    cli.main(["setup"])  # returns: exit 0
++    assert server.requests == []
++
++
++def test_setup_connect_skill(server):  # 015 AC4
++    cli.main(["setup"])
++    front, body = frontmatter(skill("factory-connect").read_text())
++    assert "name: factory-connect" in front.splitlines()
++    assert re.search(r"^description: \S", front, re.M)
++    for needle in ("$ARGUMENTS", "fctl connect --workspace", "--test-cmd"):
++        assert needle in body
++
++
++def test_setup_submit_skill(server):  # 015 AC5
++    cli.main(["setup"])
++    front, body = frontmatter(skill("factory-submit").read_text())
++    assert "name: factory-submit" in front.splitlines()
++    assert re.search(r"^description: \S", front, re.M)
++    assert "fctl submit --new --title" in body
++    assert "fctl submit <id> <<'EOF'" in body
++    assert re.search(r"fctl submit --new --title .*<<'EOF'\n", body)
++
++
++def test_setup_overwrites_only_skill_md(server):  # 015 AC6
++    cli.main(["setup"])
++    first = skill("factory-connect").read_bytes()
++    skill("factory-connect").write_text("my edit\n")
++    notes = skill("factory-connect").with_name("notes.md")
++    notes.write_text("mine\n")
++    cli.main(["setup"])
++    assert skill("factory-connect").read_bytes() == first
++    assert notes.read_text() == "mine\n"
++
++
++def test_setup_cant_write(server, capsys):  # 015 AC7
++    skills = Path(os.environ["HOME"]) / ".claude" / "skills"
++    skills.parent.mkdir()
++    skills.write_text("not a dir\n")
++    with pytest.raises(SystemExit) as e:
++        cli.main(["setup"])
++    assert e.value.code == 1
++    err = capsys.readouterr().err
++    assert err.startswith(f"fctl: can't write {skill('factory-connect')}: ")
++    assert "Traceback" not in err
++
++
++# --- fctl run, task add --run (015) --------------------------------------------------
++
++RUN = {"run_id": 41, "session_id": "s", "worktree": ".claude/worktrees/12-x"}
++ADDED = {"id": 12, "status": "backlog"}
++
++
++def test_run_task(server, capsys):  # 015 AC8
++    server.reply = reply(RUN, 202)
++    cli.main(["run", "12"])
++    assert requests(server) == [("POST", "/api/tasks/12/run", None)]
++    assert capsys.readouterr().out == f"Run #41 on #12 → {os.environ['FCTL_URL']}/tasks/12\n"
++
++
++def test_run_task_outside_repo(server, tmp_path, monkeypatch):  # 015 AC9
++    nowhere = tmp_path / "nowhere"
++    nowhere.mkdir()
++    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
++    monkeypatch.chdir(nowhere)
++    server.reply = reply(RUN, 202)
++    cli.main(["run", "12"])
++    assert requests(server) == [("POST", "/api/tasks/12/run", None)]
++
++
++def test_run_next(server, repo, monkeypatch, capsys):  # 015 AC10
++    server.replies = [reply(PROJECT), reply({"task_id": 14, "run_id": 42}, 202)]
++    monkeypatch.chdir(repo)
++    cli.main(["run", "next"])
++    assert requests(server) == [
++        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None),
++        ("POST", "/api/projects/3/run-next", None),
++    ]
++    assert capsys.readouterr().out == f"Run #42 on #14 → {os.environ['FCTL_URL']}/tasks/14\n"
++
++
++def test_run_next_outside_repo(server, tmp_path, monkeypatch, capsys):  # 015 AC11
++    nowhere = tmp_path / "nowhere"
++    nowhere.mkdir()
++    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
++    monkeypatch.chdir(nowhere)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["run", "next"])
++    assert e.value.code == 1
++    assert capsys.readouterr().err == f"fctl: not inside a git repository: {os.getcwd()}\n"
++    assert server.requests == []
++
++
++def test_run_next_empty_backlog(server, repo, monkeypatch, capsys):  # 015 AC12
++    server.replies = [reply(PROJECT), reply({"detail": "backlog is empty"}, 404)]
++    monkeypatch.chdir(repo)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["run", "next"])
++    assert e.value.code == 1
++    assert capsys.readouterr().err == "fctl: 404 backlog is empty\n"
++
++
++def test_run_refused(server, capsys):  # 015 AC13
++    server.reply = reply({"detail": "run #41 active"}, 409)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["run", "12"])
++    assert e.value.code == 1
++    out, err = capsys.readouterr()
++    assert (out, err) == ("", "fctl: 409 run #41 active\n")
++
++
++@pytest.mark.parametrize("argv", [["run"], ["run", "abc"]])
++def test_run_usage_errors(server, capsys, argv):  # 015 AC14
++    with pytest.raises(SystemExit) as e:
++        cli.main(argv)
++    assert e.value.code == 2
++    assert capsys.readouterr().err.startswith("usage: fctl run")
++    assert server.requests == []
++
++
++def test_task_add_run(server, repo, monkeypatch, capsys):  # 015 AC15
++    server.replies = [reply(PROJECT), reply(ADDED, 201), reply(RUN, 202)]
++    monkeypatch.chdir(repo)
++    cli.main(["task", "add", "T", "--run"])
++    assert requests(server) == [
++        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None),
++        ("POST", "/api/projects/3/tasks", {"title": "T"}),
++        ("POST", "/api/tasks/12/run", None),
++    ]
++    url = os.environ["FCTL_URL"]
++    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 → {url}/tasks/12\n"
++
++
++def test_task_add_run_refused(server, repo, monkeypatch, capsys):  # 015 AC16
++    server.replies = [reply(PROJECT), reply(ADDED, 201), reply({"detail": "not on subscription auth"}, 409)]
++    monkeypatch.chdir(repo)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["task", "add", "T", "--run"])
++    assert e.value.code == 1
++    out, err = capsys.readouterr()
++    assert out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
++    assert err == "fctl: 409 not on subscription auth\n"
++
++
++def test_task_add_without_run(server, repo, monkeypatch, capsys):  # 015 AC17
++    server.replies = [reply(PROJECT), reply(ADDED, 201), reply(RUN, 202)]
++    monkeypatch.chdir(repo)
++    cli.main(["task", "add", "T"])
++    assert [(m, p) for m, p, _ in requests(server)][1:] == [("POST", "/api/projects/3/tasks")]
++    assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"

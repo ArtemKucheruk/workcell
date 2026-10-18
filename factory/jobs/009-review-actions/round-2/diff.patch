@@ -1,0 +1,618 @@
+diff --git a/src/claude_factories/app.py b/src/claude_factories/app.py
+index 8628ab6..0e8da98 100644
+--- a/src/claude_factories/app.py
++++ b/src/claude_factories/app.py
+@@ -838,6 +838,83 @@ def post_decision(task_id: int, body: DecisionBody):
+     return {"id": decision_id}
+ 
+ 
++# --- My review actions (docs/MVP.md §3.6, §3.7; docs/data-model-and-api.md §6.3) --------
++
++
++class ApproveBody(BaseModel):
++    body_md: str = ""  # Q9: optional; neither the page nor fctl approve sends one
++
++
++class ChangesBody(BaseModel):
++    body_md: str  # Q9: required, and not blank
++
++
++def commit_hint(task) -> str:
++    """Q4, Q5: §3.7's commands for me to run, every value shell-quoted. A standalone task (no branch or
++    worktree) gets the commit line alone."""
++    commit = f"git add -A && git commit -m {shlex.quote(task['title'])}"
++    if not (task["branch"] and task["worktree_path"]):
++        return commit
++    wt, root = task["worktree_path"], task["path"]
++    return "\n".join([
++        f"cd {shlex.quote(wt)}",
++        commit,
++        f"git push -u origin {shlex.quote(task['branch'])}     # then open a PR, or merge locally",
++        f"cd {shlex.quote(root)} && git worktree remove {shlex.quote(os.path.relpath(wt, root))}",
++    ])
++
++
++def decide_review(task_id: int, decision: str, body_md: str, status: str, stage: str | None) -> sqlite3.Row:
++    """Q2, Q3, Q10: in one transaction, refuse unless in review with a round, then my decision on the
++    latest round, the move (position kept, Q8), and the event (actor me, Q7). Returns the task as it was."""
++    with closing(db.connect()) as conn, conn:
++        conn.execute("BEGIN IMMEDIATE")  # the check and the writes together, so a double click can't act twice
++        conn.row_factory = sqlite3.Row
++        task = conn.execute(
++            "SELECT t.status, t.title, t.branch, t.worktree_path, p.path FROM tasks t"
++            " JOIN projects p ON p.id = t.project_id WHERE t.id = ?", (task_id,),
++        ).fetchone()
++        if not task:
++            raise HTTPException(404)
++        if task["status"] != "review":
++            raise HTTPException(409, f"#{task_id} is not in review")
++        latest = conn.execute("SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,)).fetchone()
++        if not latest:
++            raise HTTPException(404, f"#{task_id} has no rounds")
++        now = db.now()
++        conn.execute(
++            "INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at)"
++            " VALUES (?, ?, 'me', ?, ?, ?)",
++            (task_id, latest["id"], decision, body_md, now),
++        )
++        conn.execute(
++            "UPDATE tasks SET status = ?, stage = ?, done_at = ?, updated_at = ? WHERE id = ?",
++            (status, stage, now if status == "done" else None, now, task_id),
++        )
++        conn.execute(
++            "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
++            " VALUES (?, 'me', 'review', ?, ?, ?)",
++            (task_id, status, stage, now),
++        )
++    return task
++
++
++@app.post("/api/tasks/{task_id}/approve")
++def approve(task_id: int, body: ApproveBody):
++    """§3.7: my APPROVE → done, and the commands I run myself. The app never runs git."""
++    task = decide_review(task_id, "APPROVE", body.body_md, "done", None)
++    return {"status": "done", "commit_hint": commit_hint(task)}
++
++
++@app.post("/api/tasks/{task_id}/request-changes", status_code=202)
++def request_changes(task_id: int, body: ChangesBody):
++    """§3.6: my CHANGES_REQUESTED → in_progress · rework (Q1: standalone too)."""
++    if not body.body_md.strip():
++        raise HTTPException(422, "body_md must not be blank")
++    decide_review(task_id, "CHANGES_REQUESTED", body.body_md, "in_progress", "rework")
++    return {"status": "in_progress", "stage": "rework", "run_id": None}  # 013 spawns the rework run
++
++
+ def context_md(task: sqlite3.Row, rounds: list[sqlite3.Row], feedback: sqlite3.Row | None = None) -> str:
+     """Q5, Q6: the task as markdown blocks joined by one blank line. A block is a heading, then its
+     body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is."""
+@@ -1110,7 +1187,7 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
+     `path`, `side`, and `line` open the inline comment form under that line (008 Q1)."""
+     task = one_or_404(
+         "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
+-        " t.branch, t.worktree_path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
++        " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+         (task_id,), f"Task #{task_id} not found",
+     )
+     rounds = round_summaries(task_id)
+@@ -1134,9 +1211,24 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
+         "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
+         "timeline": query(TIMELINE, {"task": task_id}),
+         "tab": tab, "files": files, "tree": file_tree(files),
++        # Q6: from the task row, so it survives a reload and also follows fctl approve or a drag to Done
++        "commit_hint": commit_hint(task) if task["status"] == "done" else None,
+     })
+ 
+ 
++@app.post("/tasks/{task_id}/approve")
++def approve_form(task_id: int):
++    """Q12: the page's Approve sends no summary."""
++    approve(task_id, ApproveBody())
++    return hx_redirect(f"/tasks/{task_id}/review")
++
++
++@app.post("/tasks/{task_id}/request-changes")
++async def request_changes_form(request: Request, task_id: int):
++    request_changes(task_id, ChangesBody(body_md=await form_field(request, "body_md")))
++    return hx_redirect(f"/tasks/{task_id}/review")
++
++
+ @app.post("/tasks/{task_id}/comments")
+ async def add_comment_form(request: Request, task_id: int):
+     """007 Q9: a conversation comment from me on the latest round, or 008 Q3: an inline one on the
+diff --git a/src/claude_factories/cli.py b/src/claude_factories/cli.py
+index 73b1983..f1f8a8c 100644
+--- a/src/claude_factories/cli.py
++++ b/src/claude_factories/cli.py
+@@ -14,7 +14,7 @@ DEFAULT_URL = "http://127.0.0.1:4545"
+ # The app's values, repeated here for argparse `choices`: this module must not import app.py.
+ REVIEWERS = ("security", "ux", "ui", "code")
+ STAGES = ("spec", "build", "agent_review", "approval", "rework", "human_review", "escalated")
+-DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; my APPROVE and CHANGES_REQUESTED come in 009
++DECISIONS = ("APPROVE", "ESCALATE")  # the approver's; mine go through `fctl approve` and `fctl rework`
+ 
+ 
+ def _fail(message: str):
+@@ -194,6 +194,18 @@ def decide(args):
+     print(f"Decision #{r['id']} on #{args.id}: {args.decision}")
+ 
+ 
++def approve(args):
++    """docs/claude-code.md §7.2: my Approve; prints the commands to commit it myself (Q11)."""
++    r = api("POST", f"/api/tasks/{args.id}/approve", {"body_md": ""})
++    print(f"#{args.id}: {r['status']}\n{r['commit_hint']}")
++
++
++def rework(args):
++    """§7.2: my Request changes with its note."""
++    r = api("POST", f"/api/tasks/{args.id}/request-changes", {"body_md": args.note})
++    print(f"#{args.id}: {r['status']} · {r['stage']}")
++
++
+ def round_status(args):
+     """docs/claude-code.md §7.2: the latest round's verdicts, for the orchestrator's WAIT FOR ALL."""
+     rounds = api("GET", f"/api/tasks/{args.id}")["rounds"]
+@@ -270,5 +282,12 @@ def main(argv=None):
+     p = commands.add_parser("round", help="print the latest round's verdicts, e.g. (3/4)")
+     p.add_argument("id", type=int, help="the task")
+     p.set_defaults(func=round_status)
++    p = commands.add_parser("approve", help="approve a task in review: done, then print the commit commands")
++    p.add_argument("id", type=int, help="the task")
++    p.set_defaults(func=approve)
++    p = commands.add_parser("rework", help="request changes on a task in review: in_progress · rework")
++    p.add_argument("id", type=int, help="the task")
++    p.add_argument("note", help='what should change, e.g. "Make the limit configurable"')
++    p.set_defaults(func=rework)
+     args = parser.parse_args(argv)
+     args.func(args)
+diff --git a/src/claude_factories/templates/base.html b/src/claude_factories/templates/base.html
+index 2b7f91e..c7032d7 100644
+--- a/src/claude_factories/templates/base.html
++++ b/src/claude_factories/templates/base.html
+@@ -41,6 +41,17 @@
+     #timeline time { color: GrayText; font-variant-numeric: tabular-nums; margin-right: .5rem; }
+     #timeline li > :not(time) { margin: .25rem 0 0 1rem; }
+     .comment-box { display: grid; gap: .5rem; max-width: 48rem; }
++    /* §8.2: [Request changes] [Approve] on the title row. The forms are display: contents, so their
++       buttons and the Summary place in this grid while staying inside their forms. */
++    .review-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: .5rem; align-items: center; }
++    .review-header > * { grid-column: 1 / -1; }
++    .review-header > h1 { grid-column: 1; grid-row: 2; }
++    .review-header > form { display: contents; }
++    .review-header .request-changes { grid-column: 2; grid-row: 2; }
++    .review-header .approve { grid-column: 3; grid-row: 2; }
++    .review-header > form > .form-error { grid-column: 1 / -1; grid-row: 3; text-align: end; }  /* Approve's, under the buttons */
++    .review-header .summary { grid-column: 1 / -1; display: grid; gap: .5rem; max-width: 48rem; margin-top: .75rem; }
++    #commit pre { overflow-x: auto; padding: .5rem .75rem; border: 1px solid GrayText; border-radius: 6px; }
+     .form-error { margin: 0; font-weight: bold; color: light-dark(#cf222e, #f85149); }  /* the escalated red */
+     /* Files changed (docs/ui.md §8.3) */
+     .tabs { display: flex; gap: 1rem; border-bottom: 1px solid GrayText; margin-block: 1rem; }
+diff --git a/src/claude_factories/templates/review.html b/src/claude_factories/templates/review.html
+index c166d22..46f1109 100644
+--- a/src/claude_factories/templates/review.html
++++ b/src/claude_factories/templates/review.html
+@@ -4,7 +4,7 @@
+ {% set labels = {"backlog": "Backlog", "in_progress": "In progress", "review": "Review", "done": "Done"} %}
+ {% set short = {"security": "sec", "ux": "ux", "ui": "ui", "code": "code"} %}
+ {% set symbol = {"PASS": "✓", "CHANGES": "✗", "pending": "·"} %}
+-<header>
++<header><div class="review-header">
+   <p><a href="/projects/{{ task.project_id }}">{{ task.project }}</a></p>
+   <h1>#{{ task.id }} {{ task.title }}</h1>
+   <div class="review-meta">
+@@ -24,8 +24,30 @@
+     {% endif %}
+     {% if selected %}<span id="files" class="diff">{{ selected.files }} file{{ "" if selected.files == 1 else "s" }} changed +{{ selected.additions }} −{{ selected.deletions }}</span>{% endif %}
+   </div>
+-</header>
++  {# 009 Q2, Q3, Q12: enabled only in review with a round to decide on. Both forms are display: contents
++     (base.html), so their buttons sit on the title row (§8.2) and the Summary under the meta line. #}
++  {% set off = "" if task.status == "review" and rounds else " disabled" %}
++  <form hx-post="/tasks/{{ task.id }}/request-changes">
++    <div class="summary">
++      <label for="summary">Summary</label>
++      <textarea name="body_md" required id="summary" rows="2" placeholder="What should change? Required for Request changes."{{ off }}></textarea>
++      <p class="form-error" role="alert"></p>
++    </div>
++    <button class="request-changes"{{ off }}>Request changes</button>
++  </form>
++  <form hx-post="/tasks/{{ task.id }}/approve">
++    <button class="approve"{{ off }}>Approve</button>
++    <p class="form-error" role="alert"></p>
++  </form>
++</div></header>
+ <main>
++{% if commit_hint %}
++<section id="commit">
++  <h3>Commit it yourself</h3>
++  <p class="muted">Done. The app never runs git; run these in a terminal.</p>
++  <pre>{{ commit_hint }}</pre>
++</section>
++{% endif %}
+ {% set round_q = "round=" ~ selected.n if selected else "" %}
+ <nav class="tabs" aria-label="Review tabs">
+   <a href="/tasks/{{ task.id }}/review{% if selected %}?{{ round_q }}{% endif %}"{% if tab != "files" %} aria-current="page"{% endif %}>Conversation</a>
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 1204e9f..1091d33 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -724,3 +724,36 @@ def test_agent_usage_errors(server, monkeypatch, capsys, argv):  # 006 AC39
+     assert e.value.code == 2
+     assert capsys.readouterr().err.startswith(f"usage: fctl {argv[0]}")
+     assert server.requests == []
++
++
++# --- My review actions (009): approve, rework ----------------------------------------
++
++
++def test_approve(server, capsys):  # 009 AC24
++    server.reply = reply({"status": "done", "commit_hint": "cd /x\ngit add -A && git commit -m 'T'"})
++    cli.main(["approve", "12"])
++    assert requests(server) == [("POST", "/api/tasks/12/approve", {"body_md": ""})]
++    assert capsys.readouterr().out == "#12: done\ncd /x\ngit add -A && git commit -m 'T'\n"
++
++
++def test_rework(server, capsys):  # 009 AC25
++    server.reply = reply({"status": "in_progress", "stage": "rework", "run_id": None}, 202)
++    cli.main(["rework", "12", "Make the limit configurable"])
++    assert requests(server) == [("POST", "/api/tasks/12/request-changes", {"body_md": "Make the limit configurable"})]
++    assert capsys.readouterr().out == "#12: in_progress · rework\n"
++
++
++def test_rework_needs_note(server, capsys):  # 009 AC26
++    with pytest.raises(SystemExit) as e:
++        cli.main(["rework", "12"])
++    assert e.value.code == 2
++    assert capsys.readouterr().err.startswith("usage: fctl rework")
++    assert server.requests == []
++
++
++def test_approve_refused(server, capsys):  # 009 AC26
++    server.reply = reply({"detail": "#12 is not in review"}, 409)
++    with pytest.raises(SystemExit) as e:
++        cli.main(["approve", "12"])
++    assert e.value.code == 1
++    assert capsys.readouterr().err == "fctl: 409 #12 is not in review\n"
+diff --git a/tests/test_review_actions.py b/tests/test_review_actions.py
+new file mode 100644
+index 0000000..74caa79
+--- /dev/null
++++ b/tests/test_review_actions.py
+@@ -0,0 +1,315 @@
++import re
++import shlex
++from datetime import UTC, datetime, timedelta
++
++import pytest
++from conftest import sql
++from markupsafe import escape
++from test_review import H, add_round, add_task, header, page, project, section, timeline  # noqa: F401
++
++FORM = H | {"Content-Type": "application/x-www-form-urlencoded"}
++NOTE = "Make the limit configurable via settings."
++WT = "/code/api/.claude/worktrees/12-rate-limit-login"
++BRANCH = "factory/12-rate-limit-login"
++PATCH = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"
++
++
++def task_with_rounds(project_id, n=2, status="review", stage="human_review", **kw):
++    """A task with rounds 1..n; (task id, [round ids])."""
++    task = add_task(project_id, status=status, stage=stage, **kw)
++    return task, [add_round(task, i, "initial" if i == 1 else "agent") for i in range(1, n + 1)]
++
++
++@pytest.fixture
++def factory_task(project):
++    return task_with_rounds(project, title="Rate-limit login endpoint", branch=BRANCH, worktree=WT)
++
++
++@pytest.fixture
++def standalone(project):
++    return task_with_rounds(project, title="Fix open redirect after login", branch=None, worktree=None)
++
++
++def approve(client, task, body=None, headers=H):
++    return client.post(f"/api/tasks/{task}/approve", json={"body_md": ""} if body is None else body, headers=headers)
++
++
++def rework(client, task, body=None, headers=H):
++    return client.post(f"/api/tasks/{task}/request-changes", json={"body_md": NOTE} if body is None else body,
++                       headers=headers)
++
++
++def row(task):
++    return sql("SELECT status, stage, position, done_at, updated_at FROM tasks WHERE id = ?", (task,))[0]
++
++
++def snapshot(task):
++    """What "nothing written" compares: the decisions and events counts and the task row."""
++    return sql("SELECT COUNT(*) FROM decisions")[0][0], sql("SELECT COUNT(*) FROM events")[0][0], row(task)
++
++
++def decisions(task):
++    return sql("SELECT actor, decision, round_id, body_md FROM decisions WHERE task_id = ? ORDER BY id", (task,))
++
++
++def events(task):
++    return sql("SELECT actor, from_status, to_status, stage FROM events WHERE task_id = ? ORDER BY id", (task,))
++
++
++def current(ts):
++    """A YYYY-MM-DDTHH:MM:SSZ timestamp from the last few seconds."""
++    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", ts), ts
++    return datetime.now(UTC) - datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC) < timedelta(seconds=5)
++
++
++# --- Approve API -----------------------------------------------------------------------
++
++
++def test_approve(client, factory_task):  # AC1
++    task, _ = factory_task
++    r = approve(client, task)
++    assert r.status_code == 200
++    assert list(r.json()) == ["status", "commit_hint"] and r.json()["status"] == "done"
++    status, stage, position, done_at, updated_at = row(task)
++    assert (status, stage, position) == ("done", None, 1.0)
++    assert current(done_at) and current(updated_at)
++
++
++def test_approve_decision(client, project, factory_task):  # AC2
++    task, (_, r2) = factory_task
++    approve(client, task, {"body_md": "Ship it."})
++    assert decisions(task) == [("me", "APPROVE", r2, "Ship it.")]
++    other, (_, o2) = task_with_rounds(project)
++    assert approve(client, other, {}).status_code == 200
++    assert decisions(other) == [("me", "APPROVE", o2, "")]
++
++
++def test_approve_event(client, factory_task):  # AC3
++    task, _ = factory_task
++    approve(client, task)
++    assert events(task) == [("me", "review", "done", None)]
++
++
++def test_approve_escalated(client, project):  # AC4
++    task, _ = task_with_rounds(project, stage="escalated")
++    r = approve(client, task)
++    assert (r.status_code, r.json()["status"], row(task)[0]) == (200, "done", "done")
++
++
++def test_commit_hint_factory(client, factory_task):  # AC5
++    task, _ = factory_task
++    assert approve(client, task).json()["commit_hint"] == (
++        "cd /code/api/.claude/worktrees/12-rate-limit-login\n"
++        "git add -A && git commit -m 'Rate-limit login endpoint'\n"
++        "git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally\n"
++        "cd /code/api && git worktree remove .claude/worktrees/12-rate-limit-login"
++    )
++
++
++def test_commit_hint_quoted(client, project):  # AC6
++    title = """it's $(touch x) "q\""""
++    task, _ = task_with_rounds(project, title=title, branch="factory/12-x", worktree="/code/api/.claude/worktrees/12 x")
++    lines = approve(client, task).json()["commit_hint"].split("\n")
++    assert lines[0] == "cd '/code/api/.claude/worktrees/12 x'"
++    assert lines[1] == "git add -A && git commit -m " + shlex.quote(title)
++    assert shlex.split(lines[1])[-1] == title
++    assert lines[3] == "cd /code/api && git worktree remove '.claude/worktrees/12 x'"
++
++
++def test_commit_hint_standalone(client, standalone):  # AC7
++    task, _ = standalone
++    assert approve(client, task).json()["commit_hint"] == "git add -A && git commit -m 'Fix open redirect after login'"
++
++
++@pytest.mark.parametrize("status, stage", [("backlog", None), ("in_progress", "build"), ("done", None)])
++def test_approve_not_in_review(client, project, status, stage):  # AC8
++    task, _ = task_with_rounds(project, status=status, stage=stage)
++    before = snapshot(task)
++    r = approve(client, task)
++    assert (r.status_code, r.json()) == (409, {"detail": f"#{task} is not in review"})
++    assert snapshot(task) == before
++
++
++def test_approve_twice(client, factory_task):  # AC8
++    task, _ = factory_task
++    assert approve(client, task).status_code == 200
++    r = approve(client, task)
++    assert (r.status_code, r.json()) == (409, {"detail": f"#{task} is not in review"})
++    assert [d[1] for d in decisions(task)] == ["APPROVE"]
++
++
++def test_approve_missing(client, project):  # AC9
++    assert approve(client, 999).status_code == 404
++    task, _ = task_with_rounds(project, n=0)
++    before = snapshot(task)
++    r = approve(client, task)
++    assert (r.status_code, r.json()) == (404, {"detail": f"#{task} has no rounds"})
++    assert snapshot(task) == before
++
++
++# --- Request changes API ---------------------------------------------------------------
++
++
++def test_request_changes(client, factory_task):  # AC10
++    task, _ = factory_task
++    r = rework(client, task)
++    assert (r.status_code, r.json()) == (202, {"status": "in_progress", "stage": "rework", "run_id": None})
++    status, stage, position, done_at, updated_at = row(task)
++    assert (status, stage, position, done_at) == ("in_progress", "rework", 1.0, None)
++    assert current(updated_at)
++
++
++def test_request_changes_rows(client, factory_task):  # AC11
++    task, (_, r2) = factory_task
++    rework(client, task)
++    assert decisions(task) == [("me", "CHANGES_REQUESTED", r2, NOTE)]
++    assert events(task) == [("me", "review", "in_progress", "rework")]
++
++
++def test_request_changes_standalone(client, factory_task, standalone):  # AC12
++    task, (_, r2) = standalone
++    r = rework(client, task)
++    assert (r.status_code, r.json()) == (202, {"status": "in_progress", "stage": "rework", "run_id": None})
++    assert row(task)[:4] == ("in_progress", "rework", 1.0, None)
++    assert decisions(task) == [("me", "CHANGES_REQUESTED", r2, NOTE)]
++    assert events(task) == [("me", "review", "in_progress", "rework")]
++    assert rework(client, factory_task[0]).status_code == 202
++    assert sql("SELECT COUNT(*) FROM runs") == [(0,)]
++
++
++@pytest.mark.parametrize("body, detail", [({}, None), ({"body_md": ""}, "body_md must not be blank"),
++                                          ({"body_md": "  \n"}, "body_md must not be blank")])
++def test_request_changes_blank(client, factory_task, body, detail):  # AC13
++    task, _ = factory_task
++    before = snapshot(task)
++    r = rework(client, task, body)
++    assert r.status_code == 422
++    if detail:
++        assert r.json() == {"detail": detail}
++    assert snapshot(task) == before
++
++
++def test_request_changes_refused(client, project):  # AC14
++    for status, stage in (("backlog", None), ("in_progress", "build"), ("done", None)):
++        task, _ = task_with_rounds(project, status=status, stage=stage)
++        before = snapshot(task)
++        r = rework(client, task)
++        assert (r.status_code, r.json()) == (409, {"detail": f"#{task} is not in review"})
++        assert snapshot(task) == before
++    assert rework(client, 999).status_code == 404
++    task, _ = task_with_rounds(project, n=0)
++    before = snapshot(task)
++    r = rework(client, task)
++    assert (r.status_code, r.json()) == (404, {"detail": f"#{task} has no rounds"})
++    assert snapshot(task) == before
++
++
++def test_request_changes_feedback(client, factory_task):  # AC15
++    task, _ = factory_task
++    comment = {"round": 2, "author": "me", "path": "f0.py", "line": 1, "body_md": "Keep the old default."}
++    assert client.post(f"/api/tasks/{task}/comments", json=comment, headers=H).status_code == 201
++    rework(client, task)
++    text = client.get(f"/api/tasks/{task}/context?feedback=1").text
++    assert f"## Feedback on round 2\n{NOTE}\n\n## Comments\n\n### me on f0.py:1 (new)\nKeep the old default.\n" in text
++
++
++def test_request_changes_then_submit(client, standalone):  # AC16
++    task, _ = standalone
++    rework(client, task)
++    r = client.post(f"/api/tasks/{task}/rounds", json={"base_sha": "abc1234", "patch": PATCH}, headers=H)
++    assert r.status_code == 201 and r.json()["round"] == 3
++    assert sql("SELECT trigger FROM rounds WHERE task_id = ? AND n = 3", (task,)) == [("human",)]
++    assert row(task)[:2] == ("review", "human_review")
++
++
++@pytest.mark.parametrize("path", ["/api/tasks/{}/approve", "/api/tasks/{}/request-changes",
++                                  "/tasks/{}/approve", "/tasks/{}/request-changes"])
++def test_actions_need_fctl_header(client, factory_task, path):  # AC17
++    task, _ = factory_task
++    before = snapshot(task)
++    r = client.post(path.format(task), json={"body_md": NOTE}, headers={})
++    assert r.status_code == 403
++    assert snapshot(task) == before
++
++
++# --- Review page -----------------------------------------------------------------------
++
++
++def action_forms(html, task):
++    """{"request-changes": inner html, "approve": inner html} of the header's two action forms."""
++    return dict(re.findall(rf'<form hx-post="/tasks/{task}/(request-changes|approve)"[^>]*>(.*?)</form>',
++                           header(html), re.S))
++
++
++def button(form, label):
++    """The attributes of the form's button labelled `label`."""
++    return re.search(rf"<button([^>]*)>{label}</button>", form)[1]
++
++
++@pytest.mark.parametrize("query", ["", "?tab=files"])
++def test_action_forms(client, factory_task, query):  # AC18
++    task, _ = factory_task
++    forms = action_forms(page(client, task, query), task)
++    assert list(forms) == ["request-changes", "approve"]
++    [textarea] = re.findall(r"<textarea[^>]*>", forms["request-changes"])
++    assert 'name="body_md"' in textarea and " required" in textarea and "disabled" not in textarea
++    assert "disabled" not in button(forms["request-changes"], "Request changes")
++    assert "disabled" not in button(forms["approve"], "Approve")
++    assert "<textarea" not in forms["approve"]
++    assert all('class="form-error"' in f for f in forms.values())
++
++
++@pytest.mark.parametrize("status, stage, n", [("backlog", None, 2), ("in_progress", "rework", 2), ("done", None, 2),
++                                              ("review", "human_review", 0)])
++def test_action_forms_disabled(client, project, status, stage, n):  # AC19
++    task, _ = task_with_rounds(project, n=n, status=status, stage=stage)
++    forms = action_forms(page(client, task), task)
++    assert " disabled" in button(forms["request-changes"], "Request changes")
++    assert " disabled" in button(forms["approve"], "Approve")
++
++
++def test_approve_form(client, factory_task):  # AC20
++    task, _ = factory_task
++    r = client.post(f"/tasks/{task}/approve", content=b"", headers=FORM)
++    assert (r.status_code, r.headers["HX-Redirect"]) == (204, f"/tasks/{task}/review")
++    assert row(task)[0] == "done"
++
++
++def test_request_changes_form(client, project, factory_task):  # AC21
++    task, _ = factory_task
++    r = client.post(f"/tasks/{task}/request-changes", content=b"body_md=Make+it+configurable", headers=FORM)
++    assert (r.status_code, r.headers["HX-Redirect"]) == (204, f"/tasks/{task}/review")
++    assert [d[3] for d in decisions(task)] == ["Make it configurable"]
++    other, _ = task_with_rounds(project)
++    before = snapshot(other)
++    for body in (b"body_md=", b"body_md=+%0A+"):
++        r = client.post(f"/tasks/{other}/request-changes", content=body, headers=FORM)
++        assert (r.status_code, r.json()) == (422, {"detail": "body_md must not be blank"})
++    assert snapshot(other) == before
++
++
++def test_commit_section(client, project, factory_task):  # AC22
++    task, _ = factory_task
++    hint = approve(client, task).json()["commit_hint"]
++    for query in ("", "?tab=files"):
++        assert f"<pre>{escape(hint)}</pre>" in section(page(client, task, query), "commit")
++    bold, _ = task_with_rounds(project, title="Fix <b>login</b>", branch=None, worktree=None)
++    approve(client, bold)
++    shown = section(page(client, bold), "commit")
++    assert f"<pre>{escape('git add -A && git commit -m ' + shlex.quote('Fix <b>login</b>'))}</pre>" in shown
++    assert "&lt;b&gt;" in shown and "<b>" not in shown
++    for status, stage in (("backlog", None), ("in_progress", "build"), ("review", "human_review")):
++        assert 'id="commit"' not in page(client, task_with_rounds(project, status=status, stage=stage)[0])
++
++
++def test_timeline_after_actions(client, project, factory_task):  # AC23
++    task, _ = factory_task
++    rework(client, task)
++    items = timeline(page(client, task))
++    labels = [label for label, _ in items]
++    assert f"me CHANGES_REQUESTED · round 2 {NOTE}" in labels and "in_progress · rework" in labels
++    assert f"<p>{NOTE}</p>" in dict(items)[f"me CHANGES_REQUESTED · round 2 {NOTE}"]
++    other, _ = task_with_rounds(project)
++    approve(client, other)
++    labels = [label for label, _ in timeline(page(client, other))]
++    assert "me APPROVE · round 2" in labels and "done" in labels
+diff --git a/tests/test_review_files.py b/tests/test_review_files.py
+index 537a9ab..af90ea2 100644
+--- a/tests/test_review_files.py
++++ b/tests/test_review_files.py
+@@ -139,7 +139,7 @@ def test_tab_bodies(client, sample):  # AC2
+     html = files_tab(client, sample)
+     for name in ("description", "rounds", "approver", "timeline"):
+         assert section(html, name) is None
+-    assert "<textarea" not in html
++    assert "<textarea" not in html.split("</header>", 1)[1]  # 009's Summary box sits in the header
+     for query in ("", "?tab=conversation", "?tab=xyz"):
+         html = page(client, sample, query)
+         assert section(html, "timeline") is not None
+@@ -345,7 +345,7 @@ def test_inline_form(client, sample):  # AC17
+     "path=app/auth.py&side=both&line=42", "path=nope.py&side=new&line=42", "path=app/auth.py",
+ ])
+ def test_no_form_for_bad_target(client, sample, target):  # AC18
+-    html = files_tab(client, sample, f"?round=1&tab=files&{target}")
++    html = files_tab(client, sample, f"?round=1&tab=files&{target}").split("</header>", 1)[1]  # past 009's forms
+     assert "hx-post" not in html and "<textarea" not in html
+ 
+ 

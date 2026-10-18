@@ -1,0 +1,12 @@
+VERDICT: CHANGES
+
+Checked in W (`.claude/worktrees/008-review-files`) by rendering with FCTL_HOME set to a scratch dir: the sample round plus round 2 (`b.py`), the no-rounds task, an unknown task (`/tasks/9999/review?tab=files`), and an unknown round (`?round=99&tab=files`), with the inline form open (`?round=1&tab=files&path=app/auth.py&side=new&line=42`). The tab bar, tree, file headers, `diff-table` rows, anchors, comments rows, orphan row, form markup, and empty and 404 states match §8.3 and the spec. I could not view it in a browser, so light and dark were checked by reading the CSS, not by looking at screenshots.
+
+## Findings
+
+- factory/jobs/008-review-files/round-1/diff.patch (templates/review.html:72, form `hx-post` to `/tasks/{id}/comments`) — a failed inline post shows nothing. The route returns 422 for a whitespace-only `body_md` (the browser `required` attribute lets "   " through) and 404 if the round is gone, but htmx does not swap 4xx responses and no `htmx:responseError` handler exists in base.html or review.html. The user gets no message, and the form just sits there. The conversation box from 007 has the same gap. Error states on this page have to be designed, not blank. — Add one listener in base.html's `<body>` script (or next to it) for `htmx:responseError` that puts the response's `detail` (already a list of messages, no input echoed) into a `<p class="form-error" role="alert">` inside the form that posted, and add that `<p>` to both forms in review.html (the inline form at line 72 and the 007 box at line 150). It is a few lines, and it fixes both forms.
+
+## Nits (non-blocking)
+
+- templates/base.html:59 — line numbers are `GrayText` (about 4.1:1 against the light `add`/`del` tints at this font size, under the 4.5:1 for small text). Suggest `.diff-table td.num a { color: light-dark(#57606a, #8b949e); }`, which is about 5.7:1 on the light tint.
+- Verified and fine, no change needed: `highlight.min.js` registers `py` as an alias of Python, so `data-lang="py"` highlights; the vendored htmx has the `htmx:responseError` event the fix above needs; the `meta color-scheme` tag enables `light-dark()`; the `hljs` script runs after the table markup in `<main>`, so it finds the tables; the round count in the tab is the shown round's count, and a round can't have zero files (`split_patch` rejects an empty patch), so the empty-tree case is unreachable.

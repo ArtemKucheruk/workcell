@@ -1,0 +1,468 @@
+diff --git a/src/claude_factories/app.py b/src/claude_factories/app.py
+index bc2287d..e750458 100644
+--- a/src/claude_factories/app.py
++++ b/src/claude_factories/app.py
+@@ -1247,35 +1247,60 @@ def file_tree(files: list[dict]) -> dict:
+     return root
+ 
+ 
++PAGE_TASK = (  # the task row both task pages show; `path` is for Review's commit hint
++    "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
++    " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?"
++)
++
++
++def posted_verdicts(task_id: int) -> dict[int, dict]:
++    """007 Q5, Q6: round n → {reviewer: verdict row}, for the bodies."""
++    posted: dict[int, dict] = {}
++    for v in query(
++        "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
++        " WHERE r.task_id = ?", (task_id,),
++    ):
++        posted.setdefault(v["n"], {})[v["reviewer"]] = v
++    return posted
++
++
++def approver_decision(task_id: int) -> sqlite3.Row | None:
++    """007 Q7: only the approver's latest decision, by id."""
++    found = query(
++        "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
++        " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
++    )
++    return found[0] if found else None
++
++
++@app.get("/tasks/{task_id}", response_class=HTMLResponse)
++def task_page(request: Request, task_id: int):
++    """docs/ui.md §8 item 4 without run controls (014): header, description, spec, rounds with build
++    notes and verdict popovers, the approver's latest decision, and the status history."""
++    task = one_or_404(PAGE_TASK, (task_id,), f"Task #{task_id} not found")
++    return templates.TemplateResponse(request, "task.html", {
++        "task": task, "rounds": round_summaries(task_id), "posted": posted_verdicts(task_id),
++        "build": dict(query("SELECT n, build_md FROM rounds WHERE task_id = ?", (task_id,))),
++        "reviewers": REVIEWERS, "approver": approver_decision(task_id),
++        "history": [e for e in query(TIMELINE, {"task": task_id}) if e["kind"] == 0],  # Q8: events only
++    })
++
++
+ @app.get("/tasks/{task_id}/review", response_class=HTMLResponse)
+ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="round"), tab: str = "",
+                 path: str = "", side: str = "", line: str = ""):
+     """§8.2's Conversation tab, or with `tab=files` §8.3's Files changed for the picked round (008).
+     `path`, `side`, and `line` open the inline comment form under that line (008 Q1)."""
+-    task = one_or_404(
+-        "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
+-        " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+-        (task_id,), f"Task #{task_id} not found",
+-    )
++    task = one_or_404(PAGE_TASK, (task_id,), f"Task #{task_id} not found")
+     rounds = round_summaries(task_id)
+     # AC11: with no rounds, `latest` is a page without a selector, not round_or_404's 404
+     found = round_or_404(task_id, n) if rounds or n != "latest" else None
+     picked = found["n"] if found else None
+     tab = "files" if tab == "files" else "conversation"  # 008 Q4
+     files = review_files(found["id"], (path, side, line)) if tab == "files" and found else []
+-    posted: dict[int, dict] = {}  # round n → {reviewer: verdict row}, for the bodies (Q5, Q6)
+-    for v in query(
+-        "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
+-        " WHERE r.task_id = ?", (task_id,),
+-    ):
+-        posted.setdefault(v["n"], {})[v["reviewer"]] = v
+-    approver = query(  # Q7: only the approver's latest
+-        "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
+-        " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
+-    )
+     return templates.TemplateResponse(request, "review.html", {
+         "task": task, "rounds": rounds, "selected": next((r for r in rounds if r["n"] == picked), None),
+-        "posted": posted, "reviewers": REVIEWERS, "approver": approver[0] if approver else None,
++        "posted": posted_verdicts(task_id), "reviewers": REVIEWERS, "approver": approver_decision(task_id),
+         "timeline": query(TIMELINE, {"task": task_id}),
+         "tab": tab, "files": files, "tree": file_tree(files),
+         # Q6: from the task row, so it survives a reload and also follows fctl approve or a drag to Done
+diff --git a/src/claude_factories/templates/base.html b/src/claude_factories/templates/base.html
+index ea71f9d..4947008 100644
+--- a/src/claude_factories/templates/base.html
++++ b/src/claude_factories/templates/base.html
+@@ -34,11 +34,11 @@
+     .review-meta form { display: inline; }
+     .round { border-bottom: 1px solid GrayText; padding-block: .25rem; }
+     .round-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: .25rem 0; }
+-    .chips span + span { margin-left: .5rem; }
++    .chips > * + * { margin-left: .5rem; }
+     details.verdict { margin-left: 1rem; }
+     details.verdict summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+-    #timeline ol { list-style: none; padding: 0; display: grid; gap: .25rem; }
+-    #timeline time { color: GrayText; font-variant-numeric: tabular-nums; margin-right: .5rem; }
++    #timeline ol, #history ol { list-style: none; padding: 0; display: grid; gap: .25rem; }
++    #timeline time, #history time { color: GrayText; font-variant-numeric: tabular-nums; margin-right: .5rem; }
+     #timeline li > :not(time) { margin: .25rem 0 0 1rem; }
+     .comment-box { display: grid; gap: .5rem; max-width: 48rem; }
+     /* §8.2: [Request changes] [Approve] on the title row. The forms are display: contents, so their
+@@ -53,6 +53,11 @@
+     .review-header .summary { grid-column: 1 / -1; display: grid; gap: .5rem; max-width: 48rem; margin-top: .75rem; }
+     #commit pre { overflow-x: auto; padding: .5rem .75rem; border: 1px solid GrayText; border-radius: 6px; }
+     .form-error { margin: 0; font-weight: bold; color: light-dark(#cf222e, #f85149); }  /* the escalated red */
++    /* Task page (docs/ui.md §8 item 4): a chip that opens its verdict reads like Review's chips */
++    .chips button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer;
++      text-decoration: underline dotted; }
++    [popover] { width: min(48rem, 90vw); max-height: 70vh; overflow: auto; padding: .5rem 1rem;
++      border: 1px solid GrayText; border-radius: 6px; }
+     /* Files changed (docs/ui.md §8.3) */
+     .tabs { display: flex; gap: 1rem; border-bottom: 1px solid GrayText; margin-block: 1rem; }
+     .tabs a { padding: .25rem .5rem; text-decoration: none; }
+diff --git a/src/claude_factories/templates/task.html b/src/claude_factories/templates/task.html
+new file mode 100644
+index 0000000..85427ae
+--- /dev/null
++++ b/src/claude_factories/templates/task.html
+@@ -0,0 +1,78 @@
++{% extends "base.html" %}
++{% block title %}#{{ task.id }} {{ task.title }} · {{ task.project }}{% endblock %}
++{% block content %}
++{# review.html's maps, verbatim: they live inside its content block, so they can't be imported #}
++{% set labels = {"backlog": "Backlog", "in_progress": "In progress", "review": "Review", "done": "Done"} %}
++{% set short = {"security": "sec", "ux": "ux", "ui": "ui", "code": "code"} %}
++{% set symbol = {"PASS": "✓", "CHANGES": "✗", "pending": "·"} %}
++{# Q10 ponytail: polling pauses while any build note or verdict is open, so the page goes stale while I read
++   one; to keep it live, poll anyway and reopen the open <details> and popovers by id on htmx:afterSwap #}
++<div id="live" hx-get="/tasks/{{ task.id }}" hx-trigger="every 3s [!document.querySelector('#live details[open], #live :popover-open')]" hx-select="#live" hx-swap="outerHTML">
++<header>
++  <p><a href="/projects/{{ task.project_id }}">{{ task.project }}</a></p>
++  <h1>#{{ task.id }} {{ task.title }}</h1>
++  <div class="review-meta">
++    <span id="status">{{ labels[task.status] }}
++      {%- if task.stage == "escalated" %} · <strong class="escalated">⚠ NEEDS YOU — escalated</strong>
++      {%- elif task.stage == "human_review" %} · waiting on you
++      {%- elif task.stage %} · {{ task.stage }}{% endif %}</span>
++    {% if task.branch %}<code>{{ task.branch }}</code>{% endif %}
++    <a href="/tasks/{{ task.id }}/review">Review</a>
++  </div>
++</header>
++<main>
++<section id="description">
++  <h3>Description</h3>
++  {% if task.description_md.strip() %}{{ task.description_md | markdown }}{% else %}<p class="muted">No description.</p>{% endif %}
++</section>
++<section id="spec">
++  <h3>Spec</h3>
++  {% if task.spec_md and task.spec_md.strip() %}{{ task.spec_md | markdown }}{% else %}<p class="muted">No spec yet.</p>{% endif %}
++</section>
++<section id="rounds">
++  <h3>Rounds</h3>
++  {% for r in rounds %}
++  {% set verdicts = posted.get(r.n, {}) %}
++  {% set notes = build[r.n] %}
++  <div id="round-{{ r.n }}" class="round">
++    <p class="round-row"><strong>Round {{ r.n }}</strong> <span class="muted">{{ r.trigger }}</span>
++      {% if task.worktree_path is none and not verdicts %}<span class="muted">no agent review</span>
++      {% else %}<span class="chips">{% for who, verdict in r.verdicts.items() %}
++        {%- if who in verdicts and verdicts[who].body_md.strip() %} <button type="button" popovertarget="verdict-{{ r.n }}-{{ who }}" title="{{ who }}: {{ verdict }}">{{ short[who] }} {{ symbol[verdict] }}</button>
++        {%- else %} <span title="{{ who }}: {{ verdict }}">{{ short[who] }} {{ symbol[verdict] }}</span>{% endif %}
++      {%- endfor %}</span>{% endif %}
++      <span class="diff">+{{ r.additions }} −{{ r.deletions }}</span></p>
++    {# Q1: outside the <p>, which a <div> would close early #}
++    {% for who in reviewers if who in verdicts and verdicts[who].body_md.strip() %}
++    <div popover id="verdict-{{ r.n }}-{{ who }}">
++      <p><strong>{{ who }} · {{ verdicts[who].verdict }}</strong></p>
++      {{ verdicts[who].body_md | markdown }}
++    </div>
++    {% endfor %}
++    {% if notes and notes.strip() %}
++    <details><summary>Build notes</summary>{{ notes | markdown }}</details>
++    {% else %}
++    <p class="muted">No build notes.</p>
++    {% endif %}
++  </div>
++  {% else %}
++  <p class="muted">No rounds yet.</p>
++  {% endfor %}
++</section>
++{% if approver %}
++<section id="approver">
++  <p><strong>Approver · {{ approver.decision }}</strong> <span class="muted">round {{ approver.n }}</span></p>
++  {{ approver.body_md | markdown }}
++</section>
++{% endif %}
++<section id="history">
++  <h3>Status history</h3>
++  <ol>
++    {% for e in history %}
++    <li><time datetime="{{ e.created_at }}">{{ e.created_at | local_time }}</time> {{ e.label }}</li>
++    {% endfor %}
++  </ol>
++</section>
++</main>
++</div>
++{% endblock %}
+diff --git a/tests/test_task_page.py b/tests/test_task_page.py
+new file mode 100644
+index 0000000..3bea444
+--- /dev/null
++++ b/tests/test_task_page.py
+@@ -0,0 +1,266 @@
++import re
++
++import pytest
++from conftest import sql
++from test_review import (REVIEWERS, add_comment, add_decision, add_event, add_round, add_task, add_verdict, at,  # noqa: F401
++                         header, not_found_page, project, section, text)
++
++
++def page(client, task_id):
++    r = client.get(f"/tasks/{task_id}")
++    assert r.status_code == 200, r.text
++    return r.text
++
++
++def block(html, n):
++    """Round n's block: up to the next round or the end of the rounds section (popovers are <div>s)."""
++    return re.search(rf'<div id="round-{n}" class="round">(.*?)(?=<div id="round-|</section>)', html, re.S)[1]
++
++
++def row(html, n):
++    return re.search(r'<p class="round-row">(.*?)</p>', block(html, n), re.S)[1]
++
++
++def popover(html, n, who):
++    return re.search(rf'<div popover id="verdict-{n}-{who}">(.*?)</div>', block(html, n), re.S)[1]
++
++
++def history(html):
++    """[(the label text, the item's html)], in page order."""
++    ol = re.search(r"<ol>(.*?)</ol>", section(html, "history"), re.S)[1]
++    items = re.findall(r"<li>(.*?)</li>", ol, re.S)
++    return [(text(re.sub(r"<time[^>]*>.*?</time>", "", i, flags=re.S)), i) for i in items]
++
++
++def set_build(round_id, build_md):
++    sql("UPDATE rounds SET build_md = ? WHERE id = ?", (build_md, round_id))
++
++
++# --- Page ----------------------------------------------------------------------------
++
++
++def test_page_renders(client, project):  # AC1
++    task = add_task(project, title="Rate-limit login")
++    r = client.get(f"/tasks/{task}")
++    assert r.status_code == 200
++    assert r.template.name == "task.html"
++    assert re.findall(r"<h1>(.*?)</h1>", r.text, re.S) == [f"#{task} Rate-limit login"]
++
++
++def test_unknown_task_404(client, project):  # AC2
++    assert not_found_page(client.get("/tasks/999")) == "Task #999 not found"
++
++
++def test_project_link(client, project):  # AC3
++    assert f'<a href="/projects/{project}">api</a>' in page(client, add_task(project))
++
++
++def test_review_link(client, project):  # AC4
++    no_rounds = add_task(project)
++    assert f'<a href="/tasks/{no_rounds}/review">Review</a>' in header(page(client, no_rounds))
++    with_round = add_task(project)
++    add_round(with_round, 1)
++    assert f'<a href="/tasks/{with_round}/review">Review</a>' in header(page(client, with_round))
++
++
++# --- Header --------------------------------------------------------------------------
++
++
++@pytest.mark.parametrize("status, stage, expected", [
++    ("in_progress", "build", "In progress · build"),
++    ("review", "human_review", "Review · waiting on you"),
++    ("review", "escalated", "Review · ⚠ NEEDS YOU — escalated"),
++    ("backlog", None, "Backlog"),
++    ("done", None, "Done"),
++])
++def test_status_stage(client, project, status, stage, expected):  # AC5
++    html = page(client, add_task(project, status=status, stage=stage))
++    assert text(re.search(r'<span id="status">(.*?)</span>\s', header(html), re.S)[1]) == expected
++    assert bool(re.search(r'class="[^"]*\bescalated\b', html)) == (stage == "escalated")
++
++
++def test_branch(client, project):  # AC6
++    assert "<code>factory/12-x</code>" in header(page(client, add_task(project, branch="factory/12-x")))
++    assert "<code>" not in header(page(client, add_task(project, branch=None)))
++
++
++# --- Description and spec -------------------------------------------------------------
++
++
++def test_description(client, project):  # AC7
++    html = page(client, add_task(project, description="**Max 5** failed logins"))
++    assert "<strong>Max 5</strong>" in section(html, "description")
++    assert text(section(page(client, add_task(project)), "description")) == "Description No description."
++
++
++def test_spec_open(client, project):  # AC8
++    spec = section(page(client, add_task(project, spec="## Criteria\n- 429")), "spec")
++    assert "<h2>Criteria</h2>" in spec and "<li>429</li>" in spec
++    assert "<details" not in spec
++
++
++@pytest.mark.parametrize("spec", [None, "  \n "])
++def test_no_spec(client, project, spec):  # AC9
++    assert text(section(page(client, add_task(project, spec=spec)), "spec")) == "Spec No spec yet."
++
++
++# --- Rounds --------------------------------------------------------------------------
++
++
++def test_round_rows(client, project):  # AC10
++    task = add_task(project)
++    r1 = add_round(task, 1, files=((100, 5), (18, 4)))
++    for who in REVIEWERS:
++        add_verdict(r1, who, "CHANGES" if who == "security" else "PASS")
++    r2 = add_round(task, 2, "agent", files=((126, 9),))
++    for who in REVIEWERS:
++        add_verdict(r2, who, "PASS")
++    html = page(client, task)
++    assert re.findall(r'<div id="(round-\d+)"', section(html, "rounds")) == ["round-1", "round-2"]
++    assert text(row(html, 1)) == "Round 1 initial sec ✗ ux ✓ ui ✓ code ✓ +118 −9"
++    assert text(row(html, 2)) == "Round 2 agent sec ✓ ux ✓ ui ✓ code ✓ +126 −9"
++
++
++def test_verdict_popover(client, project):  # AC11
++    task = add_task(project)
++    add_verdict(add_round(task, 1), "security", "CHANGES", "Trusts **X-Forwarded-For**")
++    html = page(client, task)
++    assert ('<button type="button" popovertarget="verdict-1-security" title="security: CHANGES">sec ✗</button>'
++            in row(html, 1))
++    assert block(html, 1).count('<div popover id="verdict-1-security">') == 1
++    assert "<div" not in row(html, 1)  # the popover sits after the row's <p>, not in it
++    body = popover(html, 1, "security")
++    assert text(body).startswith("security · CHANGES")
++    assert "<strong>X-Forwarded-For</strong>" in body
++
++
++def test_plain_chips(client, project):  # AC12
++    task = add_task(project)
++    add_verdict(add_round(task, 1), "ux", "PASS", "  \n ")
++    html = page(client, task)
++    assert '<span title="ui: pending">ui ·</span>' in row(html, 1)
++    assert '<span title="ux: PASS">ux ✓</span>' in row(html, 1)
++    assert "popovertarget" not in html and "popover" not in block(html, 1)
++
++
++def test_no_agent_review(client, project):  # AC13
++    standalone = add_task(project, worktree=None)
++    add_round(standalone, 1)
++    html = page(client, standalone)
++    assert "no agent review" in row(html, 1)
++    assert "title=" not in block(html, 1) and "popover" not in block(html, 1)
++    factory = add_task(project)
++    add_round(factory, 1)
++    html = page(client, factory)
++    assert "no agent review" not in row(html, 1)
++    assert re.findall(r'<span title="([^"]*)">', row(html, 1)) == [f"{who}: pending" for who in REVIEWERS]
++
++
++def test_build_notes(client, project):  # AC14
++    task = add_task(project)
++    set_build(add_round(task, 1), "Token **bucket**")
++    [(attrs, inner)] = re.findall(r"<details([^>]*)>(.*?)</details>", block(page(client, task), 1), re.S)
++    assert "open" not in attrs
++    assert inner.startswith("<summary>Build notes</summary>")
++    assert "<strong>bucket</strong>" in inner
++
++
++@pytest.mark.parametrize("build_md", [None, "  \n "])
++def test_no_build_notes(client, project, build_md):  # AC15
++    task = add_task(project)
++    set_build(add_round(task, 1), build_md)
++    found = block(page(client, task), 1)
++    assert "No build notes." in text(found) and "<details" not in found
++
++
++def test_no_rounds(client, project):  # AC16
++    assert text(section(page(client, add_task(project)), "rounds")) == "Rounds No rounds yet."
++
++
++# --- Approver decision -----------------------------------------------------------------
++
++
++def test_approver_latest(client, project):  # AC17
++    task = add_task(project)
++    r1, r2 = add_round(task, 1), add_round(task, 2)
++    add_decision(task, r1, "approver", "ESCALATE", "stuck")
++    add_decision(task, r2, "approver", "APPROVE", "All **4** PASS")
++    add_decision(task, r2, "me", "CHANGES_REQUESTED", "nope")
++    html = page(client, task)
++    assert html.count('<section id="approver">') == 1
++    found = section(html, "approver")
++    assert text(found).startswith("Approver · APPROVE") and "round 2" in text(found)
++    assert "<strong>4</strong>" in found
++    assert "ESCALATE" not in found and "CHANGES_REQUESTED" not in found
++
++
++def test_no_approver(client, project):  # AC18
++    task = add_task(project)
++    add_decision(task, add_round(task, 1), "me", "CHANGES_REQUESTED")
++    assert '<section id="approver">' not in page(client, task)
++
++
++# --- Status history --------------------------------------------------------------------
++
++
++def test_history_labels(client, project):  # AC19
++    task = add_task(project, status="done", stage=None)
++    add_event(task, None, "backlog", at=at(1))
++    add_event(task, "backlog", "in_progress", at=at(2))
++    add_event(task, "in_progress", "in_progress", "spec", at=at(3))
++    add_event(task, "in_progress", "review", "human_review", at=at(4))
++    add_event(task, "review", "done", at=at(5))
++    items = history(page(client, task))
++    assert [label for label, _ in items] == [
++        "created · backlog", "in_progress", "in_progress · spec", "review · human_review", "done"]
++    assert [re.search(r'<time datetime="([^"]*)">', item)[1] for _, item in items] == [at(s) for s in range(1, 6)]
++
++
++def test_history_events_only(client, project):  # AC20
++    task = add_task(project)
++    add_event(task, None, "backlog", at=at(1))
++    add_event(task, "backlog", "in_progress", "build", at=at(2))
++    r1 = add_round(task, 1, at=at(3))
++    add_verdict(r1, "ux", "PASS", at=at(4))
++    add_decision(task, r1, "approver", "APPROVE", at=at(5))
++    add_comment(task, r1, "me", "hi", at=at(6))
++    assert [label for label, _ in history(page(client, task))] == ["created · backlog", "in_progress · build"]
++
++
++def test_history_ties(client, project):  # AC21
++    task = add_task(project)
++    add_event(task, "backlog", "in_progress", "build", id=8)  # both at OLD
++    add_event(task, None, "backlog", id=2)
++    assert [label for label, _ in history(page(client, task))] == ["created · backlog", "in_progress · build"]
++
++
++# --- Safety and polling ------------------------------------------------------------------
++
++
++def test_raw_html_off(client, project):  # AC22
++    script, img = "<script>alert(1)</script>", "<img src=x onerror=alert(1)>"
++    task = add_task(project, title=script, spec=img)
++    r1 = add_round(task, 1)
++    set_build(r1, script)
++    add_verdict(r1, "security", "CHANGES", img)
++    add_decision(task, r1, "approver", "ESCALATE", script)
++    html = page(client, task)
++    assert "&lt;script&gt;" in header(html)
++    assert "&lt;img" in section(html, "spec")
++    assert "&lt;script&gt;" in re.search(r"<details>(.*?)</details>", block(html, 1), re.S)[1]
++    assert "&lt;img" in popover(html, 1, "security")
++    assert "&lt;script&gt;" in section(html, "approver")
++    assert "<script>alert" not in html and "<img" not in html
++
++
++def test_live_poll(client, project):  # AC23
++    task = add_task(project)
++    html = page(client, task)
++    [(attrs, rest)] = re.findall(r'<div id="live"([^>]*)>(.*)', html, re.S)
++    attr = dict(re.findall(r'([\w-]+)="([^"]*)"', attrs))
++    assert (attr["hx-get"], attr["hx-select"], attr["hx-swap"]) == (f"/tasks/{task}", "#live", "outerHTML")
++    assert attr["hx-trigger"].startswith("every 3s")
++    assert "details[open]" in attr["hx-trigger"] and ":popover-open" in attr["hx-trigger"]
++    before = html.split('<div id="live"')[0]
++    assert "<header>" not in before and "<section" not in before
++    assert rest.startswith("\n<header>") and re.search(r"</main>\s*</div>\s*</body>", rest)

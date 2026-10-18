@@ -1,0 +1,15 @@
+VERDICT: PASS
+
+No blocking findings. What I checked against the diff:
+
+- §4.5: both new routes are POSTs, so the existing `local_safety` middleware covers them for Host and `X-Requested-By` (AC24 tests the 403). No templates, markdown, code viewer, or patch-size paths are touched. The Host header can't redirect `FCTL_URL` (Q8): I checked in W that Starlette drops a crafted `Host: localhost:4545@evil.example` and falls back to the bound server, giving `http://127.0.0.1:4545`.
+- Subprocesses: `git rev-parse`, `git worktree add`, `claude auth status`, and the `claude -p` Popen all take argument lists. Nothing uses `shell=True`, `os.system`, or `os.popen`. The branch name is built from a slug limited to `[a-z0-9-]`. `default_branch` can't start with `-` (checked in connect, app.py:194), and `factory_state` gates on it first.
+- §4.3: `run_env` drops `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and every `CLAUDE_CODE_USE_*`. `auth status` gets the same env and cwd (the worktree) as the run. The run is refused with 409 unless the exit code is 0 and `authMethod == "claude.ai"`. A missing binary, non-JSON output, or a timeout all fail closed. There is no `--bare`.
+- §4.4: `ALLOWED_TOOLS` and `DISALLOWED_TOOLS` match the doc verbatim. No git write command is allowed. stdin is `/dev/null`, stdout and stderr go to the log, the run gets its own process group, and runs are one at a time (checked before any side effect, re-checked under `BEGIN IMMEDIATE`, and the `IntegrityError` maps to 409). The CLI has no `run`, `approve`, or `rework` command, and no API field lets callers write `worktree_path`.
+- SQL: every app query uses `?` parameters. The env isn't logged, and error details carry only git's stderr and the OSError text.
+- Tests: conftest puts a do-nothing fake first on PATH, and each test overwrites it. AC23 pins PATH and asserts that git's dir has no real `claude`. `tests/test_runs.py` passes in W: 36 passed.
+
+## Nits (non-blocking)
+- src/claude_factories/app.py:479-480 — the test-command entry is built from `projects.test_cmd` with no check, so a `test_cmd` such as `fctl approve` or `git add` would put `Bash(fctl approve *)` or `Bash(git add *)` on the allowlist and break §4.4's "agents can't reach approve/run/rework" and "no git write". `test_cmd` is user-set at connect and agents can't change it, so this is not a defect against Q7 — fix: skip the entry (or reject it at connect) when the first word is `fctl` or `git`, or when it contains shell metacharacters.
+- src/claude_factories/app.py:419 — the port in `FCTL_URL` follows the client's Host header. Only a local non-browser caller can choose it, and that caller could already reach the API, so there is no real exposure — fix (optional): build it from the bound socket, `f"http://127.0.0.1:{request.scope['server'][1]}"`.
+- tests/test_runs.py:30 — the fake writes the whole `os.environ` to pytest's tmp dir. pytest keeps the last 3 sessions, and the dir is 0700. That copies any secrets in the developer's shell onto disk — fix: record only the keys the tests check (`STRIPPED`, `FOO`, `FCTL_URL`).

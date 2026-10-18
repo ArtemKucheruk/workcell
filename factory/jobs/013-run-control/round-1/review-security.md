@@ -1,0 +1,15 @@
+VERDICT: PASS
+
+No blocking findings. Checked against the spec, MVP §4.3–§4.5, and the security checklist:
+
+- §4.5: `POST /api/runs/{id}/stop` and both request-changes routes are POSTs behind the existing `local_safety` middleware (Host allowlist plus `X-Requested-By: fctl`). AC6 covers the 403 for a missing header. `GET /api/runs/{id}/log` is a safe method, so it needs no header (spec Q9, AC17). The app has no CORS middleware, and the Host check blocks DNS rebinding, so another origin can't read it. No template, markdown, Jinja, code-path, or 413 code was changed.
+- Signals: `os.killpg(pid, SIGTERM)` only uses `runs.pid`. Only `run_task` writes that column, at app.py:608, with `proc.pid` from a `start_new_session=True` Popen. So the pgid is never the server's own group. A NULL or 0 pid is skipped. At startup, runs a crash left behind become `failed: app restarted`, and no signal is sent (Q5).
+- Subprocesses: nothing new in `src/`. The test fake's `sleep 60` uses an argument list. No `shell=True`, `os.system`, or `os.popen` anywhere.
+- §4.3: the rework spawn goes through `run_task`, which is unchanged. It keeps the env strip (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_*`), the `claude auth status` / `authMethod: claude.ai` check with its 409, and no `--bare`. AC21 covers the 409 on the rework path.
+- §4.4: `ALLOWED_TOOLS` and `DISALLOWED_TOOLS` are unchanged and match the doc. No git write command is allowed. Agents can't reach the new spawn path or Stop. `fctl rework`, `approve`, and `run` aren't on the allowlist. `fctl decide` goes to `/decision`, whose `DecisionBody` only accepts `APPROVE` or `ESCALATE`, and there is no `fctl stop`. The rework cwd comes from `tasks.worktree_path`, which only `worktree()` writes (app.py:495). `TaskPatch` can't set it.
+- SQL: every new statement in the diff is parameterized, with no f-string or `%` SQL. Nothing new is logged.
+- Ran in W with `.venv/bin/python -m pytest`: `tests/test_run_control.py tests/test_runs.py tests/test_review_actions.py` gives 95 passed.
+
+## Nits (non-blocking)
+- src/claude_factories/app.py:520-542 and :627-631 — the row is still `running` from the moment `proc.wait()` reaps the leader until finish_run's status UPDATE, and finish_run re-reads the whole log in between. If the finish_run thread dies (for example, an OSError at :521 when the log is gone), the row stays `running` for good. A Stop or a shutdown in either case calls `killpg` on a pgid that has been reaped. If the OS has since given that id to a new group leader, SIGTERM reaches an unrelated process group. Spec Q2 and AC7 accept the reaped-pid case and the window is small, so this doesn't block. — Fix: write `exit_code` right after `proc.wait()`, before reading the log. Then make stop_run use `RETURNING pid, exit_code` and only signal when `exit_code IS NULL`.
+- src/claude_factories/app.py:630 — only `ProcessLookupError` is caught. An `EPERM`, from a pgid reused by another user's process, returns a 500 after the row is already committed as `stopped`. In the lifespan shutdown loop the same error propagates. — Fix: `except (ProcessLookupError, PermissionError)`.

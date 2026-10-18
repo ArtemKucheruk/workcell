@@ -1,0 +1,899 @@
+diff --git a/src/claude_factories/app.py b/src/claude_factories/app.py
+index afa4972..6364de9 100644
+--- a/src/claude_factories/app.py
++++ b/src/claude_factories/app.py
+@@ -4,6 +4,7 @@ import codecs
+ import json
+ import os
+ import re
++import shlex
+ import sqlite3
+ import subprocess
+ import threading
+@@ -23,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
+ from fastapi.templating import Jinja2Templates
+ from typing import Literal, get_args
+ 
++import jinja2
+ from markdown_it import MarkdownIt
+ from markupsafe import Markup
+ from pydantic import BaseModel, Field, FiniteFloat
+@@ -238,6 +240,61 @@ def find_project(path: str):
+     return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
+ 
+ 
++# --- Create factory (docs/MVP.md §3.2, docs/claude-code.md §7.1, §7.3) ---------
++
++FACTORY_FILES = (SKILL, *(f".claude/agents/{a}.md" for a in (  # Q6: written and listed in this order
++    "spec-writer", "builder", "review-security", "review-ux", "review-ui", "review-code", "approver")))
++# Q5: markdown, not HTML; values go in verbatim and are never evaluated as template code
++FACTORY_TEMPLATES = jinja2.Environment(
++    loader=jinja2.FileSystemLoader(HERE / "factory_templates"),
++    autoescape=False, keep_trailing_newline=True, undefined=jinja2.StrictUndefined,
++)
++COMMIT_HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'
++
++
++class FactoryBody(BaseModel):
++    overwrite: bool = False
++
++
++def create_factory(project_id: int, overwrite: bool) -> dict:
++    """Q7, Q8: every check before any write; existing files (lexists) are skipped unless overwrite."""
++    p = one_or_404(
++        "SELECT p.name, p.path, p.default_branch, p.test_cmd, w.name AS workspace FROM projects p"
++        " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
++        (project_id,),
++    )
++    if not (p["test_cmd"] or "").strip():
++        raise HTTPException(409, "no test command: in the repo, run fctl connect --workspace"
++                                 f' {shlex.quote(p["workspace"])} --test-cmd "<your test command>"')
++    root = p["path"]
++    if not os.path.isdir(root):
++        raise HTTPException(409, f"{root} is not a directory")
++    real_root = Path(os.path.realpath(root))
++    for rel in FACTORY_FILES:
++        if not Path(os.path.realpath(os.path.join(root, rel))).is_relative_to(real_root):
++            raise HTTPException(409, f"{rel} resolves outside the project")
++    values = {"name": p["name"], "default_branch": p["default_branch"], "test_cmd": p["test_cmd"]}
++    written, skipped = [], []
++    for rel in FACTORY_FILES:
++        target = Path(root, rel)
++        if os.path.lexists(target) and not overwrite:
++            skipped.append(rel)
++            continue
++        target.parent.mkdir(parents=True, exist_ok=True)
++        target.write_text(FACTORY_TEMPLATES.get_template(rel.removeprefix(".claude/")).render(values),
++                          encoding="utf-8")
++        written.append(rel)
++    if written:  # Q9
++        with closing(db.connect()) as conn, conn:
++            conn.execute("UPDATE projects SET factory_version = 1 WHERE id = ?", (project_id,))
++    return {"written": written, "skipped": skipped, "commit_hint": COMMIT_HINT}
++
++
++@app.post("/api/projects/{project_id}/factory")
++def create_factory_api(project_id: int, body: FactoryBody):
++    return create_factory(project_id, body.overwrite)
++
++
+ # --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
+ 
+ 
+@@ -938,6 +995,16 @@ async def move_project(request: Request, project_id: int):
+     return hx_redirect(f"/projects/{project_id}")
+ 
+ 
++@app.post("/projects/{project_id}/factory", response_class=HTMLResponse)
++async def create_factory_form(request: Request, project_id: int):
++    """Q11: htmx doesn't swap 4xx, so errors come back as a 200 fragment with role="alert"."""
++    try:
++        result = create_factory(project_id, bool(await form_field(request, "overwrite")))
++    except HTTPException as e:
++        result = {"error": e.detail}
++    return templates.TemplateResponse(request, "factory_result.html", result)
++
++
+ # §5.1, Q8: one row per event, round, verdict, decision, and comment, labelled; ties sort by kind, then id.
+ TIMELINE = """
+ SELECT created_at, 0 AS kind, id, IIF(from_status IS NULL, 'created · ', '') || COALESCE(to_status, '')
+diff --git a/src/claude_factories/factory_templates/agents/approver.md b/src/claude_factories/factory_templates/agents/approver.md
+new file mode 100644
+index 0000000..2532ff7
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/approver.md
+@@ -0,0 +1,34 @@
++---
++name: approver
++description: Final agent call on a factory task after agent review. Posts one decision, APPROVE or ESCALATE, with fctl decide. Used by /factory.
++tools: Read, Grep, Glob, Bash
++model: opus
++---
++Input: a task id and the rounds used in this run, e.g. "rounds used 2 of 2".
++
++Read `fctl show <id>`: the spec, every round's build notes, verdicts, comments, and
++decisions, and my feedback if I left any. Read the latest round's patch with `fctl diff <id>`,
++and the repo's docs the spec relies on, with Read, Grep, and Glob. Use Bash only for `fctl`,
++`git status`, and `git diff`.
++
++ESCALATE if any of these hold:
++- A verdict on the latest round is still CHANGES (the round cap was hit).
++- Tests fail or didn't run (the build notes' test output, the code review).
++- An acceptance criterion has no passing test.
++- The work conflicts with the repo's docs. Cite both sides.
++- An open question's answer changed behavior. I decide those.
++
++Otherwise APPROVE.
++
++Post exactly one decision:
++
++```sh
++fctl decide <id> APPROVE|ESCALATE <<'EOF'
++<2–5 lines: what was built, rounds used, tests. For ESCALATE: what I have to decide.>
++
++## Open questions
++- Each one and the default the builder used, so I see them.
++EOF
++```
++
++Do not edit code. Write nothing else.
+diff --git a/src/claude_factories/factory_templates/agents/builder.md b/src/claude_factories/factory_templates/agents/builder.md
+new file mode 100644
+index 0000000..efcae9a
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/builder.md
+@@ -0,0 +1,44 @@
++---
++name: builder
++description: Implements a factory task's spec in its worktree, runs the tests, and submits each round with fctl submit. Spawned as builder-<id> by /factory and messaged each round.
++tools: Read, Edit, Write, Grep, Glob, Bash
++model: opus
++---
++Input: a task id and a round n. Your cwd is the task's worktree: work only in it, and run
++every command from it.
++
++Read:
++- `fctl show <id>`: the task, its spec, and every earlier round's build notes, verdicts, and
++  comments.
++- Round n > 1: `fctl show <id> --round <n-1>`. Fix every finding in a CHANGES verdict.
++- Rework: `fctl show <id> --feedback` holds my summary and line comments. They win over the
++  reviewers.
++
++Do:
++1. Implement the spec in your cwd. Read the code around it first and follow its conventions.
++2. One test per acceptance criterion. Run the test command until it passes.
++   Test command for this repo: {{ test_cmd }}
++3. Keep `.gitignore` covering generated files (build output, caches, virtualenvs):
++   `fctl submit` sends every changed and untracked file that isn't ignored.
++4. End every round with `fctl submit <id>`, build notes on stdin:
++
++```sh
++fctl submit <id> <<'EOF'
++# Round <n>
++## Changes
++- path: what changed and why
++## Criteria → tests
++- AC1 → <test file>::<test name>
++## Review findings          (round > 1)
++- reviewer · finding → fixed, or why not
++## Open questions
++- Q1 → the default you used
++## Test output
++<the last lines of the test command's output, verbatim>
++EOF
++```
++
++Never commit, and run no git command that writes: no add, commit, stash, checkout, switch,
++reset, merge, rebase, or push. `git status` and `git diff` are fine.
++
++End with one line: `round <n> done: <N> passed`.
+diff --git a/src/claude_factories/factory_templates/agents/review-code.md b/src/claude_factories/factory_templates/agents/review-code.md
+new file mode 100644
+index 0000000..7c7eb28
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/review-code.md
+@@ -0,0 +1,44 @@
++---
++name: review-code
++description: Code review of the latest round of a factory task. Runs the tests and posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
++tools: Read, Grep, Glob, Bash
++model: sonnet
++---
++Input: a task id. Read `fctl show <id>` (the spec, the build notes, and earlier verdicts) and
++`fctl diff <id>`, and the files in your cwd (the worktree), with Read, Grep, and Glob. Round
++n > 1: check that your findings on the round before are fixed.
++
++Run the test command in your cwd. Use Bash only for it, `fctl`, `git status`, and `git diff`.
++Test command for this repo: {{ test_cmd }}
++
++Check:
++- The test command passes.
++- Every acceptance criterion has a test that passes and really asserts the criterion. Open
++  the tests; don't trust the build notes' mapping alone.
++- The code follows the repo's stack and conventions. A new dependency has its reason in the
++  spec.
++- Nothing unrequested: no extra abstractions, dead code, config, or dependencies.
++
++If the task changes no code: PASS with "no code in this task".
++
++Post exactly one verdict: the test command's summary line, then findings, most severe first,
++each as `file:line — problem — fix`:
++
++```sh
++fctl verdict <id> code PASS|CHANGES <<'EOF'
++…
++EOF
++```
++
++CHANGES only for real defects against the spec or these checks. Put nits under
++`## Nits (non-blocking)`. They never make CHANGES.
++
++Optional line comments on the diff:
++
++```sh
++fctl comment <id> code --path <file> --line <n> <<'EOF'
++…
++EOF
++```
++
++Do not edit code. Write nothing else.
+diff --git a/src/claude_factories/factory_templates/agents/review-security.md b/src/claude_factories/factory_templates/agents/review-security.md
+new file mode 100644
+index 0000000..de209ba
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/review-security.md
+@@ -0,0 +1,43 @@
++---
++name: review-security
++description: Security review of the latest round of a factory task. Posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
++tools: Read, Grep, Glob, Bash
++model: opus
++---
++Input: a task id. Read `fctl show <id>` and `fctl diff <id>`. Read files in your cwd (the
++worktree) as needed, with Read, Grep, and Glob. Use Bash only for `fctl`, `git status`, and
++`git diff`. Round n > 1: check that your findings on the round before (in `fctl show <id>`)
++are fixed.
++
++Check what the diff touches:
++- Injection: SQL, HTML, or paths built from input without parameters, escaping, or
++  containment (no `..`, no symlinks out).
++- Shell strings in subprocesses: commands run as argument lists, never one string through a
++  shell.
++- Missing authz: a new route, command, or action that skips the checks its neighbors have.
++- Secret leaks: keys or tokens in code, logs, errors, or responses.
++- Unsafe input handling: unchecked sizes, types, or formats where input crosses a trust
++  boundary.
++
++If the task touches none of this: PASS with "no security surface in this task".
++
++Post exactly one verdict, most severe finding first, each as `file:line — problem — fix`:
++
++```sh
++fctl verdict <id> security PASS|CHANGES <<'EOF'
++…
++EOF
++```
++
++CHANGES only for real defects against the spec or these checks. Put nits under
++`## Nits (non-blocking)`. They never make CHANGES.
++
++Optional line comments on the diff:
++
++```sh
++fctl comment <id> security --path <file> --line <n> <<'EOF'
++…
++EOF
++```
++
++Do not edit code. Write nothing else.
+diff --git a/src/claude_factories/factory_templates/agents/review-ui.md b/src/claude_factories/factory_templates/agents/review-ui.md
+new file mode 100644
+index 0000000..d343733
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/review-ui.md
+@@ -0,0 +1,41 @@
++---
++name: review-ui
++description: UI review of the latest round of a factory task against its spec and the repo's design docs. Posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
++tools: Read, Grep, Glob, Bash
++model: sonnet
++---
++Input: a task id. Read `fctl show <id>` and `fctl diff <id>`, any design docs in the repo,
++and the templates, styles, and scripts in your cwd (the worktree), with Read, Grep, and Glob.
++Use Bash only for `fctl`, `git status`, and `git diff`. Round n > 1: check that your findings
++on the round before (in `fctl show <id>`) are fixed.
++
++Check each page or screen the task adds or changes:
++- Layout, labels, and content match the spec and the design docs.
++- Empty states (nothing yet) and error states (unknown id, failed action) are designed, not
++  blank or a stack trace.
++- Light and dark both work.
++- Accessibility basics: real buttons and links, labeled form fields, visible focus, readable
++  contrast.
++
++If the task has no UI: PASS with "no UI in this task".
++
++Post exactly one verdict, most severe finding first, each as `file:line — problem — fix`:
++
++```sh
++fctl verdict <id> ui PASS|CHANGES <<'EOF'
++…
++EOF
++```
++
++CHANGES only for real defects against the spec or these checks. Put nits under
++`## Nits (non-blocking)`. They never make CHANGES.
++
++Optional line comments on the diff:
++
++```sh
++fctl comment <id> ui --path <file> --line <n> <<'EOF'
++…
++EOF
++```
++
++Do not edit code. Write nothing else.
+diff --git a/src/claude_factories/factory_templates/agents/review-ux.md b/src/claude_factories/factory_templates/agents/review-ux.md
+new file mode 100644
+index 0000000..46baac2
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/review-ux.md
+@@ -0,0 +1,42 @@
++---
++name: review-ux
++description: UX review of the latest round of a factory task, covering its user-facing flows, CLI output, and errors. Posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
++tools: Read, Grep, Glob, Bash
++model: sonnet
++---
++Input: a task id. Read `fctl show <id>` and `fctl diff <id>`. Read files in your cwd (the
++worktree) as needed, with Read, Grep, and Glob. Use Bash only for `fctl`, `git status`, and
++`git diff`. Round n > 1: check that your findings on the round before (in `fctl show <id>`)
++are fixed.
++
++Check what a user sees:
++- The task's user-facing flows work as the spec describes, with no extra steps, prompts, or
++  flags.
++- CLI output is short, consistent with the rest of the tool, and matches any examples in the
++  spec or the repo's docs.
++- Error messages say what went wrong and what to do next. CLI errors go to stderr and exit
++  non-zero; success exits 0.
++- API errors use fitting status codes with a readable message.
++
++If the task changes nothing a user sees: PASS with "nothing user-facing in this task".
++
++Post exactly one verdict, most severe finding first, each as `file:line — problem — fix`:
++
++```sh
++fctl verdict <id> ux PASS|CHANGES <<'EOF'
++…
++EOF
++```
++
++CHANGES only for real defects against the spec or these checks. Put nits under
++`## Nits (non-blocking)`. They never make CHANGES.
++
++Optional line comments on the diff:
++
++```sh
++fctl comment <id> ux --path <file> --line <n> <<'EOF'
++…
++EOF
++```
++
++Do not edit code. Write nothing else.
+diff --git a/src/claude_factories/factory_templates/agents/spec-writer.md b/src/claude_factories/factory_templates/agents/spec-writer.md
+new file mode 100644
+index 0000000..b1dc7f0
+--- /dev/null
++++ b/src/claude_factories/factory_templates/agents/spec-writer.md
+@@ -0,0 +1,46 @@
++---
++name: spec-writer
++description: Writes the spec for a factory task from its description, the repo's docs, and the code, and posts it with fctl spec. Used by /factory.
++tools: Read, Grep, Glob, Bash
++model: opus
++---
++Input: a task id. Your cwd is the task's worktree, fresh from the default branch (the builder
++hasn't started).
++
++Read:
++- `fctl show <id>`: the title and description are the request.
++- The repo's own docs, if any (README, docs/, design notes), and the code in your cwd.
++
++Read files with Read, Grep, and Glob. Use Bash only for `fctl`.
++
++Post the spec with `fctl spec <id>`:
++
++```sh
++fctl spec <id> <<'EOF'
++# <short title>
++
++## Goal
++2–4 sentences.
++
++## Acceptance criteria
++- [ ] AC1: <behavior> → <expected result: status code, output, row, page content>
++Each one testable by the repo's tests, one behavior each.
++
++## Files
++Files to create or change.
++
++## Out of scope
++Anything not to build now.
++
++## Open questions
++- Q1: <what the request and the docs don't decide>. Default: <what the builder should do>.
++EOF
++```
++
++Rules:
++- The request and the repo's docs decide. Anything they don't decide goes under Open
++  questions with a default. Never settle it silently inside a criterion.
++- Stay inside the request. No hooks or abstractions for later tasks.
++- Keep the repo's stack. A new dependency needs its reason in the spec.
++
++Do not edit code. Write nothing else.
+diff --git a/src/claude_factories/factory_templates/skills/factory/SKILL.md b/src/claude_factories/factory_templates/skills/factory/SKILL.md
+new file mode 100644
+index 0000000..607322e
+--- /dev/null
++++ b/src/claude_factories/factory_templates/skills/factory/SKILL.md
+@@ -0,0 +1,73 @@
++---
++name: factory
++description: Factory orchestrator. The app runs it headless as "/factory <task-id>" in the task's worktree. It drives one task through spec, build, agent review, and approval, with all state in the app.
++---
++
++# /factory $ARGUMENTS
++
++You orchestrate task $ARGUMENTS in {{ name }}. Below, `<id>` is $ARGUMENTS. All state lives in
++the app; read and write it only with `fctl`.
++
++Your cwd is the task's worktree, on a branch the app created from {{ default_branch }}. You and
++every agent work only in it. You are the only one who runs `fctl stage`. Every other agent
++posts only its own record: the spec, a round, a verdict, or a decision. You write no code,
++spec, verdicts, or decisions, and you edit no files.
++
++Never commit, push, merge, or switch branches, and no agent runs a git command that writes.
++The builder submits the worktree as it is.
++
++A run allows only these Bash commands: `fctl show`, `fctl diff`, `fctl spec`, `fctl submit`,
++`fctl verdict`, `fctl comment`, `fctl decide`, `fctl stage`, `fctl round`, `git status`,
++`git diff`, and the test command, plus what this repo's `.claude/settings.json` allows. Agents
++read files with Read, Grep, and Glob.
++
++Test command for this repo: {{ test_cmd }}
++
++Print one short line per step, e.g. `#<id> · round 1 · security CHANGES (3/4)`.
++
++## Where to start
++
++`fctl show <id>` prints the task: its status and stage, the spec, and every round with its
++build notes, verdicts, comments, and decisions. Continue from the current stage:
++
++| stage | go to |
++|---|---|
++| none, spec, or build | No spec yet (`_No spec yet._`) → step 2. No rounds, or the latest round has verdicts → step 3 with the next round. The latest round has none yet (`fctl round <id>` shows 0/4) → step 4. |
++| rework | `fctl show <id> --feedback` names the round my feedback is on. The latest round is that one → Rework below. The latest round is newer → step 4. |
++| agent_review | step 4, spawning only the reviewers `fctl round <id>` shows as pending (none → step 5) |
++| approval | step 6 |
++| human_review or escalated | nothing to do: print the stage and stop |
++
++## The loop
++
++1. `fctl show <id>`: read the task, then continue from its current stage (table above).
++2. spec → `fctl stage <id> spec`. Spawn `spec-writer`: "Task <id>." Wait for it.
++   `fctl show <id>` still says `_No spec yet._` → stop and report.
++3. build, round n → `fctl stage <id> build`.
++   - Round 1, or no `builder-<id>` in this session: spawn `builder` named `builder-<id>`:
++     "Task <id>, round <n>."
++   - Otherwise SendMessage `builder-<id>`: "Round <n>. Round <n-1> verdicts: `fctl show <id> --round <n-1>`."
++     SendMessage may be a deferred tool: load it with ToolSearch `select:SendMessage`.
++
++   Wait for it. Done when the builder has run `fctl submit <id>` and `fctl round <id>` shows
++   round n. Not there → ask the builder once to submit, then stop and report.
++4. agent_review → `fctl stage <id> agent_review`. Spawn `review-security`, `review-ux`,
++   `review-ui`, and `review-code` in ONE message, each with "Task <id>." WAIT FOR ALL: go on
++   only when `fctl round <id>` shows 4/4. Spawn a reviewer that ended without posting its
++   verdict once more. Never message the builder mid-round.
++5. Any CHANGES and fewer than 2 rounds in this run → step 3 with round n + 1. Otherwise →
++   step 6. Rounds in this run are the rounds after the one my latest feedback is on
++   (`fctl show <id> --feedback`), or all rounds when I left none.
++6. approval → `fctl stage <id> approval`. Spawn `approver`: "Task <id>, rounds used <x> of 2."
++   Rounds exhausted with CHANGES → it must ESCALATE. Wait for it.
++7. Read the approver's latest decision in `fctl show <id> --round <n>`. APPROVE →
++   `fctl stage <id> human_review`. ESCALATE, no decision, or anything else →
++   `fctl stage <id> escalated`. Stop and report the decision's summary: the task now waits
++   on me in Review.
++
++## Rework
++
++Stage rework means I requested changes on the latest round. Spawn a fresh `builder-<id>`:
++"Task <id>, round <n>. Address `fctl show <id> --feedback`." Keep the rework stage while it
++builds (skip step 3's `fctl stage`), then go on from step 3's wait. My feedback wins over the
++reviewers.
+diff --git a/src/claude_factories/templates/factory_result.html b/src/claude_factories/templates/factory_result.html
+new file mode 100644
+index 0000000..41d6207
+--- /dev/null
++++ b/src/claude_factories/templates/factory_result.html
+@@ -0,0 +1,14 @@
++{% if error %}
++<p role="alert">{{ error }}</p>
++{% else %}
++{% if written %}
++<p>Wrote {{ written | length }} file{{ "" if written | length == 1 else "s" }}:</p>
++<ul>{% for path in written %}<li><code>{{ path }}</code></li>{% endfor %}</ul>
++{% endif %}
++{% if skipped %}
++<p>Skipped {{ skipped | length }} existing file{{ "" if skipped | length == 1 else "s" }} (tick Overwrite to replace them):</p>
++<ul>{% for path in skipped %}<li><code>{{ path }}</code></li>{% endfor %}</ul>
++{% endif %}
++<p>Commit them so runs can see the factory:</p>
++<pre><code>{{ commit_hint }}</code></pre>
++{% endif %}
+diff --git a/src/claude_factories/templates/project.html b/src/claude_factories/templates/project.html
+index 96fff8e..add76bf 100644
+--- a/src/claude_factories/templates/project.html
++++ b/src/claude_factories/templates/project.html
+@@ -10,6 +10,12 @@
+   <div class="toolbar">
+     <a href="/projects/{{ project.id }}/code">Code</a>
+     <span>Factory: {{ factory }}{% if factory == "ready" %} ✓{% endif %}</span>
++    {% if factory != "ready" %}
++    <form hx-post="/projects/{{ project.id }}/factory" hx-target="#factory-result">
++      <label><input type="checkbox" name="overwrite"> Overwrite existing files</label>
++      <button>Create factory</button>
++    </form>
++    {% endif %}
+     <details>
+       <summary>+ New task</summary>
+       <form hx-post="/projects/{{ project.id }}/tasks">
+@@ -20,6 +26,7 @@
+     </details>
+     <button disabled title="Runs aren't available yet">Run next ▶</button>
+   </div>
++  <div id="factory-result" aria-live="polite"></div>
+ </header>
+ <main>
+ <p class="muted">{{ project.path }}</p>
+diff --git a/tests/test_factory.py b/tests/test_factory.py
+new file mode 100644
+index 0000000..4a25f16
+--- /dev/null
++++ b/tests/test_factory.py
+@@ -0,0 +1,334 @@
++import html
++import re
++
++import pytest
++from conftest import git, sql
++
++H = {"X-Requested-By": "fctl"}
++SKILL = ".claude/skills/factory/SKILL.md"
++AGENTS = ["spec-writer", "builder", "review-security", "review-ux", "review-ui", "review-code", "approver"]
++PATHS = [SKILL, *(f".claude/agents/{a}.md" for a in AGENTS)]
++BUILDER = ".claude/agents/builder.md"
++HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'
++NO_TEST_CMD = 'no test command: in the repo, run fctl connect --workspace personal --test-cmd "<your test command>"'
++
++
++def connect(client, path, **extra):
++    body = {"path": str(path), "workspace": "personal", "name": "api-server", "default_branch": "main",
++            "test_cmd": "make check"} | extra
++    r = client.post("/api/projects/connect", json=body, headers=H)
++    assert r.status_code == 200, r.text
++    return r.json()["id"]
++
++
++def create(client, project_id, body=None, headers=H):
++    return client.post(f"/api/projects/{project_id}/factory", json={"overwrite": False} if body is None else body,
++                       headers=headers)
++
++
++def rendered(client, repo, **extra) -> dict[str, str]:
++    """Connect, create the factory, and return {relative path: text} of the 8 files."""
++    r = create(client, connect(client, repo, **extra))
++    assert r.status_code == 200, r.text
++    return {p: (repo / p).read_text(encoding="utf-8") for p in PATHS}
++
++
++def files_outside_git(repo) -> set[str]:
++    return {p.relative_to(repo).as_posix() for p in repo.rglob("*")
++            if p.is_file() and p.relative_to(repo).parts[0] != ".git"}
++
++
++def frontmatter(text) -> dict[str, str]:
++    assert text.startswith("---\n")
++    head = text[4:text.index("\n---\n")]
++    return dict(line.split(": ", 1) for line in head.splitlines())
++
++
++def snapshot(repo) -> dict[str, bytes]:
++    return {p: (repo / p).read_bytes() for p in PATHS}
++
++
++# --- Template content ----------------------------------------------------------------
++
++
++def test_exactly_eight_files(client, repo):  # AC1
++    assert files_outside_git(repo) == set()
++    rendered(client, repo)
++    assert files_outside_git(repo) == set(PATHS)
++
++
++def test_agent_frontmatter(client, repo):  # AC2
++    files = rendered(client, repo)
++    opus = {"spec-writer", "builder", "review-security", "approver"}
++    for agent in AGENTS:
++        meta = frontmatter(files[f".claude/agents/{agent}.md"])
++        assert meta["name"] == agent
++        assert meta["model"] == ("opus" if agent in opus else "sonnet")
++        assert meta["tools"] == ("Read, Edit, Write, Grep, Glob, Bash" if agent == "builder"
++                                 else "Read, Grep, Glob, Bash")
++
++
++def test_skill_frontmatter(client, repo):  # AC3
++    text = rendered(client, repo)[SKILL]
++    meta = frontmatter(text)
++    assert meta["name"] == "factory"
++    assert meta["description"].strip()
++    assert "disable-model-invocation" not in text
++    assert "$ARGUMENTS" in text[text.index("\n---\n") + 5:]
++
++
++def test_skill_commands(client, repo):  # AC4
++    text = rendered(client, repo)[SKILL]
++    for stage in ("spec", "build", "agent_review", "approval", "human_review", "escalated"):
++        assert f"fctl stage <id> {stage}" in text
++    for needed in ("fctl show <id>", "fctl show <id> --feedback", "fctl round <id>", "builder-<id>"):
++        assert needed in text
++
++
++def test_agents_post_own_records(client, repo):  # AC5
++    files = rendered(client, repo)
++    agent = {a: files[f".claude/agents/{a}.md"] for a in AGENTS}
++    assert "fctl spec <id>" in agent["spec-writer"]
++    assert "fctl submit <id>" in agent["builder"]
++    for r in ("security", "ux", "ui", "code"):
++        assert f"fctl verdict <id> {r}" in agent[f"review-{r}"]
++        assert f"fctl comment <id> {r}" in agent[f"review-{r}"]
++    assert "fctl decide <id>" in agent["approver"]
++    for name, text in agent.items():
++        assert "fctl show <id>" in text
++        if name.startswith("review-") or name == "approver":
++            assert "fctl diff <id>" in text
++
++
++def test_values_rendered(client, repo):  # AC6
++    files = rendered(client, repo, default_branch="develop")
++    for value in ("api-server", "develop", "make check"):
++        assert value in files[SKILL]
++    assert "make check" in files[BUILDER]
++    assert "make check" in files[".claude/agents/review-code.md"]
++    for text in files.values():
++        for leftover in ("{{", "}}", "{%"):
++            assert leftover not in text
++
++
++def test_only_allowlisted_fctl_commands(client, repo):  # AC7
++    files = rendered(client, repo)
++    allowed = {"show", "diff", "spec", "submit", "verdict", "comment", "decide", "stage", "round"}
++    for path, text in files.items():
++        assert set(re.findall(r"\bfctl ([a-z]+)\b", text)) <= allowed, path
++    assert "never commit" in files[SKILL].lower()
++    assert "never commit" in files[BUILDER].lower()
++
++
++def test_no_bootstrap_factory_leftovers(client, repo):  # AC8
++    banned = ("board.json", "factory/jobs", "FACTORY.md", "§", "gh pr", "git worktree", "/factory next",
++              "/factory approve", "/factory rework", "/factory resume", "FCTL_HOME", "uv run pytest")
++    for path, text in rendered(client, repo).items():
++        for word in banned:
++            assert word not in text, (path, word)
++
++
++def test_test_cmd_verbatim(client, repo):  # AC9
++    cmd = '{{ name }} && echo "<b>&amp;"'
++    assert cmd in rendered(client, repo, test_cmd=cmd)[BUILDER]
++
++
++# --- POST /api/projects/{id}/factory -----------------------------------------------
++
++
++def test_create_fresh(client, repo):  # AC10
++    r = create(client, connect(client, repo), {"overwrite": False})
++    assert r.status_code == 200
++    assert r.json() == {"written": PATHS, "skipped": [], "commit_hint": HINT}
++
++
++def test_existing_files_skipped(client, repo):  # AC11
++    pid = connect(client, repo)
++    create(client, pid)
++    (repo / BUILDER).write_text("hand edit\n")
++    before = snapshot(repo)
++    r = create(client, pid, {})
++    assert r.status_code == 200
++    assert r.json() == {"written": [], "skipped": PATHS, "commit_hint": HINT}
++    assert snapshot(repo) == before
++    assert before[BUILDER] == b"hand edit\n"
++
++
++def custom_builder(repo):
++    (repo / BUILDER).parent.mkdir(parents=True)
++    (repo / BUILDER).write_text("custom\n")
++
++
++def test_one_existing_skipped(client, repo):  # AC12
++    custom_builder(repo)
++    r = create(client, connect(client, repo), {"overwrite": False})
++    assert r.json() == {"written": [p for p in PATHS if p != BUILDER], "skipped": [BUILDER], "commit_hint": HINT}
++    assert (repo / BUILDER).read_text() == "custom\n"
++
++
++def test_overwrite(client, repo):  # AC13
++    custom_builder(repo)
++    r = create(client, connect(client, repo), {"overwrite": True})
++    assert r.json() == {"written": PATHS, "skipped": [], "commit_hint": HINT}
++    assert "fctl submit <id>" in (repo / BUILDER).read_text()
++
++
++def test_factory_state_through_commit(client, repo):  # AC14
++    pid = connect(client, repo)
++
++    def state():
++        return client.get("/api/projects", params={"path": str(repo)}).json()["factory"]
++
++    assert state() == "none"
++    create(client, pid)
++    assert state() == "uncommitted"
++    git(repo, "add", ".claude/skills/factory", ".claude/agents")
++    git(repo, "commit", "-q", "-m", "Add factory")
++    assert state() == "ready"
++    assert git(repo, "status", "--porcelain") == ""
++
++
++def test_factory_version(client, repo, tmp_path):  # AC15
++    pid = connect(client, repo)
++    version = "SELECT factory_version FROM projects WHERE id = ?"
++    assert sql(version, (pid,)) == [(None,)]
++    create(client, pid)
++    assert sql(version, (pid,)) == [(1,)]
++
++    other = tmp_path / "other"
++    git(tmp_path, "init", "-q", "-b", "main", str(other))
++    for p in PATHS:
++        (other / p).parent.mkdir(parents=True, exist_ok=True)
++        (other / p).write_text("mine\n")
++    other_id = connect(client, other)
++    assert create(client, other_id).json()["written"] == []
++    assert sql(version, (other_id,)) == [(None,)]
++
++
++@pytest.mark.parametrize("test_cmd", [None, "   "])
++def test_no_test_cmd(client, repo, test_cmd):  # AC16
++    r = create(client, connect(client, repo, test_cmd=test_cmd))
++    assert r.status_code == 409
++    assert r.json() == {"detail": NO_TEST_CMD}
++    assert not (repo / ".claude").exists()
++
++
++@pytest.mark.parametrize("kind", ["deleted", "file"])
++def test_path_not_a_directory(client, tmp_path, kind):  # AC17
++    path = tmp_path / "project"
++    if kind == "file":
++        path.write_text("x")
++    r = create(client, connect(client, path))
++    assert r.status_code == 409
++    assert r.json() == {"detail": f"{path} is not a directory"}
++    if kind == "file":
++        assert path.read_text() == "x"
++    else:
++        assert not path.exists()
++
++
++@pytest.mark.parametrize("overwrite", [False, True])
++def test_symlink_out_refused(client, repo, tmp_path, overwrite):  # AC18
++    outside = tmp_path / "outside"
++    outside.mkdir()
++    (repo / ".claude").mkdir()
++    (repo / ".claude" / "agents").symlink_to(outside)
++    r = create(client, connect(client, repo), {"overwrite": overwrite})
++    assert r.status_code == 409
++    assert r.json() == {"detail": ".claude/agents/spec-writer.md resolves outside the project"}
++    assert list(outside.iterdir()) == []
++    assert not (repo / SKILL).exists()
++
++
++def test_unknown_project_and_no_header(client, repo):  # AC19
++    assert create(client, 999).status_code == 404
++    assert create(client, connect(client, repo), headers={}).status_code == 403
++    assert files_outside_git(repo) == set()
++
++
++# --- Board -----------------------------------------------------------------------------
++
++
++def header(client, project_id):
++    """The page before #board, and the whole page."""
++    r = client.get(f"/projects/{project_id}")
++    assert r.status_code == 200
++    return r.text.split('<div id="board"')[0], r.text
++
++
++def factory_form(head, project_id):
++    return re.findall(rf'<form hx-post="/projects/{project_id}/factory" hx-target="#factory-result">(.*?)</form>',
++                      head, re.S)
++
++
++def text(fragment):
++    """Tags stripped, entities unescaped, whitespace collapsed."""
++    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
++
++
++def test_create_factory_form(client, repo):  # AC20
++    pid = connect(client, repo)
++    head, _ = header(client, pid)
++    [form] = factory_form(head, pid)
++    [label] = re.findall(r"<label>(.*?)</label>", form, re.S)
++    assert '<input type="checkbox" name="overwrite">' in label
++    assert "Overwrite" in text(label)
++    assert re.findall(r"<button[^>]*>(.*?)</button>", form) == ["Create factory"]
++    assert 'id="factory-result"' in head
++
++
++def test_form_by_state(client, repo):  # AC21
++    pid = connect(client, repo)
++    (repo / SKILL).parent.mkdir(parents=True)
++    (repo / SKILL).write_text("# factory\n")
++    head, _ = header(client, pid)
++    assert len(factory_form(head, pid)) == 1
++    git(repo, "add", SKILL)
++    git(repo, "commit", "-q", "-m", "Add factory")
++    _, page = header(client, pid)
++    assert f'hx-post="/projects/{pid}/factory"' not in page
++    assert "Create factory" not in page
++    assert "Factory: ready ✓" in page
++
++
++def post_form(client, project_id, data=None, headers=H):
++    return client.post(f"/projects/{project_id}/factory", data=data or {}, headers=headers)
++
++
++def test_form_post_writes(client, repo):  # AC22
++    r = post_form(client, connect(client, repo))
++    assert r.status_code == 200
++    assert "<html" not in r.text
++    shown = text(r.text)
++    assert "Wrote 8 files:" in shown
++    for p in PATHS:
++        assert p in shown
++        assert (repo / p).is_file()
++    assert HINT in shown
++
++
++def test_form_post_skips_then_overwrites(client, repo):  # AC23
++    pid = connect(client, repo)
++    post_form(client, pid)
++    shown = text(post_form(client, pid).text)
++    assert "Skipped 8 existing files" in shown and "Wrote" not in shown
++    assert "Overwrite" in shown
++    assert all(p in shown for p in PATHS)
++    (repo / BUILDER).write_text("hand edit\n")
++    shown = text(post_form(client, pid, {"overwrite": "on"}).text)
++    assert "Wrote 8 files:" in shown and "Skipped" not in shown
++    assert all(p in shown for p in PATHS)
++    assert "fctl submit <id>" in (repo / BUILDER).read_text()
++
++
++def test_form_post_error(client, repo):  # AC24
++    r = post_form(client, connect(client, repo, test_cmd=None))
++    assert r.status_code == 200
++    [alert] = re.findall(r'<(\w+) role="alert">(.*?)</\1>', r.text, re.S)
++    assert html.unescape(alert[1]) == NO_TEST_CMD
++    assert not (repo / ".claude").exists()
++
++
++def test_form_post_needs_header(client, repo):  # AC25
++    assert post_form(client, connect(client, repo), headers={}).status_code == 403
++    assert files_outside_git(repo) == set()

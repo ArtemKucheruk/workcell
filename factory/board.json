@@ -250,6 +250,654 @@
       ],
       "stage": null,
       "status": "done"
+    },
+    {
+      "id": "006-agent-api",
+      "title": "Agent API: verdicts, comments, decision, context, fctl",
+      "description": "`PUT \u2026/rounds/latest/verdicts/{reviewer}` (re-post overwrites), `POST /api/tasks/{id}/comments`, `POST /api/tasks/{id}/decision` (\u00a76.3); `GET /api/tasks/{id}/context?round=|?feedback=1` as markdown (\u00a76.2, \u00a74.3); `fctl show [--round N | --feedback]`, `spec`, `stage`, `verdict`, `comment`, `decide`, `round` with stdin heredocs and the `round 2: security=PASS \u2026 (3/4)` output (\u00a77.2).",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/006-agent-api",
+      "worktree": ".claude/worktrees/006-agent-api",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/8",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T16:05:34Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T16:12:08Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T16:20:07Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T17:21:16Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T17:23:49Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T17:26:07Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T17:28:16Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-17T17:31:11Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "007-review-conversation",
+      "title": "Review page: header, conversation tab, timeline",
+      "description": "review page `/tasks/{id}/review` (\u00a78 item 5, \u00a78.2): header with status \u00b7 stage, branch, round selector (default latest), files and +/\u2212; Conversation tab with description, spec summary, rounds with verdict chips and expandable bodies, approver decision, timeline as the union of events, rounds, verdicts, decisions, and comments (\u00a75.1); conversation comment box; \"no agent review\" for standalone tasks (\u00a77.4).",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/007-review-conversation",
+      "worktree": ".claude/worktrees/007-review-conversation",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/10",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T17:32:40Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T17:37:44Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T17:44:50Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T17:47:23Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T17:51:06Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T17:53:14Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T17:55:31Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-17T17:56:49Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "012-run-spawn",
+      "title": "Run spawn: run, run-next, worktree, auth, one at a time",
+      "description": "`POST /api/tasks/{id}/run` and `POST /api/projects/{id}/run-next` (\u00a76.2); 409 unless the factory is committed on the default branch; worktree `.claude/worktrees/<id>-<slug>` on `factory/<id>-<slug>` and `.claude/worktrees/` in `.git/info/exclude` (\u00a710 assumption 4); env stripping and the `claude auth status` check, 409 `not on subscription auth` (\u00a74.3); the spawn command with the allow and deny lists and the project's test command, in its own process group, stdout to `runs/<run-id>.jsonl` (\u00a74.4); one run at a time, 409 `run #N active`; on exit, record the exit code and read the `result` event (\u00a74.1). The prompt string lives in one constant (\u00a710 open question 1).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/012-run-spawn",
+      "worktree": ".claude/worktrees/012-run-spawn",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/9",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T17:34:50Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T17:41:28Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T17:49:33Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T17:52:40Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T17:54:10Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T17:55:20Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "008-review-files",
+      "title": "Review page: Files changed tab, diff, inline comments",
+      "description": "Files changed tab (\u00a78.3): file tree with +/\u2212 per file, server-rendered unified diff table with one row per line and anchors `path:side:line`, highlight.js; click a line number to post an inline comment; agent and my inline comments shown in place (\u00a73.5, MVP assumption 12).",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/008-review-files",
+      "worktree": ".claude/worktrees/008-review-files",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/12",
+      "reviews": {
+        "security": "PASS",
+        "ux": "CHANGES",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T17:58:05Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T18:06:11Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T18:50:24Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T18:54:01Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T18:58:27Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T19:01:57Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T19:04:32Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-17T19:25:20Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "011-factory-templates",
+      "title": "Create factory: agent templates, API, board button",
+      "description": "Create factory (\u00a73.2, \u00a76.1 `POST /api/projects/{id}/factory`): SKILL.md and the 7 agent templates from \u00a77.3, adapted from this repo's `.claude/` to fctl, rendered with the project's name, test command, and default branch; skip existing files unless overwrite; written and skipped lists plus the commit hint; Create factory button and result on the board.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/011-factory-templates",
+      "worktree": ".claude/worktrees/011-factory-templates",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/11",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T17:59:38Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T18:07:10Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T18:15:17Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T18:17:31Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T18:19:49Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T18:47:48Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "009-review-actions",
+      "title": "Review actions: approve, request changes, fctl",
+      "description": "`POST /api/tasks/{id}/approve` (done, `commit_hint`) and `POST /api/tasks/{id}/request-changes` (CHANGES_REQUESTED decision, stage rework; standalone tasks only record feedback, `run_id` null) (\u00a73.6, \u00a73.7, \u00a76.3); Approve and Request changes buttons enabled only in review, summary required for Request changes, commit commands shown after Approve (\u00a78 item 5); `fctl approve <id>` and `fctl rework <id> \"note\"` (\u00a77.2).",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/009-review-actions",
+      "worktree": ".claude/worktrees/009-review-actions",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/14",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T19:28:41Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T19:40:13Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T19:48:04Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T19:51:10Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T19:56:41Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T19:59:23Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T20:01:48Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T20:05:56Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "016-code-page",
+      "title": "Project code page: file tree, README, file viewer",
+      "description": "project code page `/projects/{id}/code` (\u00a78 item 6): `git ls-files` tree of the main checkout, README landing rendered with raw HTML off, highlighted file viewer with line numbers, \"not shown\" for binary files and files over 1 MB, current branch in the header, path containment (\u00a74.5).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/016-code-page",
+      "worktree": ".claude/worktrees/016-code-page",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/13",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T19:29:37Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T19:39:36Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T19:46:28Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T19:49:26Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T19:50:54Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T19:59:11Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "010-task-detail",
+      "title": "Task page: spec, rounds, verdicts, history",
+      "description": "task page `/tasks/{id}` (\u00a78 item 4) without run controls: header, rendered spec, rounds with collapsible build notes, 4 chips that open the verdict, +/\u2212, approver decision, status history from `events`, link to Review.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/010-task-detail",
+      "worktree": ".claude/worktrees/010-task-detail",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/15",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T20:07:07Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T20:12:50Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T20:19:26Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T20:21:58Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T20:23:06Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-17T20:45:37Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "013-run-control",
+      "title": "Run control: stop, log, retry, rework runs",
+      "description": "`POST /api/runs/{id}/stop` sending SIGTERM to the process group; stopping `fctl serve` stops every run; at startup a run still marked running becomes `failed: app restarted` (\u00a74.4); `GET /api/runs/{id}/log?after=` turning stream-json into lines (\u00a76.2); Retry re-runs from the current stage (\u00a73.4); Request changes on a factory task spawns a rework run (\u00a73.6).",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/013-run-control",
+      "worktree": ".claude/worktrees/013-run-control",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/16",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T20:09:04Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T20:17:17Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T20:27:30Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T20:32:20Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T20:38:30Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T20:45:10Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T20:46:57Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-18T00:56:04Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "015-cli-and-skills",
+      "title": "fctl setup, run, and task add --run",
+      "description": "`fctl setup` writing `~/.claude/skills/factory-connect` and `factory-submit` (\u00a77.1, \u00a73.1, \u00a73.8); `fctl run <id>`, `fctl run next`, and `fctl task add \"\u2026\" --run` (\u00a77.2).",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/015-cli-and-skills",
+      "worktree": ".claude/worktrees/015-cli-and-skills",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/17",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-17T21:08:01Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-17T21:11:39Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T21:17:08Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T21:26:33Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-17T21:30:33Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-17T21:33:50Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-17T21:35:12Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-17T21:39:10Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "017-dashboard",
+      "title": "Dashboard: status tiles, open tasks, rounds per task",
+      "description": "dashboard `/` (\u00a78 item 1): tiles for tasks per status, waiting on me, escalated, running now, done this week, and runs this week, each linking to a filtered list; open tasks per workspace \u2192 project by status; rounds per task for tasks done in the last 30 days (average, max, list).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/017-dashboard",
+      "worktree": ".claude/worktrees/017-dashboard",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/18",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T00:44:22Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T00:47:14Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T00:53:55Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T00:56:08Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T00:57:15Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T01:00:10Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "014-run-ui",
+      "title": "Run controls, stalled cards, run log, auth badge",
+      "description": "Run, Run next, Stop, and Retry buttons; \"stalled \u00b7 <stage>\" cards with Retry (\u00a78.1); task page run status, run log tail polling every 3 s, and the takeover command `cd <worktree> && claude --resume <session-id>` (\u00a78 item 4, \u00a74.4); every page header shows `Claude: Pro \u2713` or a red `API key \u2014 runs disabled` from `claude auth status` (\u00a78, \u00a74.3).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/014-run-ui",
+      "worktree": ".claude/worktrees/014-run-ui",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/19",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T01:05:21Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T01:13:39Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T01:28:13Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T01:34:50Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T01:36:11Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T01:58:38Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
     }
   ]
 }
