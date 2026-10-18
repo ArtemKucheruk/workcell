@@ -61,7 +61,8 @@ creates the data dir and `factory.db` in it.
 | `FCTL_HOME` | `~/.claude-factories` | the data dir: `factory.db`, and run logs once runs exist |
 | `FCTL_URL` | `http://127.0.0.1:4545` | where `fctl` sends its API calls; set it if you changed `--port` |
 
-The app listens only on 127.0.0.1. It rejects requests whose `Host` isn't `127.0.0.1` or
+The app listens on 127.0.0.1 by default. `--host 0.0.0.0` is the Docker container's setting,
+not one to use on the host. The app rejects requests whose `Host` isn't `127.0.0.1` or
 `localhost`, and it refuses any write that lacks the `X-Requested-By: fctl` header
 (docs/MVP.md §4.5).
 
@@ -76,6 +77,26 @@ fctl setup                  # 015: installs the /factory-connect and /factory-su
 
 The full walkthrough, from connecting a repo to approving a task, is in
 [docs/MVP.md §3](docs/MVP.md#3-user-flows).
+
+## Run with Docker
+
+You need Docker with Compose. In the repo:
+
+```sh
+cp compose.override.example.yaml compose.override.yaml && docker compose up --build
+```
+
+Before the first `up`, edit `compose.override.yaml`: set `user:` to your `id -u`:`id -g`, and
+mount every folder that holds a connected project at its own path (`/Users/you/code:/Users/you/code`).
+That file is gitignored, and it publishes both servers on 127.0.0.1 only.
+
+The app opens at http://127.0.0.1:3000. The backend is on `127.0.0.1:4545` as before, so
+`fctl` on the host needs no change. Its data lives in the `fctl-home` Docker volume, not in
+`~/.claude-factories`. `docker compose down` stops it, and `docker compose down -v` also
+deletes the data.
+
+Runs don't work inside Docker yet: the app shows `API key — runs disabled` and refuses Run.
+They arrive with backlog job 028. Until then, use `fctl serve` on the host for runs.
 
 ## The factory loop
 

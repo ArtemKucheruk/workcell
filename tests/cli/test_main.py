@@ -57,18 +57,30 @@ def test_serve_port_option(uvicorn_calls):  # AC5
     assert uvicorn_calls[0]["host"] == "127.0.0.1"
 
 
-def test_serve_has_no_host_option(uvicorn_calls):  # AC6
-    with pytest.raises(SystemExit) as e:
-        main(["serve", "--host", "0.0.0.0"])
-    assert e.value.code == 2
-    assert uvicorn_calls == []
-
-
 def test_serve_prints_banner_before_run(uvicorn_calls):  # AC7
     main(["serve", "--port", "5000"])
     assert uvicorn_calls[0]["stdout"] == (
         f"Claude Factories → http://127.0.0.1:5000 (data: {config.data_dir()})\n"
     )
+
+
+def test_serve_host_option(uvicorn_calls):  # 027 AC1
+    main(["serve", "--host", "0.0.0.0"])
+    assert len(uvicorn_calls) == 1
+    assert uvicorn_calls[0]["host"] == "0.0.0.0"
+    assert uvicorn_calls[0]["port"] == 4545
+
+
+def test_serve_banner_shows_host(uvicorn_calls):  # 027 AC3
+    main(["serve", "--host", "0.0.0.0", "--port", "5000"])
+    assert uvicorn_calls[0]["stdout"] == f"Claude Factories → http://0.0.0.0:5000 (data: {config.data_dir()})\n"
+
+
+def test_serve_help_lists_host():  # 027 AC4
+    r = subprocess.run([FCTL, "serve", "--help"], capture_output=True, text=True)
+    assert r.returncode == 0
+    help_text = " ".join(r.stdout.split())  # argparse wraps at the terminal width
+    assert re.search(r"--host HOST .*default: 127\.0\.0\.1", help_text)
 
 
 def test_serve_runs_create_app(uvicorn_calls):  # 034 AC4

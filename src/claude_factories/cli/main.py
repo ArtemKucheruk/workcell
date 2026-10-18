@@ -32,14 +32,15 @@ def serve(args):
     from ..config import data_dir
     from ..server.app import create_app
 
-    print(f"Claude Factories → http://127.0.0.1:{args.port} (data: {data_dir()})", flush=True)
-    uvicorn.run(create_app(), host="127.0.0.1", port=args.port)
+    print(f"Claude Factories → http://{args.host}:{args.port} (data: {data_dir()})", flush=True)
+    uvicorn.run(create_app(), host=args.host, port=args.port)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="fctl", description="Claude Factories CLI.")
     commands = parser.add_subparsers(dest="command", required=True)
-    p = commands.add_parser("serve", help="start the app on 127.0.0.1")
+    p = commands.add_parser("serve", help="start the app's backend")
+    p.add_argument("--host", default="127.0.0.1", help="address to bind (default: 127.0.0.1; 0.0.0.0 is for the container)")
     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
     p.set_defaults(func=serve)
     p = commands.add_parser("setup", help="write the /factory-connect and /factory-submit skills to ~/.claude")

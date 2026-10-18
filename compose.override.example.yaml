@@ -1,0 +1,16 @@
+# Copy to compose.override.yaml (gitignored) and edit the uid:gid and project roots:
+#   cp compose.override.example.yaml compose.override.yaml && docker compose up --build
+services:
+  backend:
+    # your `id -u`:`id -g`, so worktree files stay yours and git doesn't call them "dubious ownership"
+    user: "501:20"
+    ports:
+      - "127.0.0.1:4545:4545"   # fctl on the host keeps using 127.0.0.1:4545
+    volumes:
+      # Mount every root that holds a connected project at its host path, because projects
+      # store the host paths from `fctl connect`. One line per root.
+      - /Users/me/code:/Users/me/code
+
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"   # the app: http://127.0.0.1:3000
