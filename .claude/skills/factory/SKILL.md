@@ -136,13 +136,14 @@ n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the c
    report if it's still missing (`/factory resume` picks up from here).
 4. Snapshot the worktree, untracked files included, without touching its index, against the
    job's base on main (after a rework, HEAD is the job's earlier commit). Vendored `*.min.*`
-   files and `uv.lock` stay out of the patch: every reviewer and the approver read it.
+   files, `uv.lock`, and `package-lock.json` stay out of the patch: every reviewer and the
+   approver read it.
    ```sh
    t=$(mktemp -d); wt=.claude/worktrees/<id>
    base=$(git -C $wt merge-base HEAD origin/main)
    GIT_INDEX_FILE=$t/index git -C $wt read-tree HEAD
    GIT_INDEX_FILE=$t/index git -C $wt add -A
-   GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' > factory/jobs/<id>/round-<n>/diff.patch
+   GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' ':!*package-lock.json' > factory/jobs/<id>/round-<n>/diff.patch
    rm -rf $t
    ```
    Over 5 MB means generated files got in (.venv/, caches): have the builder fix .gitignore,
@@ -151,10 +152,10 @@ n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the c
 ### agent_review, round n
 1. Stage agent_review.
 2. Spawn `review-security`, `review-ux`, `review-ui`, `review-code` in ONE message, each with
-   "Job <id>, round <n>." Skip `review-ui` when the diff touches no UI files, i.e.
-   `grep -qE '^diff --git .*/(templates|static)/' J/round-<n>/diff.patch` fails: write
+   "Job <id>, round <n>." Skip `review-ui` when the diff touches nothing under `frontend/`,
+   i.e. `grep -qE '^diff --git (a|.* b)/frontend/' J/round-<n>/diff.patch` fails: write
    J/round-<n>/review-ui.md yourself, `VERDICT: PASS` then
-   `no UI in this job (diff touches no templates/ or static/; review-ui skipped)`.
+   `no UI in this job (diff touches no frontend/; review-ui skipped)`. review-ux always runs.
 3. As each finishes, read the first line of J/round-<n>/review-<r>.md and set `reviews.<r>`.
    Anything but `VERDICT: PASS` counts as CHANGES.
 4. WAIT FOR ALL: the round is done only when all 4 review files exist. Spawn a reviewer

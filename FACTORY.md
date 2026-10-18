@@ -15,14 +15,21 @@ The repo holds only docs; job 001 creates the project. Don't infer the stack fro
 Use this one (docs/MVP.md §4.2):
 - Python 3.12, managed with uv. The package is `claude_factories` and the console script is `fctl`.
 - FastAPI and uvicorn. stdlib sqlite3 with one `schema.sql` applied at startup, in WAL mode. No ORM.
-- Jinja2 templates and htmx, rendered on the server, with no frontend build. htmx and
-  highlight.js are vendored under `static/`.
+- The frontend in `frontend/`: a Vite + React SPA in plain JSX, Tailwind v4, react-router,
+  and highlight.js from npm, tested with vitest + @testing-library/react + jsdom.
+  `frontend/server.js` serves the built SPA and proxies `/api` to the backend, on
+  `node:http` with no extra dependencies. Node 22 and npm.
 - markdown-it-py with raw HTML turned off.
 - The `fctl` CLI module imports only the stdlib.
 - Runtime dependencies: fastapi, uvicorn, jinja2, markdown-it-py. Dev dependencies: pytest,
   httpx. Any other dependency needs a reason in the spec.
-- Test command: `uv run pytest -q`. Tests use a temp data dir (`FCTL_HOME`) and a fake
+- npm dependencies: react, react-dom, react-router, highlight.js. Dev dependencies: vite,
+  @vitejs/plugin-react, tailwindcss, @tailwindcss/vite, vitest, @testing-library/react,
+  jsdom. `server.js` uses Node built-ins only. Any other package needs a reason in the spec.
+- Test commands: `uv run pytest -q`, plus `npm --prefix frontend test` once
+  `frontend/package.json` exists. Tests use a temp data dir (`FCTL_HOME`) and a fake
   `claude` on PATH. They never call the real `claude`, the network, or `~/.claude*`.
+  Frontend tests mock fetch and never call the backend or the network.
 
 docs/ is the source of truth for what to build. Specs cite doc sections, for example
 `docs/data-model-and-api.md §6.2`. The table at the top of docs/MVP.md says which file
@@ -140,8 +147,11 @@ What each one does:
   as a checklist (each one testable), the files it expects to touch, what's out of scope,
   and open questions. Anything the docs don't decide goes under open questions, never
   guessed silently.
-- **builder** implements the spec in the worktree, runs `uv run pytest -q` there, and maps
-  each acceptance criterion to its test in build.md.
+- **builder** implements the spec in the worktree, runs both test commands there, and maps
+  each acceptance criterion to its test in build.md. When the worktree has
+  `frontend/package.json`, it installs and builds once per round for the reviewers:
+  `npm --prefix frontend ci` if `frontend/node_modules` is missing, the frontend tests, then
+  `npm --prefix frontend run build`, leaving `node_modules/` and `dist/` in place.
 - **security** checks docs §4.5 (127.0.0.1 bind, Host and `X-Requested-By` checks, raw
   HTML off in markdown, path containment, the 5 MB limit). Subprocesses must take argument
   lists, never shell strings. It also checks env stripping and the subscription-only auth
@@ -152,13 +162,19 @@ What each one does:
 - **ui** reviews pages against docs §8 and its wireframes, including empty and error states
   and light/dark, by screenshotting them in a real browser. If the job has no UI, it writes
   `VERDICT: PASS` with "no UI in this job".
-- ux and ui run the job's app with `fctl serve --port <free port>` and drive headless Chrome
-  with `playwright-cli` (`npm install -g @playwright/cli`), one `-s=<job-id>-<reviewer>`
-  session each, from a temp dir so its output stays out of the worktree.
-  If the diff touches no `templates/` or `static/` file, the orchestrator skips it and
-  writes that PASS file itself.
-- **code** checks the stack and conventions above, that every acceptance criterion has a
-  passing test, and that there are no unrequested abstractions or dependencies.
+- ux and ui start the job's backend with `fctl serve --port <free port>`. When the worktree
+  has `frontend/`, they also start the frontend server on a second free port, pointed at
+  that backend (`HOST=127.0.0.1 PORT=<port> FCTL_API_URL=http://127.0.0.1:<backend port>
+  node server.js`), and drive the browser against the frontend. They never install or
+  build; the builder already did. They drive headless Chrome with `playwright-cli`
+  (`npm install -g @playwright/cli`), one `-s=<job-id>-<reviewer>` session each, from a temp
+  dir so its output stays out of the worktree.
+  If the diff touches nothing under `frontend/`, the orchestrator skips review-ui and writes
+  its PASS file itself. review-ux always runs, because it also reviews `fctl` output and
+  errors.
+- **code** checks the stack and conventions above, runs both test commands, and checks that
+  every acceptance criterion has a passing test and that there are no unrequested
+  abstractions or dependencies, Python or npm.
 - **approver** writes APPROVE or ESCALATE. It escalates if CHANGES remain after round 2,
   tests fail, the work conflicts with docs/, or an open question changed behavior.
 
@@ -172,7 +188,8 @@ tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---
 Input: a job id and its round folder. Read spec.md, round-N/build.md, round-N/diff.patch,
-and the files in .claude/worktrees/<job-id>. Run `uv run pytest -q` in that worktree.
+and the files in .claude/worktrees/<job-id>. Run `uv run pytest -q` in that worktree, and
+`npm --prefix frontend test` if it has `frontend/package.json`.
 Check the stack and conventions in FACTORY.md, that every acceptance criterion has a
 passing test, and that nothing unrequested was added. Write only round-N/review-code.md:
 first line VERDICT: PASS or VERDICT: CHANGES, then findings as file:line, problem, fix.
@@ -208,12 +225,13 @@ factory/board.json
 - After every builder round, the orchestrator snapshots the worktree, including untracked
   files, without touching the index, against the job's base on main (so rework rounds
   still show the whole job, not just what changed since the last commit). Vendored
-  `*.min.*` files and `uv.lock` stay out, since every reviewer reads the patch:
+  `*.min.*` files, `uv.lock`, and `package-lock.json` stay out, since every reviewer reads
+  the patch:
       t=$(mktemp -d); wt=.claude/worktrees/<job-id>
       base=$(git -C $wt merge-base HEAD origin/main)
       GIT_INDEX_FILE=$t/index git -C $wt read-tree HEAD
       GIT_INDEX_FILE=$t/index git -C $wt add -A
-      GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' > factory/jobs/<job-id>/round-<n>/diff.patch
+      GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' ':!*package-lock.json' > factory/jobs/<job-id>/round-<n>/diff.patch
       rm -rf $t
 - WAIT FOR ALL: a review round is done only when every reviewer's file exists in the
   round folder. Never resume the builder mid-round.

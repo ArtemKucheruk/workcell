@@ -16,8 +16,13 @@ Do:
 1. Implement the spec in W. Edit only files under W, plus J/round-<n>/build.md.
 2. Run every command inside W, by its absolute path: `cd <absolute path of W> && …`.
 3. One test per acceptance criterion. Run `uv run pytest -q` in W until it's green.
-4. Keep `.gitignore` covering generated files (`.venv/`, `__pycache__/`, `.pytest_cache/`).
-   The diff snapshot takes every untracked file that isn't ignored.
+   If W has `frontend/package.json`: `npm --prefix frontend ci` when `frontend/node_modules`
+   is missing, then `npm --prefix frontend test` until it's green, then
+   `npm --prefix frontend run build`. Leave `node_modules/` and `dist/` in W: the reviewers
+   run the built app and never install or build.
+4. Keep `.gitignore` covering generated files (`.venv/`, `__pycache__/`, `.pytest_cache/`,
+   `frontend/node_modules/`, `frontend/dist/`). The diff snapshot takes every untracked file
+   that isn't ignored.
 5. Write J/round-<n>/build.md:
 
 ```markdown
@@ -31,7 +36,7 @@ Do:
 ## Open questions
 - Q1 → the default you used
 ## Test output
-<the last lines of `uv run pytest -q`, verbatim>
+<the last lines of `uv run pytest -q`, and of `npm --prefix frontend test` if it ran, verbatim>
 ```
 
 Never run git commands that write: no add, commit, stash, checkout, switch, reset, merge,
