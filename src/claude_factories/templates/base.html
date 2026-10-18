@@ -102,9 +102,19 @@
     .tiles strong { font-size: 1.75rem; font-variant-numeric: tabular-nums; color: CanvasText; }
     .tiles a[aria-current="page"] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; font-weight: bold; }
     #open-tasks tbody td:first-child { padding-left: 1.5rem; }
+    /* Runs (docs/ui.md §8, §8.1, item 4) */
+    #claude-auth { margin: 0; text-align: right; font-size: .85rem; color: GrayText; }
+    #claude-auth.off { color: light-dark(#cf222e, #f85149); font-weight: bold; }  /* the escalated red */
+    .run-controls { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: baseline; margin-top: .5rem; }
+    .card .run-line { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
+    .card .run-line button { margin-left: auto; }  /* §8.1: [Run] and [Retry] at the card's right */
+    #run-log .log { max-height: 24rem; overflow: auto; margin: .5rem 0 0; padding: .5rem .75rem;
+      border: 1px solid GrayText; border-radius: 6px; font: .85rem/1.4 ui-monospace, monospace; white-space: pre-wrap; }
   </style>
 </head>
 <body hx-headers='{"X-Requested-By": "fctl"}'>
+{% set login, runs_ok = claude_login() %}
+<p id="claude-auth"{% if not runs_ok %} class="off"{% endif %}>{{ login }}</p>
 {% block content %}{% endblock %}
 </body>
 </html>

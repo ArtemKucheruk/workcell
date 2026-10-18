@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager, closing
 from datetime import datetime
 from itertools import groupby, takewhile
 from pathlib import Path
+from time import monotonic
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -67,8 +68,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Claude Factories", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
 templates = Jinja2Templates(directory=HERE / "templates")
-templates.env.filters["local_time"] = (
-    lambda iso: datetime.fromisoformat(iso).astimezone().strftime("%Y-%m-%d %H:%M")
+templates.env.filters["local_time"] = (  # 014 Q7: local_time("%H:%M") for run start times
+    lambda iso, fmt="%Y-%m-%d %H:%M": datetime.fromisoformat(iso).astimezone().strftime(fmt)
 )
 # Q13: raw HTML off, and markdown-it's link check drops javascript:/vbscript:/file:/data: URLs.
 # This filter is the only place agent text becomes Markup.
@@ -260,6 +261,16 @@ FACTORY_TEMPLATES = jinja2.Environment(
     autoescape=False, keep_trailing_newline=True, undefined=jinja2.StrictUndefined,
 )
 COMMIT_HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'
+
+
+def factory_hint(state: str, branch: str) -> str | None:
+    """MVP §3.2 step 4, 014 Q6: why Run is off for this factory state, naming the next step (015 ux
+    review); None when ready. run_task's 409 detail and the pages' hint."""
+    if state == "uncommitted":
+        return f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}"
+    if state == "none":
+        return f"factory isn't committed on {branch}: Create factory on the project board, then commit it on {branch}"
+    return None
 
 
 class FactoryBody(BaseModel):
@@ -496,22 +507,54 @@ def worktree(task: sqlite3.Row) -> str:
     return wt
 
 
+def stripped_env() -> dict:
+    """§4.3: no API key or provider variables, so claude bills to the subscription."""
+    return {k: v for k, v in os.environ.items()
+            if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN") and not k.startswith("CLAUDE_CODE_USE_")}
+
+
 def run_env(request: Request) -> dict:
-    """§4.3: no API key or provider variables, so the run bills to the subscription. Q8: FCTL_URL."""
-    env = {k: v for k, v in os.environ.items()
-           if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN") and not k.startswith("CLAUDE_CODE_USE_")}
-    return env | {"FCTL_URL": str(request.base_url).rstrip("/")}
+    """§4.3 stripping, plus Q8: FCTL_URL."""
+    return stripped_env() | {"FCTL_URL": str(request.base_url).rstrip("/")}
 
 
-def subscription_auth(cwd: str, env: dict) -> bool:
-    """§4.3, Q6: `claude auth status`, run like the run itself, exits 0 and reports claude.ai."""
+def auth_status(cwd: str, env: dict) -> dict | None:
+    """§4.3, Q6: `claude auth status`'s parsed answer if it exits 0 and reports claude.ai, else None."""
     try:
         r = subprocess.run(["claude", "auth", "status"], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
                            capture_output=True, text=True, timeout=30)
         info = json.loads(r.stdout)
     except (OSError, ValueError, subprocess.TimeoutExpired):  # no binary, not JSON, hung
-        return False
-    return r.returncode == 0 and isinstance(info, dict) and info.get("authMethod") == "claude.ai"
+        return None
+    return info if r.returncode == 0 and isinstance(info, dict) and info.get("authMethod") == "claude.ai" else None
+
+
+def subscription_auth(cwd: str, env: dict) -> bool:
+    """Each run's own check, run like the run itself and never cached (§4.3: before every run)."""
+    return auth_status(cwd, env) is not None
+
+
+LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": claude_login()'s answer}; the pages' only state
+
+
+def claude_login() -> tuple[str, bool]:
+    """docs/ui.md §8, MVP §4.3: the header's login and whether runs are allowed, checked with the runs'
+    stripped env from the neutral data dir (Q1), cached 60 s (Q3). Q2: the plan capitalized.
+    ponytail: no lock, so two cold renders may both run the check."""
+    now = monotonic()
+    if LOGIN and now - LOGIN["at"] < 60:
+        return LOGIN["value"]
+    info = auth_status(str(db.data_dir()), stripped_env())
+    if info is None:
+        value = ("API key — runs disabled", False)
+    else:
+        plan = info.get("subscriptionType")
+        value = (f"Claude: {plan.capitalize() if isinstance(plan, str) and plan else 'subscription'} ✓", True)
+    LOGIN.update(at=now, value=value)
+    return value
+
+
+templates.env.globals["claude_login"] = claude_login  # base.html renders it on every page
 
 
 def finish_run(run_id: int, proc: subprocess.Popen, log_path: Path):
@@ -557,12 +600,8 @@ def run_task(task_id: int, request: Request):
     if task["status"] in ("review", "done"):
         raise HTTPException(409, f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
     branch = task["default_branch"]
-    state = factory_state(task["path"], branch)  # the 409s name the next step (015 ux review, MVP §3.2)
-    if state == "uncommitted":
-        raise HTTPException(409, f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}")
-    if state == "none":
-        raise HTTPException(409, f"factory isn't committed on {branch}: "
-                                 f"Create factory on the project board, then commit it on {branch}")
+    if hint := factory_hint(factory_state(task["path"], branch), branch):
+        raise HTTPException(409, hint)
     wt, env = worktree(task), run_env(request)
     if not subscription_auth(wt, env):
         raise HTTPException(409, "not on subscription auth")
@@ -1228,12 +1267,18 @@ def project_page(request: Request, project_id: int):
     tasks = list_tasks(project_id)
     # Q13: the API doesn't return position; read it after list_tasks so every listed task has one
     positions = dict(query("SELECT id, position FROM tasks WHERE project_id = ?", (project_id,)))
+    # 014: nor the run's start (§6.2 keeps run {id, status}); read after it, so every listed run has one
+    started = dict(query("SELECT r.id, r.started_at FROM runs r JOIN tasks t ON t.id = r.task_id"
+                         " WHERE t.project_id = ?", (project_id,)))
     columns = {status: [] for status in COLUMNS}
     for t in tasks:
-        columns[t["status"]].append(t | {"position": positions[t["id"]]})
+        columns[t["status"]].append(t | {"position": positions[t["id"]],
+                                         "started_at": t["run"] and started[t["run"]["id"]]})
+    factory = factory_state(project["path"], project["default_branch"])
     return templates.TemplateResponse(request, "project.html", {
-        "project": project, "workspaces": workspaces(), "columns": columns,
-        "factory": factory_state(project["path"], project["default_branch"]),
+        "project": project, "workspaces": workspaces(), "columns": columns, "factory": factory,
+        "hint": factory_hint(factory, project["default_branch"]),
+        "can_run": factory == "ready" and claude_login()[1],  # Q4: the server's checks still decide
     })
 
 
@@ -1440,7 +1485,8 @@ def file_tree(files: list[dict]) -> dict:
 
 PAGE_TASK = (  # the task row both task pages show; `path` is for Review's commit hint
     "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
-    " t.branch, t.worktree_path, p.path FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?"
+    " t.branch, t.worktree_path, p.path, p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id"
+    " WHERE t.id = ?"
 )
 
 
@@ -1466,10 +1512,20 @@ def approver_decision(task_id: int) -> sqlite3.Row | None:
 
 @app.get("/tasks/{task_id}", response_class=HTMLResponse)
 def task_page(request: Request, task_id: int):
-    """docs/ui.md §8 item 4 without run controls (014): header, description, spec, rounds with build
-    notes and verdict popovers, the approver's latest decision, and the status history."""
+    """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, spec,
+    rounds with build notes and verdict popovers, the approver's latest decision, the status history,
+    the takeover command (Q9), and the run log."""
     task = one_or_404(PAGE_TASK, (task_id,), f"Task #{task_id} not found")
+    found = query("SELECT id, status, error, session_id, started_at FROM runs WHERE task_id = ?"
+                  " ORDER BY id DESC LIMIT 1", (task_id,))
+    run = found[0] if found else None
+    factory = factory_state(task["path"], task["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
+    takeover = None  # Q9: only for a run that isn't running, in the task's stored worktree
+    if run and task["worktree_path"] and run["status"] != "running":
+        takeover = f"cd {shlex.quote(task['worktree_path'])} && claude --resume {shlex.quote(run['session_id'])}"
     return templates.TemplateResponse(request, "task.html", {
+        "run": run, "takeover": takeover, "hint": factory_hint(factory, task["default_branch"]),
+        "can_run": factory == "ready" and claude_login()[1],  # Q4
         "task": task, "rounds": round_summaries(task_id), "posted": posted_verdicts(task_id),
         "build": dict(query("SELECT n, build_md FROM rounds WHERE task_id = ?", (task_id,))),
         "reviewers": REVIEWERS, "approver": approver_decision(task_id),

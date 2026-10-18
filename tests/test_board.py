@@ -175,7 +175,7 @@ def test_stage_text(client, project):  # AC11
     idle = add_task(project)
     html = page(client, project)
     assert "agent_review" in text(card(html, running)[1])
-    assert text(card(html, idle)[1]) == f"#{idle} t"
+    assert text(card(html, idle)[1]) == f"#{idle} t Run"  # 014 AC21: Backlog cards have [Run]
 
 
 def test_human_review_card(client, project):  # AC12
@@ -223,7 +223,7 @@ def test_no_rounds_no_chips(client, project):  # AC16
     for tid in tids:
         _, body = card(html, tid)
         assert 'class="chips"' not in body
-        assert text(body) == f"#{tid} t"
+        assert text(body) == f"#{tid} t" + (" Run" if tid == tids[0] else "")  # 014 AC21: Backlog's [Run]
 
 
 def test_done_round_count(client, project):  # AC17
@@ -359,4 +359,4 @@ def test_new_task_lands_last(client, project):  # AC30
     [tid] = sql("SELECT id FROM tasks WHERE title = 'Export CSV'")[0]
     backlog = columns(page(client, project))["backlog"]
     assert ids(backlog)[-1] == tid
-    assert text(cards(backlog)[-1][1]) == f"#{tid} Export CSV"
+    assert text(cards(backlog)[-1][1]) == f"#{tid} Export CSV Run"  # 014 AC21: Backlog cards have [Run]

@@ -7,7 +7,25 @@
 {% set symbol = {"PASS": "✓", "CHANGES": "✗", "pending": "·"} %}
 {# Q10 ponytail: polling pauses while any build note or verdict is open, so the page goes stale while I read
    one; to keep it live, poll anyway and reopen the open <details> and popovers by id on htmx:afterSwap #}
-<div id="live" hx-get="/tasks/{{ task.id }}" hx-trigger="every 3s [!document.querySelector('#live details[open], #live :popover-open')]" hx-select="#live" hx-swap="outerHTML">
+<script>
+// 014: Run, Retry, and Stop reply JSON (hx-swap="none"). Success reloads, so the log panel follows the new
+// run; a refusal's detail goes into #run-error, which hx-preserve keeps across the 3 s polls. Polls pause
+// while a button's request is in flight, and one already in flight doesn't swap, so the reply never
+// lands on a detached button.
+document.addEventListener("htmx:beforeSwap", e => {
+  if (e.detail.elt.id === "live" && document.querySelector("#live .htmx-request")) e.detail.shouldSwap = false;
+});
+document.addEventListener("htmx:afterRequest", e => {
+  if (!e.detail.elt.classList?.contains("run-action")) return;
+  const xhr = e.detail.xhr;
+  if (e.detail.successful) return location.reload();
+  let detail = null;
+  try { detail = JSON.parse(xhr.responseText).detail; } catch {}
+  document.getElementById("run-error").textContent = typeof detail === "string" ? detail
+    : xhr.status ? `Request failed (${xhr.status})` : "Request failed (server unreachable)";
+});
+</script>
+<div id="live" hx-get="/tasks/{{ task.id }}" hx-trigger="every 3s [!document.querySelector('#live details[open], #live :popover-open, #live .htmx-request')]" hx-select="#live" hx-swap="outerHTML">
 <header>
   <p><a href="/projects/{{ task.project_id }}">{{ task.project }}</a></p>
   <h1>#{{ task.id }} {{ task.title }}</h1>
@@ -19,6 +37,25 @@
     {% if task.branch %}<code>{{ task.branch }}</code>{% endif %}
     <a href="/tasks/{{ task.id }}/review">Review</a>
   </div>
+  {# 014 Q4, Q5, Q8: Stop while the latest run runs (never disabled); Run for a backlog task; Retry for a
+     stalled one (in_progress with a run that isn't running) #}
+  {% set running = run and run.status == "running" %}
+  {% set startable = not running and (task.status == "backlog" or (task.status == "in_progress" and run)) %}
+  <div class="run-controls">
+    {% if running %}
+    <button class="run-action" hx-post="/api/runs/{{ run.id }}/stop" hx-swap="none" hx-disabled-elt="this">Stop</button>
+    {% elif startable %}
+    <button class="run-action" hx-post="/api/tasks/{{ task.id }}/run" hx-swap="none" hx-disabled-elt="this"{% if not can_run %} disabled{% endif %}>{{ "Run" if task.status == "backlog" else "Retry" }}</button>
+    {% endif %}
+    {% if run %}<span id="run-status">run #{{ run.id }} {{ run.status }}
+      {%- if running %} · started {{ run.started_at | local_time("%H:%M") }}
+      {%- elif run.status == "failed" and run.error %}: {{ run.error }}{% endif %}</span>{% endif %}
+    {% if hint and startable %}<span class="muted">{{ hint }}</span>{% endif %}
+    <p id="run-error" class="form-error" role="alert" hx-preserve="true"></p>
+  </div>
+  {# Q9: joining a live run is Later (MVP §9) #}
+  {% if takeover %}<p>Take over in terminal: <code>{{ takeover }}</code></p>
+  {% elif running and task.worktree_path %}<p class="muted">Stop the run to take over.</p>{% endif %}
 </header>
 <main>
 <section id="description">
@@ -75,4 +112,40 @@
 </section>
 </main>
 </div>
+{% if run %}
+{# Q10: outside #live, so opening it doesn't pause the page poll and a swap doesn't reset its cursor #}
+<details id="run-log" data-run="{{ run.id }}"{% if run.status == "running" %} data-live{% endif %}>
+  <summary>Run log · run #{{ run.id }}</summary>
+  <div class="log"><span class="muted">No output yet.</span></div>
+</details>
+<script>
+// Q10: §6.2's JSON log route, each item appended as text, never parsed as HTML. It polls every 3 s if the
+// run was running at page load, else fetches once.
+// ponytail: it follows the run that was latest at page load; a run started elsewhere shows after a reload
+(() => {
+  const panel = document.getElementById("run-log"), box = panel.querySelector(".log");
+  const end = () => { box.scrollTop = box.scrollHeight; };
+  let next = 0;
+  const load = async () => {
+    try {
+      const r = await fetch(`/api/runs/${panel.dataset.run}/log?after=${next}`);
+      if (r.ok) {
+        const page = await r.json();
+        if (page.lines.length) box.querySelector(".muted")?.remove();
+        for (const item of page.lines) {
+          const line = document.createElement("div");
+          line.textContent = item.text;
+          box.append(line);
+        }
+        next = page.next;
+        end();
+      }
+    } catch {}  // unreachable or not JSON: the next poll tries again
+    if (panel.hasAttribute("data-live")) setTimeout(load, 3000);
+  };
+  panel.addEventListener("toggle", end);
+  load();
+})();
+</script>
+{% endif %}
 {% endblock %}
