@@ -79,3 +79,30 @@ class ReviewsRepo:
             " WHERE d.task_id = ? AND d.actor = 'me' AND d.decision = 'CHANGES_REQUESTED' ORDER BY d.id DESC LIMIT 1",
             (task_id,),
         ).fetchone()
+
+    def verdict_bodies(self, task_id: int) -> list[sqlite3.Row]:
+        """007 Q5: every verdict of the task's rounds with its round n and body."""
+        return self.conn.execute(
+            "SELECT r.n, v.reviewer, v.verdict, v.body_md FROM verdicts v JOIN rounds r ON r.id = v.round_id"
+            " WHERE r.task_id = ?", (task_id,),
+        ).fetchall()
+
+    def approver_latest(self, task_id: int) -> sqlite3.Row | None:
+        """007 Q7: only the approver's latest decision, by id."""
+        return self.conn.execute(
+            "SELECT d.decision, d.body_md, r.n FROM decisions d JOIN rounds r ON r.id = d.round_id"
+            " WHERE d.task_id = ? AND d.actor = 'approver' ORDER BY d.id DESC LIMIT 1", (task_id,),
+        ).fetchone()
+
+    def inline_comments(self, round_id: int) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT id, author, path, line, side, body_md FROM comments WHERE round_id = ? AND path IS NOT NULL"
+            " ORDER BY id", (round_id,),
+        ).fetchall()
+
+    def comment_anchor(self, comment_id: int) -> sqlite3.Row:
+        """008 Q3: where an inline comment sits: its round n, path, side, and line."""
+        return self.conn.execute(
+            "SELECT r.n, c.path, c.side, c.line FROM comments c JOIN rounds r ON r.id = c.round_id WHERE c.id = ?",
+            (comment_id,),
+        ).fetchone()

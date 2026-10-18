@@ -3,6 +3,35 @@
 import sqlite3
 
 from .. import db
+from ..domain.enums import Status
+
+
+def days_ago(n: int) -> str:
+    """SQL for now − n days in db.now()'s format, so stored timestamps compare as strings (Q2)."""
+    return f"strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-{n} days')"
+
+
+# The tasks each dashboard tile counts and lists (Q1), as a WHERE on tasks t. runs_week counts runs instead.
+TILE_TASKS = {status: f"t.status = '{status}'" for status in Status} | {
+    "waiting": "t.stage = 'human_review'",
+    "escalated": "t.stage = 'escalated'",
+    # one_active_run allows one running run, so tasks with one = running runs
+    "running": "t.id IN (SELECT task_id FROM runs WHERE status = 'running')",
+    "done_week": f"t.done_at >= {days_ago(7)}",
+}
+# §5.1, Q8: one row per event, round, verdict, decision, and comment, labelled; ties sort by kind, then id.
+TIMELINE = """
+SELECT created_at, 0 AS kind, id, IIF(from_status IS NULL, 'created · ', '') || COALESCE(to_status, '')
+  || COALESCE(' · ' || stage, '') AS label, NULL AS body_md FROM events WHERE task_id = :task
+UNION ALL SELECT created_at, 1, id, 'round ' || n, NULL FROM rounds WHERE task_id = :task
+UNION ALL SELECT v.created_at, 2, v.rowid, v.reviewer || ' ' || v.verdict || ' · round ' || r.n, NULL
+  FROM verdicts v JOIN rounds r ON r.id = v.round_id WHERE r.task_id = :task
+UNION ALL SELECT d.created_at, 3, d.id, d.actor || ' ' || d.decision || ' · round ' || r.n, d.body_md
+  FROM decisions d JOIN rounds r ON r.id = d.round_id WHERE d.task_id = :task
+UNION ALL SELECT c.created_at, 4, c.id, c.author || COALESCE(' on ' || c.path || ':' || c.line, '')
+  || ' · round ' || r.n, c.body_md FROM comments c JOIN rounds r ON r.id = c.round_id WHERE c.task_id = :task
+ORDER BY created_at, kind, id
+"""
 
 
 class TasksRepo:
@@ -65,3 +94,76 @@ class TasksRepo:
             " VALUES (?, ?, ?, ?, ?, ?)",
             (task_id, actor, from_status, to_status, stage, now),
         )
+
+    def for_run(self, task_id: int) -> sqlite3.Row | None:
+        """What a run needs: the task, its project's path and default branch, and the test command."""
+        return self.conn.execute(
+            "SELECT t.id, t.title, t.status, t.worktree_path, p.path, p.default_branch, p.test_cmd"
+            " FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+            (task_id,),
+        ).fetchone()
+
+    def set_worktree(self, task_id: int, branch: str, worktree_path: str) -> None:
+        self.conn.execute("UPDATE tasks SET branch = ?, worktree_path = ? WHERE id = ?",
+                          (branch, worktree_path, task_id))
+
+    def start(self, task_id: int, now: str) -> bool:
+        """012 Q9: a backlog task → in_progress, stage cleared; False for any other status, which stays."""
+        return self.conn.execute(
+            "UPDATE tasks SET status = 'in_progress', stage = NULL, updated_at = ? WHERE id = ? AND status = 'backlog'",
+            (now, task_id),
+        ).rowcount > 0
+
+    def top_backlog(self, project_id: int) -> int | None:
+        """012 Q13: the top backlog card's id, lowest position then lowest id."""
+        found = self.conn.execute(
+            "SELECT id FROM tasks WHERE project_id = ? AND status = 'backlog' ORDER BY position, id LIMIT 1",
+            (project_id,),
+        ).fetchone()
+        return found[0] if found else None
+
+    def for_page(self, task_id: int) -> sqlite3.Row | None:
+        """The task row both task pages show; `path` is for Review's commit hint."""
+        return self.conn.execute(
+            "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
+            " t.branch, t.worktree_path, p.path, p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id"
+            " WHERE t.id = ?",
+            (task_id,),
+        ).fetchone()
+
+    def timeline(self, task_id: int) -> list[sqlite3.Row]:
+        return self.conn.execute(TIMELINE, {"task": task_id}).fetchall()
+
+    def tile_counts(self) -> sqlite3.Row:
+        """Every dashboard tile's count. Every SQL fragment is a constant."""
+        return self.conn.execute(
+            "SELECT " + ", ".join(f"COUNT(*) FILTER (WHERE {where}) AS {key}" for key, where in TILE_TASKS.items())
+            + f", (SELECT COUNT(*) FROM runs WHERE started_at >= {days_ago(7)}) AS runs_week FROM tasks t"
+        ).fetchone()
+
+    def tile(self, key: str) -> list[sqlite3.Row]:
+        """The tasks of TILE_TASKS[key], most recently updated first (Q4)."""
+        return self.conn.execute(
+            "SELECT t.id, t.title, t.status, t.stage, p.id AS project_id, p.name AS project"
+            f" FROM tasks t JOIN projects p ON p.id = t.project_id WHERE {TILE_TASKS[key]}"
+            " ORDER BY t.updated_at DESC, t.id DESC"
+        ).fetchall()
+
+    def open_by_project(self) -> list[sqlite3.Row]:
+        """Q5: each project with open tasks, its backlog, in progress, and review counts, by workspace."""
+        return self.conn.execute(
+            "SELECT w.id AS workspace_id, w.name AS workspace, p.id, p.name,"
+            " COUNT(*) FILTER (WHERE t.status = 'backlog') AS backlog,"
+            " COUNT(*) FILTER (WHERE t.status = 'in_progress') AS in_progress,"
+            " COUNT(*) FILTER (WHERE t.status = 'review') AS review"
+            " FROM tasks t JOIN projects p ON p.id = t.project_id JOIN workspaces w ON w.id = p.workspace_id"
+            " WHERE t.status != 'done' GROUP BY p.id ORDER BY w.name, p.name, p.id"
+        ).fetchall()
+
+    def done_recently(self) -> list[sqlite3.Row]:
+        """Q6: tasks done in the last 30 days with their round count; the JOIN drops tasks with no rounds."""
+        return self.conn.execute(
+            "SELECT t.id, t.title, t.done_at, p.id AS project_id, p.name AS project, COUNT(*) AS rounds"
+            " FROM tasks t JOIN rounds r ON r.task_id = t.id JOIN projects p ON p.id = t.project_id"
+            f" WHERE t.done_at >= {days_ago(30)} GROUP BY t.id ORDER BY t.done_at DESC, t.id DESC"
+        ).fetchall()

@@ -3,7 +3,7 @@ with `app.dependency_overrides`."""
 
 import sqlite3
 from collections.abc import Iterator
-from contextlib import closing
+from contextlib import closing, contextmanager
 from typing import Annotated
 
 from fastapi import Depends
@@ -29,6 +29,8 @@ def get_conn() -> Iterator[sqlite3.Connection]:
 
 
 Conn = Annotated[sqlite3.Connection, Depends(get_conn, scope="function")]
+# 036 Q1: the same connection and transaction outside Depends, for the run handlers' steps
+transaction = contextmanager(get_conn)
 
 
 def get_workspaces(conn: Conn) -> WorkspacesRepo:
@@ -70,3 +72,4 @@ Rounds = Annotated[RoundsRepo, Depends(get_rounds)]
 Reviews = Annotated[ReviewsRepo, Depends(get_reviews)]
 Runs = Annotated[RunsRepo, Depends(get_runs)]
 GitAdapter = Annotated[Git, Depends(get_git)]
+ClaudeAdapter = Annotated[Claude, Depends(get_claude)]

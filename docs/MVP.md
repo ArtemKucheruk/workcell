@@ -366,7 +366,7 @@ src/claude_factories/
 ├── adapters/       subprocesses, each a Protocol plus its implementation, run with argument lists
 │   ├── git.py      git
 │   └── claude.py   the claude CLI
-├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge
+├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge / Failed
 ├── lib/            pure parsers and renderers: patch split, diff rows, run log, markdown, slug
 ├── db/             connection, now(), and schema.sql, applied at startup
 ├── config.py       env and limits: data_dir(), MAX_PATCH, MAX_VIEW
@@ -379,7 +379,7 @@ Rules:
   | Package | May import |
   |---|---|
   | server/ | controllers, repositories, adapters, db, config, domain |
-  | controllers/ | handlers, dto, domain, `server.deps` (not `server.app`) |
+  | controllers/ | handlers, dto, domain, lib, `server.deps` (not `server.app`) |
   | handlers/ | repositories, adapters, dto, domain, lib, config |
   | repositories/ | db, domain, config |
   | adapters/ | domain, config |
@@ -390,13 +390,15 @@ Rules:
 
 - Only server/ and controllers/ import fastapi (or starlette). Handlers raise domain errors,
   and server/ maps them to `{"detail": …}`: `NotFound` → 404, `Conflict` → 409,
-  `Invalid` → 422, `TooLarge` → 413.
+  `Invalid` → 422, `TooLarge` → 413, `Failed` → 500.
 - SQL lives only in repositories/ and db/.
 - Handlers get repositories and adapters as arguments. Controllers get them through
   `Depends` on the providers in `server/deps.py`, so tests can swap in fakes with
   `app.dependency_overrides`.
 - One handler call is one transaction. A request gets one connection, which commits when
-  the handler returns and rolls back if it raises, before the response goes out.
+  the handler returns and rolls back if it raises, before the response goes out. Run handlers
+  commit before a spawn and record the exit after the request, so they open one transaction
+  per step through `transaction()` in `server/deps.py`.
 - tests/ mirrors `src/claude_factories/`, for example `tests/controllers/test_projects.py`.
   Each test subdirectory has an `__init__.py`.
 - `tests/test_architecture.py` reads every module with `ast` and fails on a wrong import

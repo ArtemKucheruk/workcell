@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import sql
-from test_review import section, text
+from controllers.pages.test_review import section, text
 
 OLD = "2026-01-01T00:00:00Z"
 STATUSES = ("backlog", "in_progress", "review", "done")

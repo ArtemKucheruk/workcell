@@ -62,3 +62,10 @@ class RoundsRepo:
         return self.conn.execute(
             "SELECT 1 FROM round_files WHERE round_id = ? AND path = ?", (round_id, path)
         ).fetchone() is not None
+
+    def files(self, round_id: int) -> list[sqlite3.Row]:
+        """The round's files in rowid order, each with its patch."""
+        return self.conn.execute(
+            "SELECT path, old_path, change, binary, additions, deletions, patch FROM round_files WHERE round_id = ?"
+            " ORDER BY rowid", (round_id,),
+        ).fetchall()

@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from conftest import commit, git, write
-from test_review import H, header, not_found_page, text
+from controllers.pages.test_review import H, header, not_found_page, text
 
 SECRET = "TOP-SECRET-7f3a"
 APP = 'def main():\n    x = "<b>&</b>"\n    return x\n'

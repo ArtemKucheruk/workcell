@@ -49,3 +49,27 @@ class ProjectsRepo:
 
     def set_factory_version(self, project_id: int, version: int) -> None:
         self.conn.execute("UPDATE projects SET factory_version = ? WHERE id = ?", (version, project_id))
+
+    def in_workspace(self, workspace_id: int) -> list[sqlite3.Row]:
+        """The workspace page's rows: each project by name with its task counts and last activity."""
+        return self.conn.execute(
+            "SELECT p.id, p.name, p.path, p.default_branch,"
+            " COUNT(t.id) FILTER (WHERE t.status = 'backlog') AS backlog,"
+            " COUNT(t.id) FILTER (WHERE t.status = 'in_progress') AS in_progress,"
+            " COUNT(t.id) FILTER (WHERE t.status = 'review') AS review,"
+            " COUNT(t.id) FILTER (WHERE t.status = 'done') AS done,"
+            " MAX(p.created_at, COALESCE(MAX(t.updated_at), '')) AS last_activity"
+            " FROM projects p LEFT JOIN tasks t ON t.project_id = p.id"
+            " WHERE p.workspace_id = ? GROUP BY p.id ORDER BY p.name",
+            (workspace_id,),
+        ).fetchall()
+
+    def for_board(self, project_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT p.id, p.name, p.path, p.default_branch, p.workspace_id, w.name AS workspace FROM projects p"
+            " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
+            (project_id,),
+        ).fetchone()
+
+    def for_code(self, project_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT id, name, path FROM projects WHERE id = ?", (project_id,)).fetchone()
