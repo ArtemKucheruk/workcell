@@ -144,7 +144,9 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
     factory = factory_state(git, found["path"], found["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
     takeover = None  # Q9: only for a run that isn't running, in the task's stored worktree
     if run and found["worktree_path"] and run["status"] != "running":
-        takeover = f"cd {shlex.quote(found['worktree_path'])} && claude --resume {shlex.quote(run['session_id'])}"
+        wt, session = shlex.quote(found["worktree_path"]), shlex.quote(run["session_id"])
+        takeover = (f"docker compose exec -w {wt} backend claude --resume {session}" if config.in_docker()  # 028 Q7
+                    else f"cd {wt} && claude --resume {session}")
     return {
         "run": run, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
         "can_run": factory == "ready" and claude_login(claude)[1],  # Q4

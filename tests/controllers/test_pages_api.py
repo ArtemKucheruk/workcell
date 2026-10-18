@@ -1,4 +1,5 @@
 import ast
+import os
 import shlex
 
 import pytest
@@ -256,6 +257,34 @@ def test_task_run_and_takeover(client, project):  # AC15
     assert (page["run"]["status"], page["takeover"]) == ("running", None)
     page = api(client, f"/api/pages/tasks/{review_task(project)}")
     assert (page["run"], page["takeover"]) == (None, None)
+
+
+DOCKER_WT, DOCKER_SESSION = "/code/my api/.claude/worktrees/1-t", "sess'1"
+
+
+def test_task_takeover_in_docker(client, project, monkeypatch):  # 028 AC1
+    monkeypatch.setenv("FCTL_IN_DOCKER", "1")
+    tid = review_task(project, worktree=DOCKER_WT)
+    run = add_run(tid, "stopped", session=DOCKER_SESSION)
+    takeover = api(client, f"/api/pages/tasks/{tid}")["takeover"]
+    assert takeover == (f"docker compose exec -w {shlex.quote(DOCKER_WT)} backend claude"
+                        f" --resume {shlex.quote(DOCKER_SESSION)}")
+    sql("UPDATE runs SET status = 'running' WHERE id = ?", (run,))
+    assert api(client, f"/api/pages/tasks/{tid}")["takeover"] is None
+
+
+@pytest.mark.parametrize("value", [None, "0", ""])
+def test_task_takeover_on_host(client, project, monkeypatch, value):  # 028 AC3
+    if value is not None:
+        monkeypatch.setenv("FCTL_IN_DOCKER", value)
+    tid = review_task(project, worktree=DOCKER_WT)
+    add_run(tid, "stopped", session=DOCKER_SESSION)
+    assert api(client, f"/api/pages/tasks/{tid}")["takeover"] == (
+        f"cd {shlex.quote(DOCKER_WT)} && claude --resume {shlex.quote(DOCKER_SESSION)}")
+
+
+def test_isolated_unsets_in_docker():  # 028 AC6: fails under `FCTL_IN_DOCKER=1 uv run pytest` without it
+    assert "FCTL_IN_DOCKER" not in os.environ
 
 
 # --- GET /api/pages/tasks/{id}/review -------------------------------------------------

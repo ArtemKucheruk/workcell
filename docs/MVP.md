@@ -70,7 +70,7 @@ The app runs in Docker (§4.6). In the repo:
 ```
 cp compose.override.example.yaml compose.override.yaml   # then edit the project roots and uid:gid
 docker compose up --build                                 # the app, from now on
-docker compose exec backend claude login                  # once, in a second terminal
+docker compose exec backend claude auth login             # once, in a second terminal
 ```
 The app opens at `http://127.0.0.1:3000`. `fctl` also goes on the host:
 ```
@@ -343,7 +343,7 @@ Single user and no auth still need these, because the API can start processes th
 - **Mounts.** The override mounts my project roots at the same absolute path, because
   projects store host paths from `fctl connect`. The backend runs as my uid:gid, so worktree
   files stay mine and git doesn't refuse them with "dubious ownership".
-- **Login.** Runs need a one-time `docker compose exec backend claude login`, and the
+- **Login.** Runs need a one-time `docker compose exec backend claude auth login`, and the
   container's `~/.claude` sits on a named volume so the login survives restarts. My host
   login can't be reused: macOS keeps it in the Keychain, which the container can't read.
   §4.3's env stripping and auth check are unchanged.

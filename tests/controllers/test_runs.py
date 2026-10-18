@@ -252,6 +252,18 @@ def test_env_stripped(client, project, fake, monkeypatch):  # AC8
         assert env["FCTL_URL"] == "http://127.0.0.1:4545"
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost:4545"])  # frontend/server.js sends the first
+@pytest.mark.parametrize("route", ["run", "run-next"])
+def test_fctl_url_ignores_host(client, project, fake, route, host):  # 028 AC4
+    task = add_task(project)
+    url = f"/api/tasks/{task}/run" if route == "run" else f"/api/projects/{project}/run-next"
+    r = client.post(url, headers=H | {"Host": host})
+    assert r.status_code == 202, r.text
+    wait(r.json()["run_id"])
+    port = client.base_url.port  # the TestClient server's port, 4545
+    assert [fake.recorded(name)["env"]["FCTL_URL"] for name in ("auth", "run")] == [f"http://127.0.0.1:{port}"] * 2
+
+
 def test_own_process_group(client, project, fake):  # AC9
     run_id = started(client, add_task(project))["run_id"]
     seen = fake.recorded("run")

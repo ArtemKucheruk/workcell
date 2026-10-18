@@ -2,6 +2,13 @@
 #   cp compose.override.example.yaml compose.override.yaml && docker compose up --build
 services:
   backend:
+    # Runs get git, uv, node, and npm. For more tools, write a Dockerfile of your own (028 Q10):
+    #   FROM claude-factories-backend
+    #   RUN apt-get update && apt-get install -y --no-install-recommends make && rm -rf /var/lib/apt/lists/*
+    # run `docker compose build backend`, then `docker build -t my-backend .` in that Dockerfile's
+    # folder, and uncomment these two lines, so compose runs your image instead of building ours:
+    # image: my-backend
+    # build: !reset null
     # your `id -u`:`id -g`, so worktree files stay yours and git doesn't call them "dubious ownership"
     user: "501:20"
     ports:

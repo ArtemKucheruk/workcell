@@ -400,6 +400,18 @@ def test_rework_form(client, factory_task):  # AC22
     wait(new)
 
 
+@pytest.mark.parametrize("form", [False, True])
+def test_rework_fctl_url_ignores_host(client, factory_task, fake, form):  # 028 Q5: every spawn, not just /run
+    task, first = factory_task
+    if form:
+        client.post(f"/tasks/{task}/request-changes", content=b"body_md=x", headers=FORM | {"Host": "127.0.0.1"})
+    else:
+        client.post(f"/api/tasks/{task}/request-changes", json={"body_md": NOTE}, headers=H | {"Host": "127.0.0.1"})
+    [(new,)] = sql("SELECT id FROM runs WHERE task_id = ? AND id != ?", (task, first["run_id"]))
+    wait(new)
+    assert fake.recorded("run")["env"]["FCTL_URL"] == BASE
+
+
 # --- Round 2 review findings ------------------------------------------------------
 
 

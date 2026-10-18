@@ -60,6 +60,7 @@ creates the data dir and `factory.db` in it.
 |---|---|---|
 | `FCTL_HOME` | `~/.claude-factories` | the data dir: `factory.db`, and run logs once runs exist |
 | `FCTL_URL` | `http://127.0.0.1:4545` | where `fctl` sends its API calls; set it if you changed `--port` |
+| `FCTL_IN_DOCKER` | unset | `1` in the backend image, where the takeover command becomes `docker compose exec …` |
 
 The app listens on 127.0.0.1 by default. `--host 0.0.0.0` is the Docker container's setting,
 not one to use on the host. The app rejects requests whose `Host` isn't `127.0.0.1` or
@@ -95,8 +96,26 @@ The app opens at http://127.0.0.1:3000. The backend is on `127.0.0.1:4545` as be
 `~/.claude-factories`. `docker compose down` stops it, and `docker compose down -v` also
 deletes the data.
 
-Runs don't work inside Docker yet: the app shows `API key — runs disabled` and refuses Run.
-They arrive with backlog job 028. Until then, use `fctl serve` on the host for runs.
+Runs happen inside the backend container, on a Claude login of its own: your host login stays
+in the macOS Keychain, which the container can't read. Log in once, with the app up, in a
+second terminal:
+
+```sh
+docker compose exec backend claude auth login    # sign in with your Claude subscription
+docker compose exec backend claude auth status   # check it: "authMethod": "claude.ai"
+```
+
+Until you do, the header shows the red `API key — runs disabled` and Run is refused. The
+login lives in the `backend-home` volume, the container's home, so restarts and rebuilds keep
+it, and `docker compose down -v` deletes it.
+
+Runs get git, uv, node, and npm. If a project's test command needs anything else, build your
+own image `FROM claude-factories-backend`. The steps are in the comments of
+`compose.override.example.yaml`.
+
+To take over a stopped run, the task page gives a command like
+`docker compose exec -w <worktree> backend claude --resume <session-id>`. Run it from this
+checkout, next to `compose.yaml`.
 
 ## The factory loop
 

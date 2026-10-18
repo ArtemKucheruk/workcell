@@ -20,6 +20,7 @@ def isolated(tmp_path, monkeypatch):
     (tmp_path / "home").mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("FCTL_URL", raising=False)
+    monkeypatch.delenv("FCTL_IN_DOCKER", raising=False)  # 028 AC6: tests run inside the image too
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     claude = bin_dir / "claude"

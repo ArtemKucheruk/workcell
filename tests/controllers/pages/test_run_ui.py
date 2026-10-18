@@ -330,6 +330,17 @@ def test_task_takeover(client, project, worktree):  # AC20
     assert "claude --resume" not in shown and "Stop the run to take over." in shown
 
 
+def test_task_takeover_in_docker(client, project, monkeypatch):  # 028 AC2
+    monkeypatch.setenv("FCTL_IN_DOCKER", "1")
+    worktree, session = "/code/my api/.claude/worktrees/1-t", "sess'1"
+    tid = add_task(project, status="in_progress", stage="build")
+    sql("UPDATE tasks SET worktree_path = ? WHERE id = ?", (worktree, tid))
+    add_run(tid, "stopped", session=session)
+    shown = text(task_page(client, tid))
+    assert f"docker compose exec -w {shlex.quote(worktree)} backend claude --resume {shlex.quote(session)}" in shown
+    assert not re.search(r"cd .* && claude --resume", shown)
+
+
 def test_task_no_takeover(client, project):  # AC20
     no_run, no_worktree = add_task(project), add_task(project, status="in_progress", stage="build")
     sql("UPDATE tasks SET worktree_path = '/tmp/wt' WHERE id = ?", (no_run,))
