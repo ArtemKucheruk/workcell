@@ -21,6 +21,8 @@ Use this one (docs/MVP.md §4.2):
   `node:http` with no extra dependencies. Node 22 and npm.
 - markdown-it-py with raw HTML turned off.
 - The `fctl` CLI module imports only the stdlib.
+- Backend code follows the layout and import rules in `docs/MVP.md §4.7`, and
+  `tests/test_architecture.py` checks its imports.
 - Runtime dependencies: fastapi, uvicorn, jinja2, markdown-it-py. Dev dependencies: pytest,
   httpx. Any other dependency needs a reason in the spec.
 - npm dependencies: react, react-dom, react-router, highlight.js. Dev dependencies: vite,

@@ -1,4 +1,4 @@
-"""The FastAPI app behind `fctl serve`."""
+"""The routes not yet moved into the docs/MVP.md §4.7 layers (035, 036). server/ includes this router."""
 
 import codecs
 import json
@@ -10,50 +10,47 @@ import sqlite3
 import subprocess
 import threading
 import uuid
-from contextlib import asynccontextmanager, closing
+from contextlib import asynccontextmanager, closing, contextmanager
 from datetime import datetime
 from itertools import groupby, takewhile
 from pathlib import Path
 from time import monotonic
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.encoders import jsonable_encoder
-from fastapi.exception_handlers import http_exception_handler
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from typing import Literal, get_args
+from typing import Literal
 
-import jinja2
 from markdown_it import MarkdownIt
 from markupsafe import Markup
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from starlette.concurrency import run_in_threadpool
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import db
+from . import config, db
+from .config import MAX_PATCH, MAX_VIEW
+from .domain import enums
+from .domain.enums import STAGE_STATUS
+from .domain.errors import DomainError
+from .handlers import factory as factory_handler
+from .handlers import projects as projects_handler
+from .handlers import workspaces as workspaces_handler
+from .handlers.factory import factory_hint, factory_state
+from .repositories.projects import ProjectsRepo
+from .repositories.workspaces import WorkspacesRepo
+from .server.deps import get_claude, get_conn, get_git
 
 HERE = Path(__file__).parent
-ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
-SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-SKILL = ".claude/skills/factory/SKILL.md"
-COLUMNS = ("backlog", "in_progress", "review", "done")
-Reviewer = Literal["security", "ux", "ui", "code"]
-REVIEWERS = get_args(Reviewer)
+COLUMNS = tuple(enums.Status)
+Reviewer = Literal["security", "ux", "ui", "code"]  # a Literal until 035: an enum's 422 has another error type
+REVIEWERS = tuple(enums.Reviewer)
 NOSNIFF = {"X-Content-Type-Options": "nosniff"}  # agent-written text, never sniffed as HTML
-MAX_PATCH = 5 * 1024 * 1024  # Q5: UTF-8 bytes of the patch alone
-STAGE_STATUS = {  # docs/data-model-and-api.md §5.2
-    "spec": "in_progress", "build": "in_progress", "agent_review": "in_progress",
-    "approval": "in_progress", "rework": "in_progress",
-    "human_review": "review", "escalated": "review",
-}
+transaction = contextmanager(get_conn)  # 034 Q12: deps' one connection and transaction, outside Depends
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    db.init()
+async def lifespan(app):
+    """The runs part; server/'s lifespan runs db.init() first (034 Q6)."""
     with closing(db.connect()) as conn, conn:  # 013 Q5: a crash left these; no signal, the pid may be reused
         conn.execute("UPDATE runs SET status = 'failed', error = 'app restarted', ended_at = ?"
                      " WHERE status = 'running'", (db.now(),))
@@ -65,8 +62,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="Claude Factories", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
+router = APIRouter(lifespan=lifespan)
 templates = Jinja2Templates(directory=HERE / "templates")
 templates.env.filters["local_time"] = (  # 014 Q7: local_time("%H:%M") for run start times
     lambda iso, fmt="%Y-%m-%d %H:%M": datetime.fromisoformat(iso).astimezone().strftime(fmt)
@@ -75,41 +71,6 @@ templates.env.filters["local_time"] = (  # 014 Q7: local_time("%H:%M") for run s
 # This filter is the only place agent text becomes Markup.
 MD = MarkdownIt("js-default", {"html": False})
 templates.env.filters["markdown"] = lambda text: Markup(MD.render(text or ""))
-
-
-@app.middleware("http")
-async def local_safety(request: Request, call_next):
-    """docs/MVP.md §4.5: block DNS rebinding (Host) and CSRF (X-Requested-By)."""
-    hostname = request.headers.get("host", "").partition(":")[0].lower()
-    if hostname not in ALLOWED_HOSTS:
-        return JSONResponse({"detail": "Host must be 127.0.0.1 or localhost"}, status_code=403)
-    if request.method not in SAFE_METHODS and request.headers.get("x-requested-by") != "fctl":
-        return JSONResponse({"detail": "X-Requested-By: fctl header required"}, status_code=403)
-    return await call_next(request)
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_error(request: Request, exc: RequestValidationError):
-    """FastAPI's default 422 without each error's echoed `input`: json.loads lets NaN and Infinity
-    in, and echoing them back would fail to encode as JSON and turn the 422 into a 500."""
-    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
-    return JSONResponse({"detail": jsonable_encoder(errors)}, status_code=422)
-
-
-@app.exception_handler(StarletteHTTPException)
-async def page_not_found(request: Request, exc: StarletteHTTPException):
-    """A browser GET of a missing page, task, or round gets a page, not JSON. /api and every other
-    status keep FastAPI's JSON."""
-    if exc.status_code == 404 and request.method == "GET" and not request.url.path.startswith("/api/"):
-        return templates.TemplateResponse(request, "error.html", {"detail": exc.detail}, status_code=404)
-    return await http_exception_handler(request, exc)
-
-
-@app.exception_handler(UnicodeEncodeError)
-async def unencodable(request: Request, exc: UnicodeEncodeError):
-    """A JSON `\\ud800` escape decodes to a lone surrogate, which UTF-8 and SQLite reject: a 422, not
-    a 500. Raised inside a transaction, so it rolls back."""
-    return JSONResponse({"detail": "text must not contain lone surrogates"}, status_code=422)
 
 
 # --- Helpers -----------------------------------------------------------------
@@ -128,30 +89,9 @@ def one_or_404(sql: str, args, detail: str | None = None) -> sqlite3.Row:
     return found[0]
 
 
-def get_or_create_workspace(conn: sqlite3.Connection, name: str) -> int:
-    conn.execute("INSERT OR IGNORE INTO workspaces (name, created_at) VALUES (?, ?)", (name, db.now()))
-    return conn.execute("SELECT id FROM workspaces WHERE name = ?", (name,)).fetchone()[0]
-
-
 def workspaces() -> list[sqlite3.Row]:
-    return query(
-        "SELECT w.id, w.name, COUNT(p.id) AS projects FROM workspaces w"
-        " LEFT JOIN projects p ON p.workspace_id = w.id GROUP BY w.id ORDER BY w.name"
-    )
-
-
-def factory_state(path: str, default_branch: str) -> str:
-    """Q6: ready = SKILL.md committed on the default branch (MVP §3.2), uncommitted = only on disk."""
-    try:
-        committed = subprocess.run(
-            ["git", "-C", path, "cat-file", "-e", f"{default_branch}:{SKILL}"],
-            capture_output=True, timeout=10,
-        ).returncode == 0
-    except (OSError, ValueError, subprocess.TimeoutExpired):  # no git, a NUL in the path, a hung repo
-        committed = False
-    if committed:
-        return "ready"
-    return "uncommitted" if os.path.isfile(os.path.join(path, SKILL)) else "none"
+    with transaction() as conn:
+        return WorkspacesRepo(conn).all()
 
 
 async def form_field(request: Request, name: str) -> str:
@@ -194,128 +134,6 @@ def latest_run(task_id: int) -> dict | None:
     return dict(found[0]) if found else None
 
 
-# --- JSON API (docs/data-model-and-api.md §6.1) -------------------------------
-
-
-class ConnectBody(BaseModel):
-    path: str
-    workspace: str
-    name: str
-    remote_url: str | None = None
-    default_branch: str
-    test_cmd: str | None = None
-
-
-@app.get("/api/workspaces")
-def list_workspaces():
-    return [dict(w) for w in workspaces()]
-
-
-@app.post("/api/projects/connect")
-def connect_project(body: ConnectBody, request: Request):
-    workspace, name, branch = body.workspace.strip(), body.name.strip(), body.default_branch
-    if not os.path.isabs(body.path):
-        raise HTTPException(422, "path must be absolute")
-    if not workspace:
-        raise HTTPException(422, "workspace must not be blank")
-    if not name:
-        raise HTTPException(422, "name must not be blank")
-    if not branch or branch.startswith("-"):  # it becomes a git argument
-        raise HTTPException(422, "default_branch must be non-empty and not start with '-'")
-    with closing(db.connect()) as conn, conn:
-        ws_id = get_or_create_workspace(conn, workspace)
-        row = conn.execute("SELECT id FROM projects WHERE path = ?", (body.path,)).fetchone()
-        if row:  # Q4: path is the key; a null test_cmd keeps the stored one
-            project_id = row[0]
-            conn.execute(
-                "UPDATE projects SET workspace_id = ?, name = ?, remote_url = ?, default_branch = ?,"
-                " test_cmd = COALESCE(?, test_cmd) WHERE id = ?",
-                (ws_id, name, body.remote_url, branch, body.test_cmd, project_id),
-            )
-        else:
-            project_id = conn.execute(
-                "INSERT INTO projects (workspace_id, name, path, remote_url, default_branch, test_cmd,"
-                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (ws_id, name, body.path, body.remote_url, branch, body.test_cmd, db.now()),
-            ).lastrowid
-    return {"id": project_id, "created": row is None, "url": f"{request.base_url}projects/{project_id}"}
-
-
-@app.get("/api/projects")
-def find_project(path: str):
-    found = query("SELECT id, name, path, default_branch FROM projects WHERE path = ?", (path,))
-    if not found:
-        raise HTTPException(404, f"no project at {path}; in that repo, run fctl connect --workspace <name>")
-    p = found[0]
-    factory = factory_state(p["path"], p["default_branch"])
-    return {"id": p["id"], "name": p["name"], "default_branch": p["default_branch"], "factory": factory}
-
-
-# --- Create factory (docs/MVP.md §3.2, docs/claude-code.md §7.1, §7.3) ---------
-
-FACTORY_FILES = (SKILL, *(f".claude/agents/{a}.md" for a in (  # Q6: written and listed in this order
-    "spec-writer", "builder", "review-security", "review-ux", "review-ui", "review-code", "approver")))
-# Q5: markdown, not HTML; values go in verbatim and are never evaluated as template code
-FACTORY_TEMPLATES = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(HERE / "factory_templates"),
-    autoescape=False, keep_trailing_newline=True, undefined=jinja2.StrictUndefined,
-)
-COMMIT_HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'
-
-
-def factory_hint(state: str, branch: str) -> str | None:
-    """MVP §3.2 step 4, 014 Q6: why Run is off for this factory state, naming the next step (015 ux
-    review); None when ready. run_task's 409 detail and the pages' hint."""
-    if state == "uncommitted":
-        return f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}"
-    if state == "none":
-        return f"factory isn't committed on {branch}: Create factory on the project board, then commit it on {branch}"
-    return None
-
-
-class FactoryBody(BaseModel):
-    overwrite: bool = False
-
-
-def create_factory(project_id: int, overwrite: bool) -> dict:
-    """Q7, Q8: every check before any write; existing files (lexists) are skipped unless overwrite."""
-    p = one_or_404(
-        "SELECT p.name, p.path, p.default_branch, p.test_cmd, w.name AS workspace FROM projects p"
-        " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
-        (project_id,),
-    )
-    if not (p["test_cmd"] or "").strip():
-        raise HTTPException(409, "no test command: in the repo, run fctl connect --workspace"
-                                 f' {shlex.quote(p["workspace"])} --test-cmd "<your test command>"')
-    root = p["path"]
-    if not os.path.isdir(root):
-        raise HTTPException(409, f"{root} is not a directory")
-    real_root = Path(os.path.realpath(root))
-    for rel in FACTORY_FILES:
-        if not Path(os.path.realpath(os.path.join(root, rel))).is_relative_to(real_root):
-            raise HTTPException(409, f"{rel} resolves outside the project")
-    values = {"name": p["name"], "default_branch": p["default_branch"], "test_cmd": p["test_cmd"]}
-    written, skipped = [], []
-    for rel in FACTORY_FILES:
-        target = Path(root, rel)
-        if os.path.lexists(target) and not overwrite:
-            skipped.append(rel)
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(FACTORY_TEMPLATES.get_template(rel.removeprefix(".claude/")).render(values),
-                          encoding="utf-8")
-        written.append(rel)
-    if written:  # Q9
-        with closing(db.connect()) as conn, conn:
-            conn.execute("UPDATE projects SET factory_version = 1 WHERE id = ?", (project_id,))
-    return {"written": written, "skipped": skipped, "commit_hint": COMMIT_HINT}
-
-
-@app.post("/api/projects/{project_id}/factory")
-def create_factory_api(project_id: int, body: FactoryBody):
-    return create_factory(project_id, body.overwrite)
-
-
 # --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
 
 
@@ -341,7 +159,7 @@ class TaskPatch(BaseModel):
     position: FiniteFloat | None = None
 
 
-@app.get("/api/projects/{project_id}/tasks")
+@router.get("/api/projects/{project_id}/tasks")
 def list_tasks(project_id: int):
     one_or_404("SELECT 1 FROM projects WHERE id = ?", (project_id,))
     tasks = query("SELECT id, title, status, stage, position FROM tasks WHERE project_id = ?", (project_id,))
@@ -359,7 +177,7 @@ def list_tasks(project_id: int):
     return items
 
 
-@app.post("/api/projects/{project_id}/tasks", status_code=201)
+@router.post("/api/projects/{project_id}/tasks", status_code=201)
 def create_task(project_id: int, body: TaskBody, request: Request):
     """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (Q3)."""
     title = body.title.strip()
@@ -391,7 +209,7 @@ def create_task(project_id: int, body: TaskBody, request: Request):
     return {"id": task_id, "status": "backlog"}
 
 
-@app.get("/api/tasks/{task_id}")
+@router.get("/api/tasks/{task_id}")
 def get_task(task_id: int):
     task = one_or_404("SELECT id, title, status, stage, branch FROM tasks WHERE id = ?", (task_id,))
     decisions = query(
@@ -406,7 +224,7 @@ def get_task(task_id: int):
     }
 
 
-@app.patch("/api/tasks/{task_id}")
+@router.patch("/api/tasks/{task_id}")
 def patch_task(task_id: int, body: TaskPatch):
     sent = body.model_fields_set
     if sent not in ({"spec_md"}, {"stage"}, {"status", "position"}):
@@ -518,20 +336,9 @@ def run_env(request: Request) -> dict:
     return stripped_env() | {"FCTL_URL": str(request.base_url).rstrip("/")}
 
 
-def auth_status(cwd: str, env: dict) -> dict | None:
-    """§4.3, Q6: `claude auth status`'s parsed answer if it exits 0 and reports claude.ai, else None."""
-    try:
-        r = subprocess.run(["claude", "auth", "status"], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                           capture_output=True, text=True, timeout=30)
-        info = json.loads(r.stdout)
-    except (OSError, ValueError, subprocess.TimeoutExpired):  # no binary, not JSON, hung
-        return None
-    return info if r.returncode == 0 and isinstance(info, dict) and info.get("authMethod") == "claude.ai" else None
-
-
 def subscription_auth(cwd: str, env: dict) -> bool:
     """Each run's own check, run like the run itself and never cached (§4.3: before every run)."""
-    return auth_status(cwd, env) is not None
+    return get_claude().auth_status(cwd, env) is not None
 
 
 LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": claude_login()'s answer}; the pages' only state
@@ -544,7 +351,7 @@ def claude_login() -> tuple[str, bool]:
     now = monotonic()
     if LOGIN and now - LOGIN["at"] < 60:
         return LOGIN["value"]
-    info = auth_status(str(db.data_dir()), stripped_env())
+    info = get_claude().auth_status(str(config.data_dir()), stripped_env())
     if info is None:
         value = ("API key — runs disabled", False)
     else:
@@ -586,7 +393,7 @@ def finish_run(run_id: int, proc: subprocess.Popen, log_path: Path):
         )
 
 
-@app.post("/api/tasks/{task_id}/run", status_code=202)
+@router.post("/api/tasks/{task_id}/run", status_code=202)
 def run_task(task_id: int, request: Request):
     """Q2's order: 404, run active, status (Q1), factory (Q12), worktree (Q4), auth; then the run row,
     the move, and the event in one transaction, then the spawn (§4.4)."""
@@ -600,7 +407,7 @@ def run_task(task_id: int, request: Request):
     if task["status"] in ("review", "done"):
         raise HTTPException(409, f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
     branch = task["default_branch"]
-    if hint := factory_hint(factory_state(task["path"], branch), branch):
+    if hint := factory_hint(factory_state(get_git(), task["path"], branch), branch):
         raise HTTPException(409, hint)
     wt, env = worktree(task), run_env(request)
     if not subscription_auth(wt, env):
@@ -612,7 +419,7 @@ def run_task(task_id: int, request: Request):
            "--output-format", "stream-json", "--verbose", "--forward-subagent-text",
            "--permission-mode", "acceptEdits", "--permission-prompts", "none",
            "--allowedTools", *allowed, "--disallowedTools", *DISALLOWED_TOOLS]
-    runs_dir = db.data_dir() / "runs"
+    runs_dir = config.data_dir() / "runs"
     runs_dir.mkdir(exist_ok=True)
     with closing(db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -655,7 +462,7 @@ def run_task(task_id: int, request: Request):
     return {"run_id": run_id, "session_id": session_id, "worktree": os.path.relpath(wt, task["path"])}
 
 
-@app.post("/api/runs/{run_id}/stop")  # also the shutdown's stop
+@router.post("/api/runs/{run_id}/stop")  # also the shutdown's stop
 def stop_run(run_id: int) -> dict:
     """013 Q1, Q2: mark the row stopped first, so the exit thread can't record `failed`, then SIGTERM
     the run's process group (§4.4). The pid is only ever one the app stored for its own spawn."""
@@ -745,7 +552,7 @@ def log_items(lines: list[str], after: int) -> list[dict]:
     return items
 
 
-@app.get("/api/runs/{run_id}/log")
+@router.get("/api/runs/{run_id}/log")
 def run_log(run_id: int, after: int = Query(0, ge=0)):
     """013 Q6: `after` and `next` count complete lines; a trailing partial line waits for its newline.
     Q9: no log file yet is an empty page, never an error."""
@@ -758,7 +565,7 @@ def run_log(run_id: int, after: int = Query(0, ge=0)):
     return {"next": len(lines), "lines": log_items(lines, after)}
 
 
-@app.post("/api/projects/{project_id}/run-next", status_code=202)
+@router.post("/api/projects/{project_id}/run-next", status_code=202)
 def run_next(project_id: int, request: Request):
     """Q13: the top backlog card, lowest position then lowest id, through all of /run's checks."""
     one_or_404("SELECT 1 FROM projects WHERE id = ?", (project_id,))
@@ -876,7 +683,7 @@ def insert_round(conn: sqlite3.Connection, task_id: int, body: RoundBody) -> dic
             "deletions": sum(f["deletions"] for f in files)}
 
 
-@app.post("/api/tasks/{task_id}/rounds", status_code=201)
+@router.post("/api/tasks/{task_id}/rounds", status_code=201)
 def submit_round(task_id: int, body: RoundBody, request: Request):
     with closing(db.connect()) as conn, conn:
         conn.execute("BEGIN IMMEDIATE")  # n, the round, its files, and the status commit together
@@ -916,7 +723,7 @@ def round_or_404(task_id: int, n: str) -> sqlite3.Row:
     return found[0]
 
 
-@app.get("/api/tasks/{task_id}/rounds/{n}/diff")
+@router.get("/api/tasks/{task_id}/rounds/{n}/diff")
 def round_diff(task_id: int, n: str):
     """Q7: the round's files' patches joined in rowid order."""
     patches = query("SELECT patch FROM round_files WHERE round_id = ? ORDER BY rowid",
@@ -947,7 +754,7 @@ class DecisionBody(BaseModel):
     body_md: str = ""
 
 
-@app.put("/api/tasks/{task_id}/rounds/{n}/verdicts/{reviewer}")
+@router.put("/api/tasks/{task_id}/rounds/{n}/verdicts/{reviewer}")
 def put_verdict(task_id: int, n: str, reviewer: Reviewer, body: VerdictBody):
     """Q2: one row per (round, reviewer); posting again replaces verdict, body, and created_at."""
     found = round_or_404(task_id, n)
@@ -960,7 +767,7 @@ def put_verdict(task_id: int, n: str, reviewer: Reviewer, body: VerdictBody):
     return {"round": found["n"], "reviewer": reviewer, "verdict": body.verdict, "complete": f"{done}/{len(REVIEWERS)}"}
 
 
-@app.post("/api/tasks/{task_id}/comments", status_code=201)
+@router.post("/api/tasks/{task_id}/comments", status_code=201)
 def post_comment(task_id: int, body: CommentBody):
     """Q3: inline (path and line, side defaulting to new) or conversation (all three NULL)."""
     if (body.path is None) != (body.line is None):
@@ -984,7 +791,7 @@ def post_comment(task_id: int, body: CommentBody):
     return {"id": comment_id}
 
 
-@app.post("/api/tasks/{task_id}/decision", status_code=201)
+@router.post("/api/tasks/{task_id}/decision", status_code=201)
 def post_decision(task_id: int, body: DecisionBody):
     """Q4: the approver's decision on the latest round. Every POST adds a row; readers take the latest."""
     found = round_or_404(task_id, "latest")
@@ -1058,14 +865,14 @@ def decide_review(task_id: int, decision: str, body_md: str, status: str, stage:
     return task
 
 
-@app.post("/api/tasks/{task_id}/approve")
+@router.post("/api/tasks/{task_id}/approve")
 def approve(task_id: int, body: ApproveBody):
     """§3.7: my APPROVE → done, and the commands I run myself. The app never runs git."""
     task = decide_review(task_id, "APPROVE", body.body_md, "done", None)
     return {"status": "done", "commit_hint": commit_hint(task)}
 
 
-@app.post("/api/tasks/{task_id}/request-changes", status_code=202)
+@router.post("/api/tasks/{task_id}/request-changes", status_code=202)
 def request_changes(task_id: int, body: ChangesBody, request: Request):
     """§3.6: my CHANGES_REQUESTED → in_progress · rework (Q1: standalone too), then for a factory task
     (013 Q11) the rework run: /factory <id> in its worktree, a fresh session (Q13). Q12: an active run
@@ -1133,7 +940,7 @@ def context_md(task: sqlite3.Row, rounds: list[sqlite3.Row], feedback: sqlite3.R
     return "\n\n".join(blocks) + "\n"
 
 
-@app.get("/api/tasks/{task_id}/context")
+@router.get("/api/tasks/{task_id}/context")
 def task_context(task_id: int, n: str | None = Query(None, alias="round"), feedback: bool = False):
     """§6.2: everything (no query), one round (`?round=`), or my latest feedback (`?feedback=1`)."""
     if n is not None and feedback:
@@ -1182,7 +989,7 @@ TILE_TASKS = {status: f"t.status = '{status}'" for status in COLUMNS} | {
 }
 
 
-@app.get("/", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 def index(request: Request, show: str = ""):
     """docs/ui.md §8 item 1. Every SQL fragment below is a constant; `show` only picks one."""
     counts = query(
@@ -1224,7 +1031,7 @@ def index(request: Request, show: str = ""):
     })
 
 
-@app.get("/workspaces/{workspace_id}", response_class=HTMLResponse)
+@router.get("/workspaces/{workspace_id}", response_class=HTMLResponse)
 def workspace_page(request: Request, workspace_id: int):
     workspace = one_or_404("SELECT id, name FROM workspaces WHERE id = ?", (workspace_id,))
     rows = query(
@@ -1239,23 +1046,24 @@ def workspace_page(request: Request, workspace_id: int):
         (workspace_id,),
     )
     # ponytail: one git call per row; cache if a workspace grows past a few dozen projects
-    projects = [dict(r, factory=factory_state(r["path"], r["default_branch"])) for r in rows]
+    git = get_git()
+    projects = [dict(r, factory=factory_state(git, r["path"], r["default_branch"])) for r in rows]
     return templates.TemplateResponse(
         request, "workspace.html", {"workspace": workspace, "projects": projects}
     )
 
 
-@app.post("/workspaces")
+@router.post("/workspaces")
 async def create_workspace(request: Request):
     name = await form_field(request, "name")
     if not name:
         raise HTTPException(422, "name must not be blank")
-    with closing(db.connect()) as conn, conn:
-        ws_id = get_or_create_workspace(conn, name)
+    with transaction() as conn:
+        ws_id = workspaces_handler.create_workspace(WorkspacesRepo(conn), name)
     return hx_redirect(f"/workspaces/{ws_id}")
 
 
-@app.get("/projects/{project_id}", response_class=HTMLResponse)
+@router.get("/projects/{project_id}", response_class=HTMLResponse)
 def project_page(request: Request, project_id: int):
     # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
     # add a /projects/{id}/board fragment route if that shows up in profiling
@@ -1274,7 +1082,7 @@ def project_page(request: Request, project_id: int):
     for t in tasks:
         columns[t["status"]].append(t | {"position": positions[t["id"]],
                                          "started_at": t["run"] and started[t["run"]["id"]]})
-    factory = factory_state(project["path"], project["default_branch"])
+    factory = factory_state(get_git(), project["path"], project["default_branch"])
     return templates.TemplateResponse(request, "project.html", {
         "project": project, "workspaces": workspaces(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
@@ -1282,7 +1090,7 @@ def project_page(request: Request, project_id: int):
     })
 
 
-@app.post("/projects/{project_id}/tasks")
+@router.post("/projects/{project_id}/tasks")
 async def add_task_form(request: Request, project_id: int):
     """Q10: the + New task form; create_task validates, places, and logs the event."""
     body = TaskBody(
@@ -1293,34 +1101,30 @@ async def add_task_form(request: Request, project_id: int):
     return hx_redirect(f"/projects/{project_id}")
 
 
-@app.post("/projects/{project_id}/workspace")
+@router.post("/projects/{project_id}/workspace")
 async def move_project(request: Request, project_id: int):
     try:
         ws_id = int(await form_field(request, "workspace_id"))
     except ValueError:
         raise HTTPException(422, "workspace_id must be an integer")
-    with closing(db.connect()) as conn, conn:
-        if not conn.execute("SELECT 1 FROM workspaces WHERE id = ?", (ws_id,)).fetchone():
-            raise HTTPException(404)
-        moved = conn.execute("UPDATE projects SET workspace_id = ? WHERE id = ?", (ws_id, project_id))
-        if moved.rowcount == 0:
-            raise HTTPException(404)
+    with transaction() as conn:
+        projects_handler.move_project(WorkspacesRepo(conn), ProjectsRepo(conn), project_id, ws_id)
     return hx_redirect(f"/projects/{project_id}")
 
 
-@app.post("/projects/{project_id}/factory", response_class=HTMLResponse)
+@router.post("/projects/{project_id}/factory", response_class=HTMLResponse)
 async def create_factory_form(request: Request, project_id: int):
-    """Q11: htmx doesn't swap 4xx, so errors come back as a 200 fragment with role="alert"."""
+    """011 Q11: htmx doesn't swap 4xx, so errors come back as a 200 fragment with role="alert"."""
+    overwrite = bool(await form_field(request, "overwrite"))
     try:
-        result = create_factory(project_id, bool(await form_field(request, "overwrite")))
-    except HTTPException as e:
+        with transaction() as conn:
+            result = factory_handler.create_factory(ProjectsRepo(conn), project_id, overwrite).model_dump()
+    except DomainError as e:
         result = {"error": e.detail}
     return templates.TemplateResponse(request, "factory_result.html", result)
 
 
 # --- Code page (docs/ui.md §8 item 6) ---
-
-MAX_VIEW = 1024 * 1024  # Q5: over this many bytes, a file isn't shown
 
 
 def git_stdout(root: str, *args: str) -> tuple[bytes | None, str | None]:
@@ -1360,7 +1164,7 @@ def read_tracked(root: str, path: str) -> dict:
     return {"text": text, "lines": len(re.findall(r"\r\n?|\n", text)) + (text[-1] not in "\r\n")}
 
 
-@app.get("/projects/{project_id}/code", response_class=HTMLResponse)
+@router.get("/projects/{project_id}/code", response_class=HTMLResponse)
 def code_page(request: Request, project_id: int, path: str = ""):
     """§8 item 6: the main checkout's `git ls-files` tree beside README.md (no `path`) or one file."""
     project = one_or_404("SELECT id, name, path FROM projects WHERE id = ?", (project_id,),
@@ -1510,7 +1314,7 @@ def approver_decision(task_id: int) -> sqlite3.Row | None:
     return found[0] if found else None
 
 
-@app.get("/tasks/{task_id}", response_class=HTMLResponse)
+@router.get("/tasks/{task_id}", response_class=HTMLResponse)
 def task_page(request: Request, task_id: int):
     """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, spec,
     rounds with build notes and verdict popovers, the approver's latest decision, the status history,
@@ -1519,7 +1323,7 @@ def task_page(request: Request, task_id: int):
     found = query("SELECT id, status, error, session_id, started_at FROM runs WHERE task_id = ?"
                   " ORDER BY id DESC LIMIT 1", (task_id,))
     run = found[0] if found else None
-    factory = factory_state(task["path"], task["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
+    factory = factory_state(get_git(), task["path"], task["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
     takeover = None  # Q9: only for a run that isn't running, in the task's stored worktree
     if run and task["worktree_path"] and run["status"] != "running":
         takeover = f"cd {shlex.quote(task['worktree_path'])} && claude --resume {shlex.quote(run['session_id'])}"
@@ -1533,7 +1337,7 @@ def task_page(request: Request, task_id: int):
     })
 
 
-@app.get("/tasks/{task_id}/review", response_class=HTMLResponse)
+@router.get("/tasks/{task_id}/review", response_class=HTMLResponse)
 def review_page(request: Request, task_id: int, n: str = Query("latest", alias="round"), tab: str = "",
                 path: str = "", side: str = "", line: str = ""):
     """§8.2's Conversation tab, or with `tab=files` §8.3's Files changed for the picked round (008).
@@ -1559,14 +1363,14 @@ def review_context(task_id: int, n: str, tab: str, path: str = "", side: str = "
     }
 
 
-@app.post("/tasks/{task_id}/approve")
+@router.post("/tasks/{task_id}/approve")
 def approve_form(task_id: int):
     """Q12: the page's Approve sends no summary."""
     approve(task_id, ApproveBody())
     return hx_redirect(f"/tasks/{task_id}/review")
 
 
-@app.post("/tasks/{task_id}/request-changes")
+@router.post("/tasks/{task_id}/request-changes")
 async def request_changes_form(request: Request, task_id: int):
     body = ChangesBody(body_md=await form_field(request, "body_md"))
     try:
@@ -1583,7 +1387,7 @@ async def request_changes_form(request: Request, task_id: int):
     return hx_redirect(f"/tasks/{task_id}/review")
 
 
-@app.post("/tasks/{task_id}/comments")
+@router.post("/tasks/{task_id}/comments")
 async def add_comment_form(request: Request, task_id: int):
     """007 Q9: a conversation comment from me on the latest round, or 008 Q3: an inline one on the
     sent `round`, `path`, `side`, and `line` (blank = absent). post_comment validates and writes."""

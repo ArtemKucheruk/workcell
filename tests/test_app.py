@@ -9,8 +9,6 @@ import claude_factories
 
 PKG = Path(claude_factories.__file__).parent
 REPO = Path(__file__).parent.parent
-HOST_ERROR = {"detail": "Host must be 127.0.0.1 or localhost"}
-HEADER_ERROR = {"detail": "X-Requested-By: fctl header required"}
 
 
 # --- Base layout and static files --------------------------------------------
@@ -43,42 +41,6 @@ def test_index_uses_base_layout(client):  # AC16
 
 def test_body_sends_header_on_htmx_requests(client):  # AC17
     assert """<body hx-headers='{"X-Requested-By": "fctl"}'>""" in client.get("/").text
-
-
-# --- Local-safety middleware -------------------------------------------------
-
-
-@pytest.mark.parametrize("host", ["127.0.0.1:4545", "localhost:4545", "localhost", "127.0.0.1:5000"])
-def test_local_hosts_allowed(client, host):  # AC18
-    assert client.get("/", headers={"Host": host}).status_code == 200
-
-
-@pytest.mark.parametrize("host", ["evil.example", "localhost.evil.example", "127.0.0.1.evil.example"])
-def test_foreign_hosts_rejected(client, host):  # AC19
-    r = client.get("/", headers={"Host": host})
-    assert r.status_code == 403
-    assert r.json() == HOST_ERROR
-
-
-@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])
-def test_mutating_without_header_rejected(client, method):  # AC20
-    r = client.request(method, "/anything")
-    assert r.status_code == 403
-    assert r.json() == HEADER_ERROR
-
-
-def test_mutating_with_wrong_header_rejected(client):  # AC21
-    r = client.post("/anything", headers={"X-Requested-By": "other"})
-    assert r.status_code == 403
-    assert r.json() == HEADER_ERROR
-
-
-def test_mutating_with_header_passes(client):  # AC22
-    assert client.post("/anything", headers={"X-Requested-By": "fctl"}).status_code == 404
-
-
-def test_get_needs_no_header(client):  # AC23
-    assert client.get("/").status_code == 200
 
 
 # --- Repo and test harness ---------------------------------------------------

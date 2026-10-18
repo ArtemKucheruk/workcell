@@ -1,10 +1,11 @@
-"""Data dir and SQLite helpers. Stdlib only."""
+"""SQLite helpers. Stdlib only."""
 
-import os
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
+
+from .. import config
 
 SCHEMA = Path(__file__).with_name("schema.sql")
 
@@ -14,19 +15,17 @@ def now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def data_dir() -> Path:
-    return Path(os.environ.get("FCTL_HOME") or Path.home() / ".claude-factories")
-
-
 def connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(data_dir() / "factory.db")
+    # check_same_thread off: a request's connection (server/deps.py) is opened, used, and closed on
+    # different threadpool threads, one at a time. No connection is ever shared by two at once.
+    conn = sqlite3.connect(config.data_dir() / "factory.db", check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")  # SQLite ignores REFERENCES without it, per connection
     return conn
 
 
 def init() -> None:
     """Create the data dir and apply schema.sql in WAL mode. Safe to run on every startup."""
-    data_dir().mkdir(parents=True, exist_ok=True)
+    config.data_dir().mkdir(parents=True, exist_ok=True)
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA.read_text())

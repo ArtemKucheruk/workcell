@@ -10,7 +10,7 @@ from test_review import add_round, header
 from test_runs import (H, OLD, add_running_run, add_task, events, fake, project, run, run_row,  # noqa: F401
                        started, task_row, wait)
 
-from claude_factories.app import app
+from claude_factories.server.app import create_app
 
 BASE = "http://127.0.0.1:4545"
 FORM = H | {"Content-Type": "application/x-www-form-urlencoded"}
@@ -162,7 +162,7 @@ def test_stop_without_live_pid(client, project):  # AC7
 
 
 def test_shutdown_stops_runs(long):  # AC8
-    with TestClient(app, base_url=BASE) as c:
+    with TestClient(create_app(), base_url=BASE) as c:
         s = long(c)
     row = run_row(s.run_id)
     assert row["status"] == "stopped" and row["ended_at"]
@@ -176,7 +176,7 @@ def test_startup_fails_leftover_runs(client, project, sleeper):  # AC9
     b = sql("INSERT INTO runs (task_id, session_id, status, exit_code, log_path, started_at, ended_at)"
             " VALUES (?, 's2', 'succeeded', 0, 'l', ?, ?) RETURNING id", (task, OLD, OLD))[0][0]
     before = run_row(b), sql("SELECT * FROM tasks"), sql("SELECT * FROM events")
-    with TestClient(app, base_url=BASE):
+    with TestClient(create_app(), base_url=BASE):
         row = run_row(a)
         assert (row["status"], row["error"], row["exit_code"]) == ("failed", "app restarted", None)
         assert row["ended_at"]
@@ -208,7 +208,7 @@ def test_retry_after_restart(client, project):  # AC11
     first = started(client, task)
     sql("UPDATE tasks SET stage = 'approval' WHERE id = ?", (task,))
     leftover = add_running_run(task)
-    with TestClient(app, base_url=BASE):
+    with TestClient(create_app(), base_url=BASE):
         pass
     assert run_row(leftover)["status"] == "failed"
     r = run(client, task)

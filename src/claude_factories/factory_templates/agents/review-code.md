@@ -17,6 +17,8 @@ Check:
   the tests; don't trust the build notes' mapping alone.
 - The code follows the repo's stack and conventions. A new dependency has its reason in the
   spec.
+- The code follows the layout and import rules the repo documents, if it has them (for
+  example an architecture doc or test).
 - Nothing unrequested: no extra abstractions, dead code, config, or dependencies.
 
 If the task changes no code: PASS with "no code in this task".

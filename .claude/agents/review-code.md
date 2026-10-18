@@ -17,6 +17,8 @@ Check:
   (others need a reason in the spec), the `fctl` CLI module imports only the stdlib, stdlib
   sqlite3 with one `schema.sql` in WAL mode, no ORM, `frontend/server.js` on Node built-ins
   only.
+- Backend code follows the layout and import rules in `docs/MVP.md §4.7`: each file in its
+  layer, handlers raising domain errors rather than HTTPException, SQL only in repositories/.
 - Every acceptance criterion has a test that passes and really asserts the criterion. Open
   the tests; don't trust build.md's mapping alone.
 - Python tests use a temp `FCTL_HOME` and a fake `claude` on PATH. Frontend tests mock fetch.
