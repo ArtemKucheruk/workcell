@@ -4,6 +4,7 @@ import { boardPage } from '../../api/pages.js'
 import { createFactory, moveProject } from '../../api/projects.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, moveTask } from '../../api/tasks.js'
+import { ActionButton, button } from '../../components/ActionButton.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { Time } from '../../components/Time.jsx'
@@ -14,30 +15,10 @@ const SHORT = { security: 'sec', ux: 'ux', ui: 'ui', code: 'co' }
 const SYMBOL = { PASS: '✓', CHANGES: '✗', pending: '·' }
 
 const muted = 'text-gray-600 dark:text-gray-400'
-const button =
-  'cursor-pointer rounded-md border border-gray-300 px-3 py-1 font-medium hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800'
 const smallButton = `${button} px-2 py-0.5 text-sm`
 const field = 'rounded-md border border-gray-300 px-2 py-1 dark:border-gray-700 dark:bg-gray-900'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
-
-/** Q9: Run, Retry, and Run next, disabled while their request is in flight. `action` never rejects. */
-function ActionButton({ action, disabled, className = button, children, ...rest }) {
-  const [busy, setBusy] = useState(false)
-  async function click() {
-    setBusy(true)
-    try {
-      await action()
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <button type="button" onClick={click} disabled={disabled || busy} className={className} {...rest}>
-      {children}
-    </button>
-  )
-}
 
 /** §8.1, as project.html: running, else stalled, else escalated, else waiting, else the stage. */
 function StatusLine({ card, running, retry }) {

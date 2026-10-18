@@ -1,6 +1,7 @@
 import { NotFound } from '../components/NotFound.jsx'
 import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
+import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { WorkspacePage } from '../pages/workspace/WorkspacePage.jsx'
 import { Layout } from './Layout.jsx'
 
@@ -12,6 +13,7 @@ export const routes = [
       { path: '/', element: <DashboardPage /> },
       { path: '/workspaces/:id', element: <WorkspacePage /> },
       { path: '/projects/:id', element: <BoardPage /> },
+      { path: '/tasks/:id', element: <TaskPage /> },
       { path: '*', element: <NotFound /> },
     ],
   },

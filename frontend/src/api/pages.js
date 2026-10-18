@@ -6,3 +6,5 @@ export const dashboardPage = (show) =>
 export const workspacePage = (id) => api(`/api/pages/workspaces/${encodeURIComponent(id)}`)
 
 export const boardPage = (id) => api(`/api/pages/projects/${encodeURIComponent(id)}`)
+
+export const taskPage = (id) => api(`/api/pages/tasks/${encodeURIComponent(id)}`)

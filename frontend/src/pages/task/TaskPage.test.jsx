@@ -1,0 +1,540 @@
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+
+const PAGE = '/api/pages/tasks/12'
+const LOG = (id, after) => `/api/runs/${id}/log?after=${after}`
+const HINT = "factory isn't committed on main: Create factory on the project board, then commit it on main"
+const ACTIVE = [409, { detail: 'run #41 active' }]
+const WORKTREE = '/Users/me/api/.claude/worktrees/12-rate-limit-login'
+const PENDING = { security: 'pending', ux: 'pending', ui: 'pending', code: 'pending' }
+
+/** 020's PageTask: the spec's fixture task. */
+const TASK = {
+  id: 12, project_id: 3, project: 'api', title: 'Rate-limit login', status: 'in_progress', stage: 'build',
+  branch: 'factory/12-rate-limit-login', worktree_path: WORKTREE,
+  description_md: '', description_html: '', spec_md: null, spec_html: '',
+}
+/** 020's TaskPage view-model; `task` overrides fields of the fixture task. */
+const taskPage = (task = {}, extra = {}) => ({
+  task: { ...TASK, ...task }, can_run: true, hint: null, run: null, takeover: null, rounds: [], approver: null,
+  history: [], ...extra,
+})
+/** RunDetail. */
+const run = (id, status, extra = {}) => ({
+  id, status, error: null, session_id: `session-${id}`, started_at: '2026-10-18T01:02:00Z', ...extra,
+})
+/** TaskRound. */
+const round = (n, extra = {}) => ({
+  n, trigger: 'initial', files: 2, additions: 10, deletions: 1, verdicts: PENDING, posted: {},
+  build_md: null, build_html: '', ...extra,
+})
+/** LogOut. */
+const log = (next, ...texts) => [200, { next, lines: texts.map((text) => ({ t: 'text', text })) }]
+
+beforeEach(() => {
+  vi.stubEnv('TZ', 'Asia/Tokyo') // UTC+9, as in the board tests
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+/** Renders /tasks/12 with `page` as its view-model; mutate `responses` to change later replies. */
+async function open(page, more = {}) {
+  const responses = { [`GET ${PAGE}`]: [200, page], ...more }
+  const fetch = mockFetch(responses)
+  const view = renderAt('/tasks/12')
+  await screen.findByRole('heading', { level: 1 })
+  return { fetch, responses, ...view }
+}
+
+/** Renders /tasks/12 under fake timers and lets the first load and log fetch settle. */
+async function openFake(responses) {
+  vi.useFakeTimers()
+  const fetch = mockFetch(responses)
+  renderAt('/tasks/12')
+  await advance(0)
+  return fetch
+}
+
+const advance = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
+const loads = (fetch) => fetched(fetch).filter((url) => url === PAGE).length
+const logs = (fetch) => fetched(fetch).filter((url) => url.startsWith('/api/runs/'))
+const header = () => document.querySelector('main header')
+const section = (name) => screen.getByRole('region', { name })
+const rows = () => [...section('Rounds').querySelectorAll('ol > li')]
+const runButtons = () => within(header()).queryAllByRole('button').map((b) => b.textContent)
+const runStatus = () => within(header()).queryByText(/^run #/)
+const panel = () => screen.queryByText(/^Run log · run #/)?.closest('details') ?? null
+const logLines = () => [...panel().querySelector('summary + div').children].map((el) => el.textContent)
+const sends = (fetch, method, url) => fetch.mock.calls.filter(([u, init]) => u === url && init?.method === method)
+
+/** The one `method url` call: asserts its X-Requested-By. */
+function sent(fetch, method, url) {
+  const calls = sends(fetch, method, url)
+  expect(calls).toHaveLength(1)
+  expect(calls[0][1].headers['X-Requested-By']).toBe('fctl')
+}
+
+/** Clicks `label`, then expects `method url` to have gone out before the page's second load. */
+async function clickAndReload(fetch, label, method, url) {
+  fireEvent.click(within(header()).getByRole('button', { name: label }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  sent(fetch, method, url)
+  const urls = fetched(fetch)
+  expect(urls.indexOf(url)).toBeLessThan(urls.lastIndexOf(PAGE))
+}
+
+// --- Page and header -------------------------------------------------------------------
+
+test('AC1: /tasks/12 shows the title, the breadcrumb to the board, the Review link, and the page title', async () => {
+  const { fetch } = await open(taskPage())
+  expect(fetched(fetch)).toContain(PAGE)
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+  const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
+  expect(within(crumbs).getByRole('link', { name: 'api' }).getAttribute('href')).toBe('/projects/3')
+  expect(within(header()).getByRole('link', { name: 'Review' }).getAttribute('href')).toBe('/tasks/12/review')
+  await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Claude Factories'))
+})
+
+test('AC2: the status line words each status and stage; only escalated is red', async () => {
+  const cases = [
+    ['in_progress', 'build', 'In progress · build'],
+    ['review', 'human_review', 'Review · waiting on you'],
+    ['review', 'escalated', 'Review · ⚠ NEEDS YOU — escalated'],
+    ['backlog', null, 'Backlog'],
+    ['done', null, 'Done'],
+  ]
+  for (const [status, stage, text] of cases) {
+    const { unmount } = await open(taskPage({ status, stage }))
+    expect(within(header()).getByText(fullText(text))).toBeTruthy()
+    const red = [...document.querySelectorAll('main [class*="text-red-"]')]
+    expect(red.map((el) => el.textContent)).toEqual(stage === 'escalated' ? ['⚠ NEEDS YOU — escalated'] : [])
+    unmount()
+  }
+})
+
+test('AC3: the branch shows in a <code>; no branch and no run leave the header without one', async () => {
+  const withBranch = await open(taskPage())
+  expect(within(header()).getByText('factory/12-rate-limit-login').tagName).toBe('CODE')
+  withBranch.unmount()
+  await open(taskPage({ branch: null }))
+  expect(header().querySelector('code')).toBeNull()
+})
+
+test('AC4: a title with markup shows as text and adds no script', async () => {
+  await open(taskPage({ title: '<script>alert(1)</script>' }))
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 <script>alert(1)</script>')
+  expect(document.querySelector('main script')).toBeNull()
+})
+
+// --- Description and spec --------------------------------------------------------------
+
+test('AC5: the description renders its HTML; a blank one says No description.', async () => {
+  const withText = await open(taskPage({ description_md: 'Max **5**', description_html: '<p>Max <strong>5</strong></p>\n' }))
+  expect(section('Description').querySelector('strong').textContent).toBe('5')
+  withText.unmount()
+  await open(taskPage())
+  expect(within(section('Description')).getByText('No description.')).toBeTruthy()
+})
+
+test('AC6: the spec renders its HTML outside any <details>; null or blank says No spec yet.', async () => {
+  const spec = await open(taskPage({ spec_md: '## Criteria\n\n- 429\n', spec_html: '<h2>Criteria</h2>\n<ul>\n<li>429</li>\n</ul>\n' }))
+  const heading = within(section('Spec')).getByRole('heading', { level: 2, name: 'Criteria' })
+  const item = within(section('Spec')).getByText('429')
+  expect(item.tagName).toBe('LI')
+  expect([heading.closest('details'), item.closest('details')]).toEqual([null, null])
+  spec.unmount()
+  for (const spec_md of [null, '  \n']) {
+    const { unmount } = await open(taskPage({ spec_md }))
+    expect(within(section('Spec')).getByText('No spec yet.')).toBeTruthy()
+    unmount()
+  }
+})
+
+// --- Rounds ----------------------------------------------------------------------------
+
+test('AC7: rounds show in order as Round n trigger, four chips, and +A −D', async () => {
+  await open(taskPage({}, {
+    rounds: [
+      round(1, { verdicts: { security: 'CHANGES', ux: 'PASS', ui: 'PASS', code: 'PASS' }, additions: 118, deletions: 9 }),
+      round(2, { trigger: 'agent', verdicts: { security: 'PASS', ux: 'PASS', ui: 'PASS', code: 'PASS' }, additions: 126, deletions: 9 }),
+    ],
+  }))
+  expect(rows().map((li) => li.querySelector('p').textContent)).toEqual([
+    'Round 1 initial sec ✗ ux ✓ ui ✓ code ✓ +118 −9',
+    'Round 2 agent sec ✓ ux ✓ ui ✓ code ✓ +126 −9',
+  ])
+})
+
+test('AC8: a verdict with a body is a popover button whose popover holds the rendered body', async () => {
+  const security = { verdict: 'CHANGES', body_md: 'Trusts **X-Forwarded-For**', body_html: '<p>Trusts <strong>X-Forwarded-For</strong></p>\n' }
+  await open(taskPage({}, {
+    rounds: [round(1, { verdicts: { ...PENDING, security: 'CHANGES' }, posted: { security } })],
+  }))
+  const chip = within(rows()[0]).getByRole('button', { name: 'sec ✗' })
+  expect(chip.getAttribute('type')).toBe('button')
+  expect(chip.getAttribute('popovertarget')).toBe('verdict-1-security')
+  expect(chip.getAttribute('title')).toBe('security: CHANGES')
+  const popover = document.getElementById('verdict-1-security')
+  expect(popover.hasAttribute('popover')).toBe(true)
+  expect(popover.textContent.startsWith('security · CHANGES')).toBe(true)
+  expect(within(popover).getByText('X-Forwarded-For').tagName).toBe('STRONG')
+})
+
+test('AC9: a pending chip, or a posted one with a blank body, is plain text with a title and no popover', async () => {
+  await open(taskPage({}, {
+    rounds: [round(1, { verdicts: { ...PENDING, ux: 'PASS' }, posted: { ux: { verdict: 'PASS', body_md: '  \n', body_html: '' } } })],
+  }))
+  const row = rows()[0]
+  for (const [text, title, id] of [['ui ·', 'ui: pending', 'verdict-1-ui'], ['ux ✓', 'ux: PASS', 'verdict-1-ux']]) {
+    const chip = within(row).getByText(text)
+    expect(chip.tagName).toBe('SPAN')
+    expect(chip.getAttribute('title')).toBe(title)
+    expect(chip.hasAttribute('popovertarget')).toBe(false)
+    expect(document.getElementById(id)).toBeNull()
+  }
+  expect(within(row).queryAllByRole('button')).toEqual([])
+  expect(document.querySelector('[popover]')).toBeNull()
+})
+
+test('AC10: a standalone round with nothing posted says no agent review; a factory one shows four pending chips', async () => {
+  const standalone = await open(taskPage({ worktree_path: null }, { rounds: [round(1)] }))
+  expect(rows()[0].querySelector('p').textContent).toBe('Round 1 initial no agent review +10 −1')
+  expect(rows()[0].querySelectorAll('[title]')).toHaveLength(0)
+  standalone.unmount()
+  await open(taskPage({}, { rounds: [round(1)] }))
+  expect(rows()[0].querySelector('p').textContent).toBe('Round 1 initial sec · ux · ui · code · +10 −1')
+  expect([...rows()[0].querySelectorAll('[title]')].map((el) => el.getAttribute('title'))).toEqual([
+    'security: pending', 'ux: pending', 'ui: pending', 'code: pending',
+  ])
+})
+
+test('AC11: build notes sit in one closed <details>; null or blank says No build notes.', async () => {
+  const notes = await open(taskPage({}, {
+    rounds: [round(1, { build_md: 'Token **bucket**', build_html: '<p>Token <strong>bucket</strong></p>\n' })],
+  }))
+  const details = rows()[0].querySelectorAll('details')
+  expect(details).toHaveLength(1)
+  expect(details[0].hasAttribute('open')).toBe(false)
+  expect(details[0].querySelector('summary').textContent).toBe('Build notes')
+  expect(within(details[0]).getByText('bucket').tagName).toBe('STRONG')
+  notes.unmount()
+  await open(taskPage({}, { rounds: [round(1), round(2, { build_md: ' \n' })] }))
+  for (const li of rows()) {
+    expect(within(li).getByText('No build notes.')).toBeTruthy()
+    expect(li.querySelector('details')).toBeNull()
+  }
+})
+
+test('AC12: no rounds says No rounds yet.', async () => {
+  await open(taskPage())
+  expect(within(section('Rounds')).getByText('No rounds yet.')).toBeTruthy()
+})
+
+// --- Approver and history --------------------------------------------------------------
+
+test("AC13: the approver's decision shows with its round and rendered body; null shows none", async () => {
+  const approved = await open(taskPage({}, {
+    approver: { decision: 'APPROVE', n: 2, body_md: 'All **4** PASS', body_html: '<p>All <strong>4</strong> PASS</p>\n' },
+  }))
+  const block = screen.getByRole('region', { name: 'Approver' })
+  expect(block.textContent.startsWith('Approver · APPROVE')).toBe(true)
+  expect(block.textContent).toContain('round 2')
+  expect(within(block).getByText('4').tagName).toBe('STRONG')
+  approved.unmount()
+  await open(taskPage())
+  expect(screen.queryByText(/Approver ·/)).toBeNull()
+})
+
+test('AC14: the status history is an ordered list of local times and labels', async () => {
+  await open(taskPage({}, {
+    history: [
+      { created_at: '2026-10-18T01:02:00Z', label: 'created · backlog' },
+      { created_at: '2026-10-18T01:05:00Z', label: 'in_progress · build' },
+    ],
+  }))
+  const items = [...section('Status history').querySelectorAll('ol > li')]
+  expect(items.map((li) => li.textContent)).toEqual(['2026-10-18 10:02 created · backlog', '2026-10-18 10:05 in_progress · build'])
+  expect(items.map((li) => li.querySelector('time').getAttribute('datetime'))).toEqual([
+    '2026-10-18T01:02:00Z', '2026-10-18T01:05:00Z',
+  ])
+})
+
+// --- Run controls ----------------------------------------------------------------------
+
+test('AC15: a backlog task without a run has only Run, which posts and reloads', async () => {
+  const { fetch } = await open(taskPage({ status: 'backlog', stage: null, branch: null }), {
+    'POST /api/tasks/12/run': [200, { run_id: 41, session_id: 'session-41', worktree: WORKTREE }],
+  })
+  expect(runButtons()).toEqual(['Run'])
+  expect(runStatus()).toBeNull()
+  expect(panel()).toBeNull()
+  expect(screen.queryByText(/Take over|to take over/)).toBeNull()
+  await clickAndReload(fetch, 'Run', 'POST', '/api/tasks/12/run')
+})
+
+test('AC16: a running run shows Stop and its start time; Stop posts and reloads', async () => {
+  const { fetch } = await open(taskPage({}, { run: run(41, 'running') }), {
+    'POST /api/runs/41/stop': [200, { id: 41, status: 'stopped' }],
+    [`GET ${LOG(41, 0)}`]: log(0),
+  })
+  expect(runButtons()).toEqual(['Stop'])
+  expect(within(header()).getByText(fullText('run #41 running · started 10:02'))).toBeTruthy()
+  expect(runStatus().querySelector('time').getAttribute('datetime')).toBe('2026-10-18T01:02:00Z')
+  await clickAndReload(fetch, 'Stop', 'POST', '/api/runs/41/stop')
+})
+
+test('AC17: an ended run on an in_progress task shows Retry and how it ended; Retry posts and reloads', async () => {
+  const cases = [
+    [{ status: 'failed', error: 'exit code 3' }, 'run #41 failed: exit code 3'],
+    [{ status: 'stopped' }, 'run #41 stopped'],
+    [{ status: 'succeeded' }, 'run #41 succeeded'],
+    [{ status: 'failed', error: null }, 'run #41 failed'],
+  ]
+  for (const [{ status, ...extra }, text] of cases) {
+    const { unmount } = await open(taskPage({}, { run: run(41, status, extra) }))
+    expect(runButtons()).toEqual(['Retry'])
+    expect(runStatus().textContent).toBe(text)
+    unmount()
+  }
+  const { fetch } = await open(taskPage({}, { run: run(41, 'failed', { error: 'exit code 3' }) }), {
+    'POST /api/tasks/12/run': [200, { run_id: 42, session_id: 'session-42', worktree: WORKTREE }],
+  })
+  await clickAndReload(fetch, 'Retry', 'POST', '/api/tasks/12/run')
+})
+
+test('AC18: review and done tasks get no Run or Retry, a running run gets Stop, in_progress without a run gets nothing', async () => {
+  for (const [status, stage] of [['review', 'human_review'], ['done', null]]) {
+    const { unmount } = await open(taskPage({ status, stage }, { run: run(41, 'succeeded') }))
+    expect(runButtons()).toEqual([])
+    expect(runStatus().textContent).toBe('run #41 succeeded')
+    unmount()
+  }
+  const review = await open(taskPage({ status: 'review', stage: 'agent_review' }, { run: run(41, 'running') }))
+  expect(runButtons()).toEqual(['Stop'])
+  review.unmount()
+  await open(taskPage())
+  expect(runButtons()).toEqual([])
+  expect(runStatus()).toBeNull()
+})
+
+test('AC19: can_run disables Run and Retry but not Stop; the hint shows beside Run or Retry only', async () => {
+  const cases = [
+    [{ status: 'backlog', stage: null }, null, 'Run', true],
+    [{}, run(41, 'failed'), 'Retry', true],
+    [{}, run(41, 'running'), 'Stop', false],
+  ]
+  for (const [task, latest, label, disabled] of cases) {
+    const { unmount } = await open(taskPage(task, { run: latest, can_run: false, hint: HINT }))
+    const button = within(header()).getByRole('button', { name: label })
+    expect(button.disabled).toBe(disabled)
+    const hint = within(header()).queryByText(HINT)
+    expect(hint?.parentElement ?? null).toBe(label === 'Stop' ? null : button.parentElement)
+    unmount()
+  }
+  const review = await open(taskPage({ status: 'review', stage: 'human_review' }, { run: run(41, 'succeeded'), can_run: false, hint: HINT }))
+  expect(screen.queryByText(HINT)).toBeNull()
+  review.unmount()
+  await open(taskPage({ status: 'backlog', stage: null }))
+  expect(within(header()).getByRole('button', { name: 'Run' }).disabled).toBe(false)
+  expect(screen.queryByText(/factory isn't committed/)).toBeNull()
+})
+
+test('AC20: a refused Run, Retry, or Stop shows its detail in the header alert; the next success clears it', async () => {
+  const cases = [
+    [{ status: 'backlog', stage: null }, null, 'Run', '/api/tasks/12/run'],
+    [{}, run(41, 'failed'), 'Retry', '/api/tasks/12/run'],
+    [{}, run(41, 'running'), 'Stop', '/api/runs/41/stop'],
+  ]
+  for (const [task, latest, label, url] of cases) {
+    const { fetch, responses, unmount } = await open(taskPage(task, { run: latest }), { [`POST ${url}`]: ACTIVE })
+    fireEvent.click(within(header()).getByRole('button', { name: label }))
+    const alert = await within(header()).findByRole('alert')
+    expect(alert.textContent).toBe('run #41 active')
+    expect(sends(fetch, 'POST', url)[0][1].headers['X-Requested-By']).toBe('fctl')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+    expect(loads(fetch)).toBe(1)
+
+    responses[`POST ${url}`] = [200, {}]
+    await waitFor(() => expect(within(header()).getByRole('button', { name: label }).disabled).toBe(false))
+    fireEvent.click(within(header()).getByRole('button', { name: label }))
+    await waitFor(() => expect(loads(fetch)).toBe(2))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(sends(fetch, 'POST', url).map(([, init]) => init.headers['X-Requested-By'])).toEqual(['fctl', 'fctl'])
+    unmount()
+  }
+})
+
+// --- Takeover --------------------------------------------------------------------------
+
+test('AC21: the takeover command shows in a <code>; a running run says to stop it first; otherwise neither', async () => {
+  const takeover = `cd ${WORKTREE} && claude --resume session-41`
+  const ended = await open(taskPage({}, { run: run(41, 'stopped'), takeover }))
+  expect(within(header()).getByText(fullText(`Take over in terminal: ${takeover}`))).toBeTruthy()
+  expect(within(header()).getByText(takeover).tagName).toBe('CODE')
+  ended.unmount()
+
+  const running = await open(taskPage({}, { run: run(41, 'running') }))
+  expect(within(header()).getByText('Stop the run to take over.')).toBeTruthy()
+  expect(screen.queryByText(/Take over in terminal/)).toBeNull()
+  running.unmount()
+
+  for (const [task, latest] of [[{}, null], [{ worktree_path: null }, run(41, 'running')], [{ worktree_path: null }, run(41, 'stopped')]]) {
+    const { unmount } = await open(taskPage(task, { run: latest }))
+    expect(screen.queryByText(/Take over in terminal|Stop the run to take over/)).toBeNull()
+    unmount()
+  }
+})
+
+// --- Run log ---------------------------------------------------------------------------
+
+test('AC22: a run has a closed Run log panel that says No output yet.; no run, no panel', async () => {
+  const withRun = await open(taskPage({}, { run: run(41, 'stopped') }), { [`GET ${LOG(41, 0)}`]: log(0) })
+  await waitFor(() => expect(logs(withRun.fetch)).toEqual([LOG(41, 0)]))
+  expect(panel().querySelector('summary').textContent).toBe('Run log · run #41')
+  expect(panel().hasAttribute('open')).toBe(false)
+  expect(within(panel()).getByText('No output yet.')).toBeTruthy()
+  withRun.unmount()
+  const { fetch } = await open(taskPage())
+  expect(panel()).toBeNull()
+  expect(logs(fetch)).toEqual([])
+})
+
+test('AC23: a running run tails its log from after=0, then from the cursor 3000 ms after each reply', async () => {
+  const fetch = await openFake({
+    [`GET ${PAGE}`]: [200, taskPage({}, { run: run(41, 'running') })],
+    [`GET ${LOG(41, 0)}`]: [200, { next: 2, lines: [{ t: 'tool', text: 'builder-12 · Bash pytest -q' }, { t: 'text', text: '3 passed' }] }],
+    [`GET ${LOG(41, 2)}`]: log(3, 'done'),
+  })
+  expect(logs(fetch)).toEqual([LOG(41, 0)])
+  expect(logLines()).toEqual(['builder-12 · Bash pytest -q', '3 passed'])
+  expect(screen.queryByText('No output yet.')).toBeNull()
+  await advance(2999)
+  expect(logs(fetch)).toEqual([LOG(41, 0)])
+  await advance(1)
+  expect(logs(fetch)).toEqual([LOG(41, 0), LOG(41, 2)])
+  expect(logLines()).toEqual(['builder-12 · Bash pytest -q', '3 passed', 'done'])
+})
+
+test('AC24: an ended run fetches its log once', async () => {
+  const fetch = await openFake({
+    [`GET ${PAGE}`]: [200, taskPage({}, { run: run(41, 'stopped') })],
+    [`GET ${LOG(41, 0)}`]: log(1, 'bye'),
+  })
+  expect(logs(fetch)).toEqual([LOG(41, 0)])
+  await advance(30000)
+  expect(loads(fetch)).toBeGreaterThan(5)
+  expect(logs(fetch)).toEqual([LOG(41, 0)])
+  expect(logLines()).toEqual(['bye'])
+})
+
+test('AC25: a run that stops gets one more log fetch from its cursor, then none; each line shows once', async () => {
+  const responses = {
+    [`GET ${PAGE}`]: [200, taskPage({}, { run: run(41, 'running') })],
+    [`GET ${LOG(41, 0)}`]: log(2, 'a', 'b'),
+    [`GET ${LOG(41, 2)}`]: log(3, 'c'),
+    [`GET ${LOG(41, 3)}`]: log(3),
+  }
+  vi.useFakeTimers()
+  const reply = mockFetch(responses)
+  // the 3 s log poll's reply lands 100 ms late, so the final fetch the stop triggers overlaps it
+  const fetch = vi.fn(async (url, init) => {
+    if (url === LOG(41, 2)) await new Promise((resolve) => setTimeout(resolve, 100))
+    return reply(url, init)
+  })
+  vi.stubGlobal('fetch', fetch)
+  renderAt('/tasks/12')
+  await advance(0)
+  expect(logLines()).toEqual(['a', 'b'])
+  responses[`GET ${PAGE}`] = [200, taskPage({}, { run: run(41, 'stopped') })]
+  await advance(3000)
+  expect(runStatus().textContent).toBe('run #41 stopped')
+  expect(logs(fetch)).toEqual([LOG(41, 0), LOG(41, 2), LOG(41, 2)]) // the poll, then the final fetch from the cursor
+  await advance(30000)
+  expect(logs(fetch)).toEqual([LOG(41, 0), LOG(41, 2), LOG(41, 2)])
+  expect(logLines()).toEqual(['a', 'b', 'c'])
+})
+
+test('AC26: a poll that brings a new run swaps in a fresh log panel for it', async () => {
+  const responses = {
+    [`GET ${PAGE}`]: [200, taskPage({}, { run: run(41, 'failed') })],
+    [`GET ${LOG(41, 0)}`]: log(1, 'old line'),
+    [`GET ${LOG(42, 0)}`]: log(1, 'new line'),
+  }
+  const fetch = await openFake(responses)
+  expect(logLines()).toEqual(['old line'])
+  responses[`GET ${PAGE}`] = [200, taskPage({}, { run: run(42, 'running') })]
+  await advance(3000)
+  expect(panel().querySelector('summary').textContent).toBe('Run log · run #42')
+  expect(logs(fetch)).toEqual([LOG(41, 0), LOG(42, 0)])
+  expect(logLines()).toEqual(['new line'])
+  expect(screen.queryByText('old line')).toBeNull()
+})
+
+test('AC27: a log line and a run error with markup show as text and add no elements', async () => {
+  await open(taskPage({}, { run: run(41, 'failed', { error: '<script>alert(1)</script>' }) }), {
+    [`GET ${LOG(41, 0)}`]: log(1, '<img src=x onerror=alert(1)>'),
+  })
+  expect(await within(panel()).findByText('<img src=x onerror=alert(1)>')).toBeTruthy()
+  expect(runStatus().textContent).toBe('run #41 failed: <script>alert(1)</script>')
+  expect(document.querySelector('main img, main script')).toBeNull()
+})
+
+// --- Polling and states ----------------------------------------------------------------
+
+test('AC28: the page reloads 3000 ms after the last load settles and shows the new view-model', async () => {
+  const responses = { [`GET ${PAGE}`]: [200, taskPage()] }
+  const fetch = await openFake(responses)
+  expect(within(header()).getByText('In progress · build')).toBeTruthy()
+  responses[`GET ${PAGE}`] = [200, taskPage({ stage: 'agent_review' })]
+  await advance(2999)
+  expect(loads(fetch)).toBe(1)
+  await advance(1)
+  expect(loads(fetch)).toBe(2)
+  expect(within(header()).getByText('In progress · agent_review')).toBeTruthy()
+})
+
+test('AC29: build notes opened with a click stay open across a poll', async () => {
+  const security = { verdict: 'CHANGES', body_md: 'Trusts **X-Forwarded-For**', body_html: '<p>Trusts <strong>X-Forwarded-For</strong></p>\n' }
+  const page = taskPage({}, {
+    rounds: [round(1, { posted: { security }, build_md: 'Token **bucket**', build_html: '<p>Token <strong>bucket</strong></p>\n' })],
+  })
+  const fetch = await openFake({ [`GET ${PAGE}`]: [200, page] })
+  const details = rows()[0].querySelector('details')
+  const popover = document.getElementById('verdict-1-security')
+  fireEvent.click(details.querySelector('summary'))
+  expect(details.open).toBe(true)
+  await advance(3000)
+  expect(loads(fetch)).toBe(2)
+  expect(rows()[0].querySelector('details')).toBe(details)
+  expect(details.open).toBe(true)
+  expect(document.getElementById('verdict-1-security')).toBe(popover)
+})
+
+test("AC30: the API's 404 shows the not-found state with its detail and a link home", async () => {
+  mockFetch({ 'GET /api/pages/tasks/99': [404, { detail: 'Task #99 not found' }] })
+  renderAt('/tasks/99')
+  expect(await screen.findByRole('heading', { name: 'Task #99 not found' })).toBeTruthy()
+  expect(screen.getByRole('link', { name: 'Go to the dashboard' }).getAttribute('href')).toBe('/')
+})
+
+test('AC31: a failed first load shows only the alert; a failed later poll keeps the page until the next success', async () => {
+  mockFetch({ [`GET ${PAGE}`]: [500, { detail: 'boom' }] })
+  const first = renderAt('/tasks/12')
+  expect((await screen.findByRole('alert')).textContent).toBe('boom')
+  expect(screen.queryByRole('heading', { level: 1 })).toBeNull()
+  first.unmount()
+
+  const responses = { [`GET ${PAGE}`]: [200, taskPage()] }
+  await openFake(responses)
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+  responses[`GET ${PAGE}`] = [502, { detail: 'Backend unreachable at http://127.0.0.1:4545' }]
+  await advance(3000)
+  expect(screen.getByRole('alert').textContent).toBe('Backend unreachable at http://127.0.0.1:4545')
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+  responses[`GET ${PAGE}`] = [200, taskPage()]
+  await advance(3000)
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+})
