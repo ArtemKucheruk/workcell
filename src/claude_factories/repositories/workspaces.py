@@ -22,3 +22,6 @@ class WorkspacesRepo:
 
     def exists(self, workspace_id: int) -> bool:
         return self.conn.execute("SELECT 1 FROM workspaces WHERE id = ?", (workspace_id,)).fetchone() is not None
+
+    def get(self, workspace_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT id, name FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()

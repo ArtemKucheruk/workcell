@@ -12,15 +12,18 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .. import app as legacy  # the routes 035 and 036 move
 from .. import db
-from ..controllers import factory, projects, reviews, rounds, tasks, workspaces
-from ..domain.errors import Conflict, DomainError, Invalid, NotFound, TooLarge
+from ..controllers import factory, projects, reviews, rounds, runs, tasks, workspaces
+from ..controllers.pages import code, dashboard, templates
+from ..controllers.pages import projects as project_pages
+from ..controllers.pages import tasks as task_pages
+from ..controllers.pages import workspaces as workspace_pages
+from ..domain.errors import Conflict, DomainError, Failed, Invalid, NotFound, TooLarge
 
 PKG = Path(__file__).parent.parent
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-STATUS = {NotFound: 404, Conflict: 409, TooLarge: 413, Invalid: 422}
+STATUS = {NotFound: 404, Conflict: 409, TooLarge: 413, Invalid: 422, Failed: 500}
 
 
 @asynccontextmanager
@@ -50,7 +53,7 @@ async def page_not_found(request: Request, exc: StarletteHTTPException):
     """A browser GET of a missing page, task, or round gets a page, not JSON. /api and every other
     status keep FastAPI's JSON."""
     if exc.status_code == 404 and request.method == "GET" and not request.url.path.startswith("/api/"):
-        return legacy.templates.TemplateResponse(request, "error.html", {"detail": exc.detail}, status_code=404)
+        return templates.TemplateResponse(request, "error.html", {"detail": exc.detail}, status_code=404)
     return await http_exception_handler(request, exc)
 
 
@@ -73,6 +76,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(UnicodeEncodeError, unencodable)
     app.add_exception_handler(DomainError, domain_error)
     app.mount("/static", StaticFiles(directory=PKG / "static"), name="static")
-    for module in (workspaces, projects, factory, tasks, rounds, reviews, legacy):
+    for module in (workspaces, projects, factory, tasks, rounds, reviews, runs,
+                   dashboard, workspace_pages, project_pages, code, task_pages):
         app.include_router(module.router)
     return app

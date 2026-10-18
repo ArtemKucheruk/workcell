@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import sql
 from markupsafe import escape
-from test_review import H, add_round, add_task, header, page, project, section, timeline  # noqa: F401
+from controllers.pages.test_review import H, add_round, add_task, header, page, project, section, timeline  # noqa: F401
 
 FORM = H | {"Content-Type": "application/x-www-form-urlencoded"}
 NOTE = "Make the limit configurable via settings."

@@ -1,11 +1,12 @@
-"""docs/data-model-and-api.md §6.3: verdicts, comments, the approver's decision, and my approve; §6.2:
-the context markdown. Request changes stays in app.py until 036 (035 Q3)."""
+"""docs/data-model-and-api.md §6.3: verdicts, comments, the approver's decision, my approve, and my
+request changes with its rework run; §6.2: the context markdown."""
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
 
-from ..dto.reviews import ApproveBody, ApproveOut, CommentBody, DecisionBody, IdOut, Reviewer, VerdictBody, VerdictOut
+from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, CommentBody, DecisionBody, IdOut, Reviewer,
+                           VerdictBody, VerdictOut)
 from ..handlers import reviews as handler
-from ..server.deps import Reviews, Rounds, Tasks
+from ..server.deps import ClaudeAdapter, GitAdapter, Reviews, Rounds, Tasks, transaction
 from .rounds import NOSNIFF
 
 router = APIRouter()
@@ -30,6 +31,13 @@ def post_decision(task_id: int, body: DecisionBody, tasks: Tasks, rounds: Rounds
 @router.post("/api/tasks/{task_id}/approve")
 def approve(task_id: int, body: ApproveBody, tasks: Tasks, rounds: Rounds, reviews: Reviews) -> ApproveOut:
     return handler.approve(tasks, rounds, reviews, task_id, body)
+
+
+@router.post("/api/tasks/{task_id}/request-changes", status_code=202)
+def request_changes(task_id: int, body: ChangesBody, request: Request, git: GitAdapter,
+                    claude: ClaudeAdapter) -> ChangesOut:
+    """036 Q10: the handler commits my decision before any spawn, so it takes transaction()."""
+    return handler.rework(transaction, git, claude, task_id, body, str(request.base_url))
 
 
 @router.get("/api/tasks/{task_id}/context")

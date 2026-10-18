@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from claude_factories import db
-from claude_factories.app import LOGIN
+from claude_factories.handlers.pages import LOGIN
 from claude_factories.server.app import create_app
 
 

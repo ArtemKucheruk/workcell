@@ -1,0 +1,41 @@
+"""docs/data-model-and-api.md §6.2: run a task, run next, stop a run, and a run's log; and the runs
+lifespan (docs/MVP.md §4.4)."""
+
+from contextlib import asynccontextmanager
+
+from fastapi import APIRouter, Query, Request
+
+from ..dto.runs import LogOut, RunNextOut, RunStarted, StopOut
+from ..handlers import runs as handler
+from ..server.deps import ClaudeAdapter, GitAdapter, get_claude, transaction
+
+
+@asynccontextmanager
+async def lifespan(app):
+    """036 Q8: on the router, so server/'s lifespan runs db.init() first (034 Q6)."""
+    handler.fail_leftovers(transaction)
+    yield
+    handler.stop_all(transaction, get_claude())
+
+
+router = APIRouter(lifespan=lifespan)
+
+
+@router.post("/api/tasks/{task_id}/run", status_code=202)
+def run_task(task_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunStarted:
+    return handler.start(transaction, git, claude, task_id, str(request.base_url))
+
+
+@router.post("/api/projects/{project_id}/run-next", status_code=202)
+def run_next(project_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunNextOut:
+    return handler.run_next(transaction, git, claude, project_id, str(request.base_url))
+
+
+@router.post("/api/runs/{run_id}/stop")
+def stop_run(run_id: int, claude: ClaudeAdapter) -> StopOut:
+    return handler.stop(transaction, claude, run_id)
+
+
+@router.get("/api/runs/{run_id}/log")
+def run_log(run_id: int, after: int = Query(0, ge=0)) -> LogOut:
+    return handler.log(transaction, run_id, after)

@@ -22,3 +22,7 @@ class TooLarge(DomainError):
 
 class Invalid(DomainError):
     """A request the handler refuses as unprocessable: 422 (035 Q1)."""
+
+
+class Failed(DomainError):
+    """Something the request needed couldn't be done, e.g. claude wouldn't start: 500 (036 Q2)."""

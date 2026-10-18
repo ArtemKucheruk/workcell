@@ -8,7 +8,10 @@ import uuid
 import pytest
 from conftest import commit, git, sql, write
 
-from claude_factories.app import slug
+from claude_factories.adapters.claude import SubprocessClaude
+from claude_factories.adapters.git import SubprocessGit
+from claude_factories.lib.slug import slug
+from claude_factories.server.deps import get_claude, get_git
 
 H = {"X-Requested-By": "fctl"}
 OLD = "2026-01-01T00:00:00Z"
@@ -481,3 +484,34 @@ def test_run_next_while_running(client, project, queue):  # AC27
     r = client.post(f"/api/projects/{project}/run-next", headers=H)
     assert (r.status_code, r.json()) == (409, {"detail": f"run #{running} active"})
     assert task_row(queue)["status"] == "backlog"
+
+
+# --- 036: the adapters come from Depends ------------------------------------------
+
+
+class NoAuth(SubprocessClaude):
+    def auth_status(self, cwd, env):
+        return None
+
+
+class Committed(SubprocessGit):
+    def committed(self, path, branch, file):
+        return True
+
+
+def test_auth_through_adapter(client, project, fake):  # 036 AC9
+    client.app.dependency_overrides[get_claude] = NoAuth
+    r = run(client, add_task(project))
+    assert (r.status_code, r.json()) == (409, {"detail": "not on subscription auth"})
+    assert no_runs() and not fake.invoked()
+
+
+def test_factory_through_adapter(client, repo, fake):  # 036 AC10
+    task = add_task(connect(client, repo), "Rate-limit login endpoint")  # no SKILL.md committed
+    r = run(client, task)
+    assert r.status_code == 409 and r.json()["detail"].startswith("factory isn't committed on main: ")
+    client.app.dependency_overrides[get_git] = Committed
+    r = run(client, task)
+    assert r.status_code == 202, r.text
+    wait(r.json()["run_id"])
+    assert os.path.isdir(f"{repo}/.claude/worktrees/{task}-rate-limit-login")

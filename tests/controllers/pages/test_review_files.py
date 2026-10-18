@@ -4,7 +4,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
 from conftest import sql
-from test_review import H, add_comment, add_task, header, not_found_page, page, post, project, section, task_row, text  # noqa: F401
+from controllers.pages.test_review import H, add_comment, add_task, header, not_found_page, page, post, project, section, task_row, text  # noqa: F401
 
 SAMPLE = """\
 diff --git a/app/auth.py b/app/auth.py

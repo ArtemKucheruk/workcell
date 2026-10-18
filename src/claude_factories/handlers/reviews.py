@@ -5,14 +5,17 @@ task row or write events (docs/claude-code.md §7.5)."""
 import os
 import shlex
 
+from ..adapters.claude import Claude
+from ..adapters.git import Git
 from ..domain.enums import Reviewer, Stage, Status
-from ..domain.errors import Conflict, Invalid, NotFound
-from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, CommentBody, DecisionBody, IdOut, VerdictBody,
-                           VerdictOut)
+from ..domain.errors import Conflict, DomainError, Invalid, NotFound
+from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, CommentBody, DecisionBody, IdOut,
+                           VerdictBody, VerdictOut)
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TasksRepo
+from . import runs as runs_handler
 from .rounds import find_round
 
 REVIEWERS = tuple(Reviewer)
@@ -100,7 +103,7 @@ def request_changes(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, 
                     body: ChangesBody) -> bool:
     """§3.6: my CHANGES_REQUESTED → in_progress · rework (009 Q1: standalone too). 013 Q12: a factory task
     is refused while any run is active, before any write. Returns whether it is a factory task, whose
-    rework run app.py spawns once this commits (035 Q1)."""
+    rework run `rework` starts once this commits (035 Q1)."""
     if not body.body_md.strip():
         raise Invalid("body_md must not be blank")
     now, task = locked_task(tasks, task_id)
@@ -109,6 +112,22 @@ def request_changes(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, 
         raise Conflict(f"run #{run['id']} active")
     decide(tasks, rounds, reviews, task, now, "CHANGES_REQUESTED", body.body_md, Status.IN_PROGRESS, Stage.REWORK)
     return factory
+
+
+def rework(tx, git: Git, claude: Claude, task_id: int, body: ChangesBody, base_url: str) -> ChangesOut:
+    """§3.6, 036 Q10: request_changes in its own transaction, committed before the spawn (whose own lock
+    would wait on it), then for a factory task (013 Q11) the rework run: /factory <id> in its worktree,
+    a fresh session (Q13). A refusal from the start leaves the decision and the move (Q12)."""
+    with tx() as conn:
+        factory = request_changes(TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn), RunsRepo(conn), task_id, body)
+    if not factory:
+        return ChangesOut(status="in_progress", stage="rework", run_id=None)
+    try:
+        run_id = runs_handler.start(tx, git, claude, task_id, base_url).run_id
+    except DomainError as e:
+        e.recorded = True  # the decision and the move are committed; the form shows them (013 ux review)
+        raise
+    return ChangesOut(status="in_progress", stage="rework", run_id=run_id)
 
 
 def context_md(reviews: ReviewsRepo, task, found: list, feedback=None) -> str:

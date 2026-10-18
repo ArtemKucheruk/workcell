@@ -2,9 +2,10 @@ import re
 
 import pytest
 from fastapi import HTTPException
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from claude_factories.domain.errors import Conflict, Invalid, NotFound, TooLarge
+from claude_factories.domain.errors import Conflict, Failed, Invalid, NotFound, TooLarge
 from claude_factories.server.app import create_app
 
 HOST_ERROR = {"detail": "Host must be 127.0.0.1 or localhost"}
@@ -69,6 +70,10 @@ MOVED_035 = [  # 035 AC1
     ("POST", "/api/tasks/{task_id}/decision"), ("POST", "/api/tasks/{task_id}/approve"),
 ]
 TEXT_035 = {("GET", "/api/tasks/{task_id}/context"), ("GET", "/api/tasks/{task_id}/rounds/{n}/diff")}
+RUN_ROUTES = [  # 036
+    ("POST", "/api/tasks/{task_id}/run"), ("POST", "/api/projects/{project_id}/run-next"),
+    ("POST", "/api/runs/{run_id}/stop"), ("GET", "/api/runs/{run_id}/log"),
+]
 
 
 def test_moved_routes_served_from_controllers():  # 034 AC7, 035 AC1
@@ -82,6 +87,7 @@ def test_moved_routes_served_from_controllers():  # 034 AC7, 035 AC1
 @pytest.mark.parametrize("error, status, detail", [
     (NotFound("x"), 404, "x"), (NotFound(), 404, "Not Found"), (Conflict("y"), 409, "y"), (TooLarge("z"), 413, "z"),
     (Invalid("w"), 422, "w"),  # 035 AC3
+    (Failed("x"), 500, "x"),  # 036 AC5
 ])
 def test_domain_errors_as_json(error, status, detail):  # 034 AC11
     app = create_app()
@@ -117,7 +123,8 @@ def test_not_found_page_outside_api():  # 034 AC12
 def test_035_response_models_from_dto():  # 035 AC2
     found = {(m, r.path): r for r in routes(create_app().routes) for m in getattr(r, "methods", ())}
     json_routes = [key for key in MOVED_035 if key not in TEXT_035] + [("POST", "/api/tasks/{task_id}/request-changes")]
-    assert len(json_routes) == 10
+    json_routes += RUN_ROUTES  # 036 AC4
+    assert len(json_routes) == 14
     for key in json_routes:
         model = found[key].response_model
         assert model is not None, key
@@ -126,3 +133,27 @@ def test_035_response_models_from_dto():  # 035 AC2
         assert all(c.startswith("claude_factories.dto.") for c in classes), (key, model)
     for key in TEXT_035:  # Q6: text, no model
         assert found[key].response_model is None, key
+
+
+# --- 036: every route from controllers/ ------------------------------------------------
+
+PAGE_ROUTES = [
+    ("GET", "/"), ("GET", "/workspaces/{workspace_id}"), ("GET", "/projects/{project_id}"),
+    ("GET", "/projects/{project_id}/code"), ("GET", "/tasks/{task_id}"), ("GET", "/tasks/{task_id}/review"),
+    ("POST", "/workspaces"), ("POST", "/projects/{project_id}/tasks"), ("POST", "/projects/{project_id}/workspace"),
+    ("POST", "/projects/{project_id}/factory"), ("POST", "/tasks/{task_id}/approve"),
+    ("POST", "/tasks/{task_id}/request-changes"), ("POST", "/tasks/{task_id}/comments"),
+]
+
+
+def test_every_route_from_controllers():  # 036 AC3
+    found = [r for r in routes(create_app().routes) if isinstance(r, APIRoute)]
+    assert found
+    for r in found:
+        assert r.endpoint.__module__.startswith("claude_factories.controllers."), (r.path, r.endpoint.__module__)
+    modules = {(m, r.path): r.endpoint.__module__ for r in found for m in r.methods}
+    for key in PAGE_ROUTES:
+        assert modules[key].startswith("claude_factories.controllers.pages."), key
+    for key in [*RUN_ROUTES, ("POST", "/api/tasks/{task_id}/request-changes")]:
+        assert modules[key].startswith("claude_factories.controllers."), key
+        assert not modules[key].startswith("claude_factories.controllers.pages."), key

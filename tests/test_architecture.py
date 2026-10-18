@@ -10,9 +10,9 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
 PKG = SRC / "claude_factories"
-ALLOWED = {  # §4.7's table: what each layer may import besides itself; app.py for server/ until 036
-    "server": {"controllers", "repositories", "adapters", "db", "config", "domain", "app"},
-    "controllers": {"handlers", "dto", "domain", "server.deps"},
+ALLOWED = {  # §4.7's table: what each layer may import besides itself
+    "server": {"controllers", "repositories", "adapters", "db", "config", "domain"},
+    "controllers": {"handlers", "dto", "domain", "lib", "server.deps"},  # 036 Q3: lib for the markdown filter
     "handlers": {"repositories", "adapters", "dto", "domain", "lib", "config"},
     "repositories": {"db", "domain", "config"},
     "adapters": {"domain", "config"},
@@ -25,8 +25,8 @@ SQL = re.compile(r"\bSELECT\b.*\bFROM\b|\bINSERT INTO\b|\bUPDATE\b.*\bSET\b|\bDE
 
 
 def checked() -> list[Path]:
-    """Every module but app.py (exempt until 036) and cli/ (tests/cli/test_architecture.py, Q3)."""
-    return sorted(p for p in PKG.rglob("*.py") if p != PKG / "app.py" and not p.is_relative_to(PKG / "cli"))
+    """Every module but cli/ (tests/cli/test_architecture.py, Q3)."""
+    return sorted(p for p in PKG.rglob("*.py") if not p.is_relative_to(PKG / "cli"))
 
 
 def layer(path: Path) -> str:
@@ -96,6 +96,12 @@ def test_mvp_code_layout_section():  # AC1
     [domain] = [line for line in tree.splitlines() if line.startswith("├── domain/")]  # 035 AC4
     assert "Invalid" in domain.split()
     assert "`Invalid` → 422" in body
+    assert "Failed" in domain.split()  # 036 AC6
+    assert "`Failed` → 500" in body
+    [controllers] = [line for line in body.splitlines() if line.strip().startswith("| controllers/ |")]
+    assert "lib" in controllers.split("|")[2].replace(",", " ").split()
+    [rule] = [line for line in body.split("\n- ") if line.startswith("One handler call is one transaction.")]
+    assert "run handlers" in rule.lower() and "`transaction()` in `server/deps.py`" in " ".join(rule.split())
 
 
 def test_conventions_point_at_layout():  # AC2
@@ -124,35 +130,17 @@ def test_checked_files():  # AC16
         assert PKG / rel in files
     assert PKG / "app.py" not in files
     assert not [f for f in files if f.is_relative_to(PKG / "cli")]
+    for rel in ("handlers/runs.py", "handlers/pages.py", "controllers/runs.py", "lib/run_log.py",
+                "lib/diff.py"):  # 036 AC2
+        assert PKG / rel in files
+    assert [f for f in files if f.parent == PKG / "controllers" / "pages" and f.name != "__init__.py"]
+    assert "app" not in ALLOWED["server"]
+    assert all(p.is_relative_to(PKG / "cli") for p in set(PKG.rglob("*.py")) - set(files))
 
 
-MOVED_OUT_OF_APP = {  # 035 AC14
-    "list_tasks", "create_task", "get_task", "patch_task", "submit_round", "insert_round", "split_patch",
-    "parse_section", "unquote", "safe_path", "round_or_404", "round_diff", "put_verdict", "post_comment",
-    "post_decision", "approve", "decide_review", "commit_hint", "context_md", "task_context", "round_summaries",
-    "latest_run", "RoundBody", "TaskBody", "TaskPatch", "VerdictBody", "CommentBody", "DecisionBody",
-    "ApproveBody", "ChangesBody",
-}
-
-
-def top_level_names(tree: ast.Module) -> set[str]:
-    """Every name a module's top level binds: defs, classes, assignments, and imports."""
-    names = set()
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names |= {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
-        elif isinstance(node, (ast.Import, ast.ImportFrom)):
-            names |= {(a.asname or a.name).split(".")[0] for a in node.names}
-    return names
-
-
-def test_moved_code_left_app():  # 035 AC14
-    names = top_level_names(ast.parse((PKG / "app.py").read_text()))
-    assert "request_changes" in names  # it reads the real module
-    assert names & MOVED_OUT_OF_APP == set()
+def test_app_py_gone():  # 036 AC1
+    assert not (PKG / "app.py").exists()
+    assert importlib.util.find_spec("claude_factories.app") is None
 
 
 # --- The checks, on samples ----------------------------------------------------------

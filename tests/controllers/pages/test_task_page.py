@@ -2,7 +2,7 @@ import re
 
 import pytest
 from conftest import sql
-from test_review import (REVIEWERS, add_comment, add_decision, add_event, add_round, add_task, add_verdict, at,  # noqa: F401
+from controllers.pages.test_review import (REVIEWERS, add_comment, add_decision, add_event, add_round, add_task, add_verdict, at,  # noqa: F401
                          header, not_found_page, project, section, text)
 
 

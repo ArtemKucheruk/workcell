@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 from conftest import sql
 from fastapi.testclient import TestClient
-from test_review import add_round, header
-from test_runs import (H, OLD, add_running_run, add_task, events, fake, project, run, run_row,  # noqa: F401
+from controllers.pages.test_review import add_round, header
+from controllers.test_runs import (H, OLD, add_running_run, add_task, events, fake, project, run, run_row,  # noqa: F401
                        started, task_row, wait)
 
 from claude_factories.server.app import create_app

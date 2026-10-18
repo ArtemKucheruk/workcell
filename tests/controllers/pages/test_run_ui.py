@@ -6,9 +6,9 @@ from datetime import datetime
 
 import pytest
 from conftest import git, sql, write
-from test_runs import AUTH_OK, SKILL, add_task, connect, fake, project  # noqa: F401
+from controllers.test_runs import AUTH_OK, SKILL, add_task, connect, fake, project  # noqa: F401
 
-from claude_factories import app as app_module
+from claude_factories.handlers import pages
 
 STARTED = "2026-10-18T10:02:00Z"
 OLD_RUN = "2026-10-18T08:00:00Z"
@@ -150,7 +150,7 @@ def test_badge_cached_60s(client, tmp_path, monkeypatch):  # AC5
     claude = tmp_path / "bin" / "claude"  # appends a line per call, so every call counts
     claude.write_text(f"#!/bin/sh\necho x >> {shlex.quote(str(calls))}\necho {shlex.quote(AUTH_OK)}\n")
     clock = [1000.0]
-    monkeypatch.setattr(app_module, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(pages, "monotonic", lambda: clock[0])
     count = lambda: len(calls.read_text().splitlines()) if calls.exists() else 0  # noqa: E731
     get(client, "/")
     get(client, "/")
