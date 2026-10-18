@@ -14,13 +14,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .. import app as legacy  # the routes 035 and 036 move
 from .. import db
-from ..controllers import factory, projects, workspaces
-from ..domain.errors import Conflict, DomainError, NotFound, TooLarge
+from ..controllers import factory, projects, reviews, rounds, tasks, workspaces
+from ..domain.errors import Conflict, DomainError, Invalid, NotFound, TooLarge
 
 PKG = Path(__file__).parent.parent
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-STATUS = {NotFound: 404, Conflict: 409, TooLarge: 413}
+STATUS = {NotFound: 404, Conflict: 409, TooLarge: 413, Invalid: 422}
 
 
 @asynccontextmanager
@@ -73,6 +73,6 @@ def create_app() -> FastAPI:
     app.add_exception_handler(UnicodeEncodeError, unencodable)
     app.add_exception_handler(DomainError, domain_error)
     app.mount("/static", StaticFiles(directory=PKG / "static"), name="static")
-    for module in (workspaces, projects, factory, legacy):
+    for module in (workspaces, projects, factory, tasks, rounds, reviews, legacy):
         app.include_router(module.router)
     return app

@@ -1,6 +1,5 @@
-"""The routes not yet moved into the docs/MVP.md §4.7 layers (035, 036). server/ includes this router."""
+"""The routes not yet moved into the docs/MVP.md §4.7 layers (036). server/ includes this router."""
 
-import codecs
 import json
 import os
 import re
@@ -20,31 +19,36 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from typing import Literal
 
 from markdown_it import MarkdownIt
 from markupsafe import Markup
-from pydantic import BaseModel, Field, FiniteFloat, ValidationError
+from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from . import config, db
-from .config import MAX_PATCH, MAX_VIEW
+from .config import MAX_VIEW
 from .domain import enums
-from .domain.enums import STAGE_STATUS
 from .domain.errors import DomainError
+from .dto import reviews as review_dto
+from .dto import tasks as task_dto
 from .handlers import factory as factory_handler
 from .handlers import projects as projects_handler
+from .handlers import reviews as reviews_handler
+from .handlers import rounds as rounds_handler
+from .handlers import tasks as tasks_handler
 from .handlers import workspaces as workspaces_handler
 from .handlers.factory import factory_hint, factory_state
 from .repositories.projects import ProjectsRepo
+from .repositories.reviews import ReviewsRepo
+from .repositories.rounds import RoundsRepo
+from .repositories.runs import RunsRepo
+from .repositories.tasks import TasksRepo
 from .repositories.workspaces import WorkspacesRepo
 from .server.deps import get_claude, get_conn, get_git
 
 HERE = Path(__file__).parent
 COLUMNS = tuple(enums.Status)
-Reviewer = Literal["security", "ux", "ui", "code"]  # a Literal until 035: an enum's 422 has another error type
 REVIEWERS = tuple(enums.Reviewer)
-NOSNIFF = {"X-Content-Type-Options": "nosniff"}  # agent-written text, never sniffed as HTML
 transaction = contextmanager(get_conn)  # 034 Q12: deps' one connection and transaction, outside Depends
 
 
@@ -102,171 +106,6 @@ async def form_field(request: Request, name: str) -> str:
 
 def hx_redirect(url: str) -> Response:
     return Response(status_code=204, headers={"HX-Redirect": url})
-
-
-def round_summaries(task_id: int) -> list[dict]:
-    """A task's rounds by n: file count, +/− sums, and all 4 verdicts ('pending' if missing)."""
-    rounds = query(
-        "SELECT r.id, r.n, r.trigger, COUNT(f.path) AS files, COALESCE(SUM(f.additions), 0) AS additions,"
-        " COALESCE(SUM(f.deletions), 0) AS deletions FROM rounds r"
-        " LEFT JOIN round_files f ON f.round_id = r.id WHERE r.task_id = ? GROUP BY r.id ORDER BY r.n",
-        (task_id,),
-    )
-    verdicts = {
-        (v["round_id"], v["reviewer"]): v["verdict"]
-        for v in query(
-            "SELECT v.round_id, v.reviewer, v.verdict FROM verdicts v"
-            " JOIN rounds r ON r.id = v.round_id WHERE r.task_id = ?",
-            (task_id,),
-        )
-    }
-    return [
-        {"n": r["n"], "trigger": r["trigger"], "files": r["files"], "additions": r["additions"],
-         "deletions": r["deletions"],
-         "verdicts": {who: verdicts.get((r["id"], who), "pending") for who in REVIEWERS}}
-        for r in rounds
-    ]
-
-
-def latest_run(task_id: int) -> dict | None:
-    """Q9: the task's latest run whatever its status, so a failed one can show as stalled."""
-    found = query("SELECT id, status FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1", (task_id,))
-    return dict(found[0]) if found else None
-
-
-# --- Tasks (docs/data-model-and-api.md §6.2) ----------------------------------
-
-
-class RoundBody(BaseModel):
-    """§6.3's rounds body, and §6.2's `submit` (Q4). base_sha may later become a git argument."""
-    base_sha: str = Field(pattern=r"^[0-9a-f]{7,64}$")
-    patch: str
-    build_md: str | None = None
-
-
-class TaskBody(BaseModel):
-    title: str
-    description_md: str = ""
-    submit: RoundBody | None = None
-
-
-class TaskPatch(BaseModel):
-    spec_md: str | None = None
-    stage: (
-        Literal["spec", "build", "agent_review", "approval", "rework", "human_review", "escalated"] | None
-    ) = None
-    status: Literal["backlog", "in_progress", "review", "done"] | None = None
-    position: FiniteFloat | None = None
-
-
-@router.get("/api/projects/{project_id}/tasks")
-def list_tasks(project_id: int):
-    one_or_404("SELECT 1 FROM projects WHERE id = ?", (project_id,))
-    tasks = query("SELECT id, title, status, stage, position FROM tasks WHERE project_id = ?", (project_id,))
-    items = []
-    # ponytail: 3 queries per task; one grouped query if a board grows past a few hundred tasks
-    for t in sorted(tasks, key=lambda t: (COLUMNS.index(t["status"]), t["position"], t["id"])):
-        rounds = round_summaries(t["id"])
-        last = rounds[-1] if rounds else {}
-        items.append({
-            "id": t["id"], "title": t["title"], "status": t["status"], "stage": t["stage"],
-            "round": last.get("n"), "verdicts": last.get("verdicts"),
-            "additions": last.get("additions"), "deletions": last.get("deletions"),
-            "run": latest_run(t["id"]),
-        })
-    return items
-
-
-@router.post("/api/projects/{project_id}/tasks", status_code=201)
-def create_task(project_id: int, body: TaskBody, request: Request):
-    """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (Q3)."""
-    title = body.title.strip()
-    if not title:
-        raise HTTPException(422, "title must not be blank")
-    status, stage, actor = ("review", "human_review", "app") if body.submit else ("backlog", None, "me")
-    with closing(db.connect()) as conn, conn:
-        conn.execute("BEGIN IMMEDIATE")  # the bottom position, the inserts, and the round, atomically
-        if not conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
-            raise HTTPException(404)
-        position = conn.execute(
-            "SELECT COALESCE(MAX(position) + 1, 1.0) FROM tasks WHERE project_id = ? AND status = ?",
-            (project_id, status),
-        ).fetchone()[0]
-        now = db.now()
-        task_id = conn.execute(
-            "INSERT INTO tasks (project_id, title, description_md, status, stage, position, created_at,"
-            " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (project_id, title, body.description_md, status, stage, position, now, now),
-        ).lastrowid
-        conn.execute(
-            "INSERT INTO events (task_id, actor, to_status, stage, created_at) VALUES (?, ?, ?, ?, ?)",
-            (task_id, actor, status, stage, now),
-        )
-        if body.submit:  # a 4xx in here rolls the task back too
-            submitted = insert_round(conn, task_id, body.submit)
-    if body.submit:
-        return {"task_id": task_id} | submitted | {"url": f"{request.base_url}tasks/{task_id}/review"}
-    return {"id": task_id, "status": "backlog"}
-
-
-@router.get("/api/tasks/{task_id}")
-def get_task(task_id: int):
-    task = one_or_404("SELECT id, title, status, stage, branch FROM tasks WHERE id = ?", (task_id,))
-    decisions = query(
-        "SELECT d.id, r.n AS round, d.actor, d.decision, d.body_md, d.created_at FROM decisions d"
-        " JOIN rounds r ON r.id = d.round_id WHERE d.task_id = ? ORDER BY d.id",
-        (task_id,),
-    )
-    return dict(task) | {
-        "rounds": round_summaries(task_id),
-        "decisions": [dict(d) for d in decisions],
-        "run": latest_run(task_id),
-    }
-
-
-@router.patch("/api/tasks/{task_id}")
-def patch_task(task_id: int, body: TaskPatch):
-    sent = body.model_fields_set
-    if sent not in ({"spec_md"}, {"stage"}, {"status", "position"}):
-        raise HTTPException(422, "send exactly one of: spec_md, stage, or status with position")
-    if any(getattr(body, key) is None for key in sent):
-        raise HTTPException(422, f"{', '.join(sorted(sent))} must not be null")
-    with closing(db.connect()) as conn, conn:
-        conn.execute("BEGIN IMMEDIATE")  # the 409 check, the update, and the event commit together
-        conn.row_factory = sqlite3.Row
-        task = conn.execute("SELECT status, stage, done_at FROM tasks WHERE id = ?", (task_id,)).fetchone()
-        if not task:
-            raise HTTPException(404)
-        now = db.now()
-        if body.spec_md is not None:
-            conn.execute(
-                "UPDATE tasks SET spec_md = ?, updated_at = ? WHERE id = ?", (body.spec_md, now, task_id)
-            )
-            return {"id": task_id, "status": task["status"], "stage": task["stage"]}
-        if body.stage is not None:
-            status, stage, actor = STAGE_STATUS[body.stage], body.stage, "orchestrator"
-        else:  # a manual move (board drag): status and position, stage cleared
-            run = conn.execute(
-                "SELECT id FROM runs WHERE task_id = ? AND status = 'running'", (task_id,)
-            ).fetchone()
-            if run:
-                raise HTTPException(409, f"run #{run['id']} active")
-            status, stage, actor = body.status, None, "me"
-        done_at = None
-        if status == "done":
-            done_at = (task["status"] == "done" and task["done_at"]) or now
-        conn.execute(
-            "UPDATE tasks SET status = ?, stage = ?, position = COALESCE(?, position), done_at = ?,"
-            " updated_at = ? WHERE id = ?",
-            (status, stage, body.position, done_at, now, task_id),
-        )
-        if (status, stage) != (task["status"], task["stage"]):
-            conn.execute(
-                "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (task_id, actor, task["status"], status, stage, now),
-            )
-    return {"id": task_id, "status": status, "stage": stage}
 
 
 # --- Runs (docs/data-model-and-api.md §6.2, docs/MVP.md §4.3, §4.4) -----------
@@ -578,391 +417,25 @@ def run_next(project_id: int, request: Request):
     return {"task_id": top[0]["id"], "run_id": run_task(top[0]["id"], request)["run_id"]}
 
 
-# --- Rounds (docs/data-model-and-api.md §6.3) ---------------------------------
-
-PATCH_NAMES = {"rename from ": "from", "rename to ": "to", "--- ": "old", "+++ ": "new"}
-
-
-def unquote(name: str) -> str:
-    """Q6: git C-quotes a name holding `"`, `\\`, or control bytes; octal escapes are UTF-8 bytes."""
-    if len(name) < 2 or name[0] != '"' or name[-1] != '"':
-        return name
-    try:
-        return codecs.escape_decode(name[1:-1].encode())[0].decode(errors="replace")
-    except ValueError:  # a trailing `\` or a bad `\x`: "" makes the caller's 422
-        return ""
-
-
-def safe_path(path: str | None) -> bool:
-    """Git never writes an empty, absolute, `..`, or NUL path; refuse them before pages link to it."""
-    return bool(path) and not path.startswith("/") and "\0" not in path and ".." not in path.split("/")
-
-
-def parse_section(section: str) -> dict:
-    """Q6: one `diff --git` section → its round_files row."""
-    header, *lines = section.split("\n")
-    row = {"path": None, "old_path": None, "change": "modified", "binary": 0, "additions": 0,
-           "deletions": 0, "patch": section}
-    names, in_hunks = {}, False
-    for line in lines:
-        if in_hunks:
-            row["additions"] += line.startswith("+")
-            row["deletions"] += line.startswith("-")
-        elif line.startswith("@@"):
-            in_hunks = True
-        elif line.startswith("new file mode "):
-            row["change"] = "added"
-        elif line.startswith("deleted file mode "):
-            row["change"] = "deleted"
-        elif line.startswith("Binary files ") and line.endswith(" differ"):
-            row["binary"] = 1
-        else:
-            for prefix, key in PATCH_NAMES.items():
-                if line.startswith(prefix):  # git adds a tab after a name with a space
-                    names[key] = unquote(line[len(prefix):].removesuffix("\t"))
-    new, old = names.get("new", "/dev/null"), names.get("old", "/dev/null")
-    if "to" in names:
-        row.update(path=names["to"], old_path=names.get("from"), change="renamed")
-    elif new != "/dev/null":
-        row["path"] = new.removeprefix("b/") if new.startswith("b/") else None
-    elif old != "/dev/null":
-        row["path"] = old.removeprefix("a/") if old.startswith("a/") else None
-    else:  # mode-only, binary, or empty: `diff --git a/X b/X`, split at its midpoint
-        pair = header.removeprefix("diff --git ")
-        mid = len(pair) // 2
-        a, b = unquote(pair[:mid]), unquote(pair[mid + 1:])
-        if pair[mid:mid + 1] == " " and a[:2] == "a/" and b[:2] == "b/" and a[2:] == b[2:]:
-            row["path"] = a[2:]
-    if not safe_path(row["path"]) or (row["change"] == "renamed" and not safe_path(row["old_path"])):
-        raise HTTPException(422, f"can't read a safe file path in: {header[:200]}")
-    return row
-
-
-def split_patch(patch: str) -> list[dict]:
-    """Q6: one row per file, in patch order. Sections split on \\n only, so joined they give the
-    patch back byte for byte."""
-    if not patch.startswith("diff --git "):
-        raise HTTPException(422, 'patch must start with "diff --git"')
-    rows: dict[str, dict] = {}
-    for section in re.split(r"(?m)^(?=diff --git )", patch)[1:]:
-        row = parse_section(section)
-        if seen := rows.get(row["path"]):  # git splits a file <-> symlink typechange in two
-            seen.update(change="modified", old_path=None, binary=seen["binary"] | row["binary"],
-                        additions=seen["additions"] + row["additions"],
-                        deletions=seen["deletions"] + row["deletions"], patch=seen["patch"] + row["patch"])
-        else:
-            rows[row["path"]] = row
-    return list(rows.values())
-
-
-def insert_round(conn: sqlite3.Connection, task_id: int, body: RoundBody) -> dict:
-    """Check the patch (Q4, Q5), number the round and pick its trigger (Q1), and insert it with its
-    files, inside the caller's BEGIN IMMEDIATE so any 4xx writes nothing."""
-    if len(body.patch.encode()) > MAX_PATCH:
-        raise HTTPException(413, "patch over 5 MB")
-    if not body.patch.strip():
-        raise HTTPException(422, "no changes to submit")
-    files = split_patch(body.patch)
-    n = conn.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM rounds WHERE task_id = ?", (task_id,)).fetchone()[0]
-    changes_requested = conn.execute(
-        "SELECT 1 FROM decisions d JOIN rounds r ON r.id = d.round_id WHERE r.task_id = ? AND r.n = ?"
-        " AND d.actor = 'me' AND d.decision = 'CHANGES_REQUESTED'",
-        (task_id, n - 1),
-    ).fetchone()
-    trigger = "initial" if n == 1 else "human" if changes_requested else "agent"
-    round_id = conn.execute(
-        "INSERT INTO rounds (task_id, n, trigger, base_sha, build_md, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (task_id, n, trigger, body.base_sha, body.build_md, db.now()),
-    ).lastrowid
-    conn.executemany(
-        "INSERT INTO round_files (round_id, path, old_path, change, binary, additions, deletions, patch)"
-        " VALUES (:round_id, :path, :old_path, :change, :binary, :additions, :deletions, :patch)",
-        [f | {"round_id": round_id} for f in files],
-    )
-    return {"round": n, "files_changed": len(files), "additions": sum(f["additions"] for f in files),
-            "deletions": sum(f["deletions"] for f in files)}
-
-
-@router.post("/api/tasks/{task_id}/rounds", status_code=201)
-def submit_round(task_id: int, body: RoundBody, request: Request):
-    with closing(db.connect()) as conn, conn:
-        conn.execute("BEGIN IMMEDIATE")  # n, the round, its files, and the status commit together
-        conn.row_factory = sqlite3.Row
-        task = conn.execute("SELECT status, stage, worktree_path FROM tasks WHERE id = ?", (task_id,)).fetchone()
-        if not task:
-            raise HTTPException(404)
-        submitted = insert_round(conn, task_id, body)
-        if task["worktree_path"] is None:  # Q2: every round puts a standalone task in Review
-            now = db.now()
-            conn.execute(
-                "UPDATE tasks SET status = 'review', stage = 'human_review', done_at = NULL, updated_at = ?"
-                " WHERE id = ?",
-                (now, task_id),
-            )
-            if (task["status"], task["stage"]) != ("review", "human_review"):
-                conn.execute(
-                    "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
-                    " VALUES (?, 'app', ?, 'review', 'human_review', ?)",
-                    (task_id, task["status"], now),
-                )
-    return submitted | {"url": f"{request.base_url}tasks/{task_id}/review?round={submitted['round']}"}
-
-
-def round_or_404(task_id: int, n: str) -> sqlite3.Row:
-    """005 Q7, 006 Q1: the task's round `n`, or the highest with `latest`; the bare 404 for an unknown
-    task first."""
-    one_or_404("SELECT 1 FROM tasks WHERE id = ?", (task_id,))
-    if n == "latest":
-        found = query("SELECT id, n, build_md FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,))
-        missing = f"#{task_id} has no rounds"
-    else:  # compared as text, so 'abc', '01', or a huge number simply match nothing
-        found = query("SELECT id, n, build_md FROM rounds WHERE task_id = ? AND CAST(n AS TEXT) = ?", (task_id, n))
-        missing = f"#{task_id} has no round {n}"
-    if not found:
-        raise HTTPException(404, missing)
-    return found[0]
-
-
-@router.get("/api/tasks/{task_id}/rounds/{n}/diff")
-def round_diff(task_id: int, n: str):
-    """Q7: the round's files' patches joined in rowid order."""
-    patches = query("SELECT patch FROM round_files WHERE round_id = ? ORDER BY rowid",
-                    (round_or_404(task_id, n)["id"],))
-    return Response("".join(p["patch"] for p in patches), media_type="text/x-diff", headers=NOSNIFF)
-
-
-# --- Agent API: verdicts, comments, decisions (§6.3), context (§6.2) -----------
-# None of these touch the task row or write events (§7.5, Q2).
-
-
-class VerdictBody(BaseModel):
-    verdict: Literal["PASS", "CHANGES"]
-    body_md: str = ""
-
-
-class CommentBody(BaseModel):
-    round: int | Literal["latest"] = "latest"
-    author: Literal["me"] | Reviewer
-    path: str | None = None
-    line: int | None = Field(None, ge=1, lt=2**63)  # SQLite INTEGER bounds
-    side: Literal["old", "new"] | None = None
-    body_md: str
-
-
-class DecisionBody(BaseModel):
-    decision: Literal["APPROVE", "ESCALATE"]  # my APPROVE / CHANGES_REQUESTED go through 009's routes
-    body_md: str = ""
-
-
-@router.put("/api/tasks/{task_id}/rounds/{n}/verdicts/{reviewer}")
-def put_verdict(task_id: int, n: str, reviewer: Reviewer, body: VerdictBody):
-    """Q2: one row per (round, reviewer); posting again replaces verdict, body, and created_at."""
-    found = round_or_404(task_id, n)
-    with closing(db.connect()) as conn, conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO verdicts (round_id, reviewer, verdict, body_md, created_at) VALUES (?, ?, ?, ?, ?)",
-            (found["id"], reviewer, body.verdict, body.body_md, db.now()),
-        )
-        done = conn.execute("SELECT COUNT(*) FROM verdicts WHERE round_id = ?", (found["id"],)).fetchone()[0]
-    return {"round": found["n"], "reviewer": reviewer, "verdict": body.verdict, "complete": f"{done}/{len(REVIEWERS)}"}
-
-
-@router.post("/api/tasks/{task_id}/comments", status_code=201)
-def post_comment(task_id: int, body: CommentBody):
-    """Q3: inline (path and line, side defaulting to new) or conversation (all three NULL)."""
-    if (body.path is None) != (body.line is None):
-        raise HTTPException(422, "path and line go together")
-    if body.side is not None and body.path is None:
-        raise HTTPException(422, "side needs a path")
-    if not body.body_md.strip():
-        raise HTTPException(422, "body_md must not be blank")
-    found = round_or_404(task_id, str(body.round))
-    if body.path is not None and not query(
-        "SELECT 1 FROM round_files WHERE round_id = ? AND path = ?", (found["id"], body.path)
-    ):
-        raise HTTPException(422, f"{body.path} is not in round {found['n']}")
-    side = None if body.path is None else body.side or "new"
-    with closing(db.connect()) as conn, conn:
-        comment_id = conn.execute(
-            "INSERT INTO comments (task_id, round_id, author, path, line, side, body_md, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, found["id"], body.author, body.path, body.line, side, body.body_md, db.now()),
-        ).lastrowid
-    return {"id": comment_id}
-
-
-@router.post("/api/tasks/{task_id}/decision", status_code=201)
-def post_decision(task_id: int, body: DecisionBody):
-    """Q4: the approver's decision on the latest round. Every POST adds a row; readers take the latest."""
-    found = round_or_404(task_id, "latest")
-    with closing(db.connect()) as conn, conn:
-        decision_id = conn.execute(
-            "INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at)"
-            " VALUES (?, ?, 'approver', ?, ?, ?)",
-            (task_id, found["id"], body.decision, body.body_md, db.now()),
-        ).lastrowid
-    return {"id": decision_id}
-
-
-# --- My review actions (docs/MVP.md §3.6, §3.7; docs/data-model-and-api.md §6.3) --------
-
-
-class ApproveBody(BaseModel):
-    body_md: str = ""  # Q9: optional; neither the page nor fctl approve sends one
-
-
-class ChangesBody(BaseModel):
-    body_md: str  # Q9: required, and not blank
-
-
-def commit_hint(task) -> str:
-    """Q4, Q5: §3.7's commands for me to run, every value shell-quoted. A standalone task (no branch or
-    worktree) gets the commit line alone."""
-    commit = f"git add -A && git commit -m {shlex.quote(task['title'])}"
-    if not (task["branch"] and task["worktree_path"]):
-        return commit
-    wt, root = task["worktree_path"], task["path"]
-    return "\n".join([
-        f"cd {shlex.quote(wt)}",
-        commit,
-        f"git push -u origin {shlex.quote(task['branch'])}     # then open a PR, or merge locally",
-        f"cd {shlex.quote(root)} && git worktree remove {shlex.quote(os.path.relpath(wt, root))}",
-    ])
-
-
-def decide_review(task_id: int, decision: str, body_md: str, status: str, stage: str | None) -> sqlite3.Row:
-    """Q2, Q3, Q10: in one transaction, refuse unless in review with a round, then my decision on the
-    latest round, the move (position kept, Q8), and the event (actor me, Q7). Returns the task as it was."""
-    with closing(db.connect()) as conn, conn:
-        conn.execute("BEGIN IMMEDIATE")  # the check and the writes together, so a double click can't act twice
-        conn.row_factory = sqlite3.Row
-        task = conn.execute(
-            "SELECT t.status, t.title, t.branch, t.worktree_path, p.path FROM tasks t"
-            " JOIN projects p ON p.id = t.project_id WHERE t.id = ?", (task_id,),
-        ).fetchone()
-        if not task:
-            raise HTTPException(404)
-        if task["status"] != "review":
-            raise HTTPException(409, f"#{task_id} is not in review")
-        latest = conn.execute("SELECT id FROM rounds WHERE task_id = ? ORDER BY n DESC LIMIT 1", (task_id,)).fetchone()
-        if not latest:
-            raise HTTPException(404, f"#{task_id} has no rounds")
-        now = db.now()
-        conn.execute(
-            "INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at)"
-            " VALUES (?, ?, 'me', ?, ?, ?)",
-            (task_id, latest["id"], decision, body_md, now),
-        )
-        conn.execute(
-            "UPDATE tasks SET status = ?, stage = ?, done_at = ?, updated_at = ? WHERE id = ?",
-            (status, stage, now if status == "done" else None, now, task_id),
-        )
-        conn.execute(
-            "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
-            " VALUES (?, 'me', 'review', ?, ?, ?)",
-            (task_id, status, stage, now),
-        )
-    return task
-
-
-@router.post("/api/tasks/{task_id}/approve")
-def approve(task_id: int, body: ApproveBody):
-    """§3.7: my APPROVE → done, and the commands I run myself. The app never runs git."""
-    task = decide_review(task_id, "APPROVE", body.body_md, "done", None)
-    return {"status": "done", "commit_hint": commit_hint(task)}
+# --- Request changes (docs/MVP.md §3.6): the route stays until 036 moves runs (035 Q1) ----
 
 
 @router.post("/api/tasks/{task_id}/request-changes", status_code=202)
-def request_changes(task_id: int, body: ChangesBody, request: Request):
-    """§3.6: my CHANGES_REQUESTED → in_progress · rework (Q1: standalone too), then for a factory task
-    (013 Q11) the rework run: /factory <id> in its worktree, a fresh session (Q13). Q12: an active run
-    refuses before any write; any later refusal from run_task leaves the decision and the move."""
-    if not body.body_md.strip():
-        raise HTTPException(422, "body_md must not be blank")
-    task = one_or_404("SELECT branch, worktree_path FROM tasks WHERE id = ?", (task_id,))
-    factory = bool(task["branch"] and task["worktree_path"])
-    if factory:
-        with closing(db.connect()) as conn:
-            refuse_if_running(conn)
-    decide_review(task_id, "CHANGES_REQUESTED", body.body_md, "in_progress", "rework")
+def request_changes(task_id: int, body: review_dto.ChangesBody, request: Request) -> review_dto.ChangesOut:
+    """§3.6: the handler records my CHANGES_REQUESTED and the move, then for a factory task (013 Q11) the
+    rework run: /factory <id> in its worktree, a fresh session (Q13). Any refusal from run_task leaves
+    the decision and the move (Q12)."""
+    with transaction() as conn:  # committed before the spawn, whose own BEGIN IMMEDIATE would wait on it
+        factory = reviews_handler.request_changes(TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn),
+                                                  RunsRepo(conn), task_id, body)
     if not factory:
-        return {"status": "in_progress", "stage": "rework", "run_id": None}
+        return review_dto.ChangesOut(status="in_progress", stage="rework", run_id=None)
     try:
         run_id = run_task(task_id, request)["run_id"]
     except HTTPException as e:
         e.recorded = True  # the decision and the move are committed; the form shows them (013 ux review)
         raise
-    return {"status": "in_progress", "stage": "rework", "run_id": run_id}
-
-
-def context_md(task: sqlite3.Row, rounds: list[sqlite3.Row], feedback: sqlite3.Row | None = None) -> str:
-    """Q5, Q6: the task as markdown blocks joined by one blank line. A block is a heading, then its
-    body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is."""
-    blocks = []
-
-    def add(heading: str, body: str | None = None):
-        blocks.append(heading + (f"\n{body.rstrip()}" if body and body.strip() else ""))
-
-    def add_comments(round_id: int, only_me: bool):
-        found = query(
-            "SELECT author, path, line, side, body_md FROM comments"
-            " WHERE round_id = ? AND (? = 0 OR author = 'me') ORDER BY id",
-            (round_id, only_me),
-        )
-        if found:
-            add("## Comments")
-        for c in found:
-            where = "" if c["path"] is None else f" on {c['path']}:{c['line']} ({c['side']})"
-            add(f"### {c['author']}{where}", c["body_md"])
-
-    status = task["status"] + (f" · {task['stage']}" if task["stage"] else "")
-    add(f"# #{task['id']} {task['title']}", f"Status: {status}")
-    add("## Description", task["description_md"])
-    add("## Spec", "_No spec yet._" if task["spec_md"] is None else task["spec_md"])
-    for r in rounds:
-        add(f"## Round {r['n']} — build notes", r["build_md"])
-        add("## Verdicts")
-        verdicts = {v["reviewer"]: v for v in query(
-            "SELECT reviewer, verdict, body_md FROM verdicts WHERE round_id = ?", (r["id"],)
-        )}
-        for who in REVIEWERS:
-            v = verdicts.get(who)
-            add(f"### {who}: {v['verdict'] if v else 'pending'}", v and v["body_md"])
-        add_comments(r["id"], only_me=False)
-        decisions = query("SELECT actor, decision, body_md FROM decisions WHERE round_id = ? ORDER BY id", (r["id"],))
-        if decisions:
-            add("## Decisions")
-        for d in decisions:
-            add(f"### {d['actor']}: {d['decision']}", d["body_md"])
-    if feedback:
-        add(f"## Feedback on round {feedback['n']}", feedback["body_md"])
-        add_comments(feedback["round_id"], only_me=True)
-    return "\n\n".join(blocks) + "\n"
-
-
-@router.get("/api/tasks/{task_id}/context")
-def task_context(task_id: int, n: str | None = Query(None, alias="round"), feedback: bool = False):
-    """§6.2: everything (no query), one round (`?round=`), or my latest feedback (`?feedback=1`)."""
-    if n is not None and feedback:
-        raise HTTPException(422, "give round or feedback, not both")
-    task = one_or_404(
-        "SELECT id, title, status, stage, description_md, spec_md FROM tasks WHERE id = ?", (task_id,)
-    )
-    mine = None
-    if feedback:  # Q6: my latest CHANGES_REQUESTED
-        found = query(
-            "SELECT d.round_id, r.n, d.body_md FROM decisions d JOIN rounds r ON r.id = d.round_id"
-            " WHERE d.task_id = ? AND d.actor = 'me' AND d.decision = 'CHANGES_REQUESTED' ORDER BY d.id DESC LIMIT 1",
-            (task_id,),
-        )
-        if not found:
-            raise HTTPException(404, f"#{task_id} has no feedback")
-        mine, rounds = found[0], []
-    elif n is not None:
-        rounds = [round_or_404(task_id, n)]
-    else:
-        rounds = query("SELECT id, n, build_md FROM rounds WHERE task_id = ? ORDER BY n", (task_id,))
-    return Response(context_md(task, rounds, mine), media_type="text/markdown", headers=NOSNIFF)
+    return review_dto.ChangesOut(status="in_progress", stage="rework", run_id=run_id)
 
 
 # --- Pages and htmx forms (docs/ui.md §8) ------------------------------------
@@ -1072,7 +545,9 @@ def project_page(request: Request, project_id: int):
         " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
         (project_id,),
     )
-    tasks = list_tasks(project_id)
+    with transaction() as conn:  # 035 Q10: the API's list, as dicts
+        tasks = [t.model_dump() for t in tasks_handler.list_tasks(
+            ProjectsRepo(conn), TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn), RunsRepo(conn), project_id)]
     # Q13: the API doesn't return position; read it after list_tasks so every listed task has one
     positions = dict(query("SELECT id, position FROM tasks WHERE project_id = ?", (project_id,)))
     # 014: nor the run's start (§6.2 keeps run {id, status}); read after it, so every listed run has one
@@ -1093,11 +568,13 @@ def project_page(request: Request, project_id: int):
 @router.post("/projects/{project_id}/tasks")
 async def add_task_form(request: Request, project_id: int):
     """Q10: the + New task form; create_task validates, places, and logs the event."""
-    body = TaskBody(
+    body = task_dto.TaskBody(
         title=await form_field(request, "title"),
         description_md=await form_field(request, "description_md"),
     )
-    create_task(project_id, body, request)
+    with transaction() as conn:
+        tasks_handler.create_task(TasksRepo(conn), ProjectsRepo(conn), RoundsRepo(conn), ReviewsRepo(conn),
+                                  project_id, body, str(request.base_url))
     return hx_redirect(f"/projects/{project_id}")
 
 
@@ -1287,6 +764,12 @@ def file_tree(files: list[dict]) -> dict:
     return root
 
 
+def summaries(task_id: int) -> list[dict]:
+    """035 Q10: the API's round summaries, as dicts for the pages."""
+    with transaction() as conn:
+        return [r.model_dump() for r in rounds_handler.round_summaries(RoundsRepo(conn), ReviewsRepo(conn), task_id)]
+
+
 PAGE_TASK = (  # the task row both task pages show; `path` is for Review's commit hint
     "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
     " t.branch, t.worktree_path, p.path, p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id"
@@ -1330,7 +813,7 @@ def task_page(request: Request, task_id: int):
     return templates.TemplateResponse(request, "task.html", {
         "run": run, "takeover": takeover, "hint": factory_hint(factory, task["default_branch"]),
         "can_run": factory == "ready" and claude_login()[1],  # Q4
-        "task": task, "rounds": round_summaries(task_id), "posted": posted_verdicts(task_id),
+        "task": task, "rounds": summaries(task_id), "posted": posted_verdicts(task_id),
         "build": dict(query("SELECT n, build_md FROM rounds WHERE task_id = ?", (task_id,))),
         "reviewers": REVIEWERS, "approver": approver_decision(task_id),
         "history": [e for e in query(TIMELINE, {"task": task_id}) if e["kind"] == 0],  # Q8: events only
@@ -1347,9 +830,11 @@ def review_page(request: Request, task_id: int, n: str = Query("latest", alias="
 
 def review_context(task_id: int, n: str, tab: str, path: str = "", side: str = "", line: str = "") -> dict:
     task = one_or_404(PAGE_TASK, (task_id,), f"Task #{task_id} not found")
-    rounds = round_summaries(task_id)
-    # AC11: with no rounds, `latest` is a page without a selector, not round_or_404's 404
-    found = round_or_404(task_id, n) if rounds or n != "latest" else None
+    rounds = summaries(task_id)
+    found = None  # AC11: with no rounds, `latest` is a page without a selector, not find_round's 404
+    if rounds or n != "latest":
+        with transaction() as conn:
+            found = rounds_handler.find_round(TasksRepo(conn), RoundsRepo(conn), task_id, n)
     picked = found["n"] if found else None
     tab = "files" if tab == "files" else "conversation"  # 008 Q4
     files = review_files(found["id"], (path, side, line)) if tab == "files" and found else []
@@ -1359,20 +844,21 @@ def review_context(task_id: int, n: str, tab: str, path: str = "", side: str = "
         "timeline": query(TIMELINE, {"task": task_id}),
         "tab": tab, "files": files, "tree": file_tree(files),
         # Q6: from the task row, so it survives a reload and also follows fctl approve or a drag to Done
-        "commit_hint": commit_hint(task) if task["status"] == "done" else None,
+        "commit_hint": reviews_handler.commit_hint(task) if task["status"] == "done" else None,
     }
 
 
 @router.post("/tasks/{task_id}/approve")
 def approve_form(task_id: int):
     """Q12: the page's Approve sends no summary."""
-    approve(task_id, ApproveBody())
+    with transaction() as conn:
+        reviews_handler.approve(TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn), task_id, review_dto.ApproveBody())
     return hx_redirect(f"/tasks/{task_id}/review")
 
 
 @router.post("/tasks/{task_id}/request-changes")
 async def request_changes_form(request: Request, task_id: int):
-    body = ChangesBody(body_md=await form_field(request, "body_md"))
+    body = review_dto.ChangesBody(body_md=await form_field(request, "body_md"))
     try:
         await run_in_threadpool(request_changes, task_id, body, request)  # the spawn blocks
     except HTTPException as e:
@@ -1393,14 +879,15 @@ async def add_comment_form(request: Request, task_id: int):
     sent `round`, `path`, `side`, and `line` (blank = absent). post_comment validates and writes."""
     fields = {k: await form_field(request, k) for k in ("round", "path", "side", "line")}
     try:
-        body = CommentBody(author="me", body_md=await form_field(request, "body_md"),
+        body = review_dto.CommentBody(author="me", body_md=await form_field(request, "body_md"),
                            **{k: v for k, v in fields.items() if v})
     except ValidationError as e:  # 008 Q11: a 422 with the messages, never the input
         raise HTTPException(422, [f"{'.'.join(map(str, err['loc']))}: {err['msg']}" for err in e.errors()])
-    created = post_comment(task_id, body)
+    with transaction() as conn:
+        created = reviews_handler.post_comment(TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn), task_id, body)
     if body.path is None:
         return hx_redirect(f"/tasks/{task_id}/review")
     c = query("SELECT r.n, c.path, c.side, c.line FROM comments c JOIN rounds r ON r.id = c.round_id"
-              " WHERE c.id = ?", (created["id"],))[0]
+              " WHERE c.id = ?", (created.id,))[0]
     anchor = quote(f"{c['path']}:{c['side']}:{c['line']}")
     return hx_redirect(f"/tasks/{task_id}/review?{urlencode({'round': c['n'], 'tab': 'files'})}#{anchor}")
