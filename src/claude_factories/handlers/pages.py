@@ -1,10 +1,9 @@
 """Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), and the header's
-login badge. Each page returns the dict its template gets, minus `request` (036 Q7)."""
+login badge. Each page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
 import shlex
 from itertools import groupby
 from time import monotonic
-from urllib.parse import quote, urlencode
 
 from .. import config
 from ..adapters.claude import Claude, stripped_env
@@ -209,9 +208,3 @@ def review(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id: 
         "commit_hint": commit_hint(found_task) if found_task["status"] == "done" else None,
     }
 
-
-def comment_url(reviews: ReviewsRepo, task_id: int, comment_id: int) -> str:
-    """008 Q3: the Files changed tab of an inline comment's round, at its line's anchor."""
-    c = reviews.comment_anchor(comment_id)
-    anchor = quote(f"{c['path']}:{c['side']}:{c['line']}")
-    return f"/tasks/{task_id}/review?{urlencode({'round': c['n'], 'tab': 'files'})}#{anchor}"

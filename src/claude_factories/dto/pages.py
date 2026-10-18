@@ -124,7 +124,7 @@ class Card(TaskItem):
 
     @computed_field
     def stalled(self) -> bool:
-        """014 Q5, as project.html: an in_progress card whose latest run has ended."""
+        """014 Q5: an in_progress card whose latest run has ended."""
         return self.status == "in_progress" and self.run is not None and self.run.status != "running"
 
 

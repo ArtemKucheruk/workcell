@@ -359,7 +359,6 @@ The backend under `src/claude_factories/` is split into layers:
 src/claude_factories/
 ├── server/         create_app(), lifespan, the §4.5 middleware, domain error → HTTP mapping, deps.py providers
 ├── controllers/    one APIRouter per resource: reads the request, calls a handler
-│   └── pages/      the Jinja page routes, until the SPA replaces them
 ├── handlers/       use cases as plain functions, one module per resource
 ├── dto/            pydantic request and response models, one module per resource
 ├── repositories/   all SQL, one class per table group, wrapping a connection

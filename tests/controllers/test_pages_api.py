@@ -1,15 +1,11 @@
 import ast
 import os
 import shlex
+from datetime import UTC, datetime, timedelta
 
 import pytest
-from conftest import commit, sql
-from controllers.pages.test_review import add_comment, add_decision, add_event, add_round, add_verdict
-from controllers.pages.test_review import add_task as review_task
-from controllers.pages.test_review_files import add_inline, submit
-from controllers.pages.test_run_ui import STARTED, add_run, badge
-from controllers.pages.test_run_ui import get as get_html
-from controllers.test_runs import H, add_task, connect, fake, project  # noqa: F401
+from conftest import commit, git, sql, write
+from controllers.test_runs import H, OLD, SKILL, add_task, connect, fake, project  # noqa: F401
 from test_architecture import PKG, checked, fastapi_outside, sql_outside, wrong_edges
 
 from claude_factories import db
@@ -21,6 +17,117 @@ B_PY = "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1,2 +1,2 @@\n keep
 TASK_KEYS = {"id", "project_id", "project", "title", "status", "stage", "branch", "worktree_path",
              "description_md", "description_html", "spec_md", "spec_html"}
 SUMMARY_KEYS = {"n", "trigger", "files", "additions", "deletions", "verdicts"}
+CONSOLE = '{"authMethod":"console"}'
+UNCOMMITTED = ("factory isn't committed on main: on main, run git add .claude/skills/factory .claude/agents"
+               ' && git commit -m "Add factory"')
+NONE = "factory isn't committed on main: Create factory on the project board, then commit it on main"
+STRIPPED = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK")
+STARTED = "2026-10-18T10:02:00Z"
+WORKTREE = "/code/api/.claude/worktrees/12-x"
+SAMPLE = """\
+diff --git a/app/auth.py b/app/auth.py
+index 1111111..2222222 100644
+--- a/app/auth.py
++++ b/app/auth.py
+@@ -41,3 +41,3 @@ def login():
+     user = authenticate(form)
+-    if not user:
++    if not user and limiter.hit(client_key(request)):
+         return deny()
+@@ -60,2 +60,3 @@ def logout():
+     session.clear()
++    audit("logout")
+     return ok()
+diff --git a/app/limits.py b/app/limits.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/app/limits.py
+@@ -0,0 +1,2 @@
++def client_key(request):
++    return request.client.host
+\\ No newline at end of file
+diff --git a/logo.png b/logo.png
+new file mode 100644
+index 0000000..4444444
+Binary files /dev/null and b/logo.png differ
+diff --git a/old_name b/new_name
+similarity index 100%
+rename from old_name
+rename to new_name
+diff --git a/tests/test_limits.py b/tests/test_limits.py
+deleted file mode 100644
+index 5555555..0000000
+--- a/tests/test_limits.py
++++ /dev/null
+@@ -1,2 +0,0 @@
+-def test_old():
+-    assert True
+"""
+
+
+# --- Shared DB-row helpers (026 Q3: test_run_control.py, test_reviews.py, and server/test_app.py import them) ---
+
+
+def review_task(project_id, title="t", status="review", stage="human_review", description="", spec=None,
+                branch=None, worktree=WORKTREE):
+    return sql(
+        "INSERT INTO tasks (project_id, title, description_md, spec_md, status, stage, position, branch,"
+        " worktree_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1.0, ?, ?, ?, ?) RETURNING id",
+        (project_id, title, description, spec, status, stage, branch, worktree, OLD, OLD),
+    )[0][0]
+
+
+def add_round(task_id, n, trigger="initial", files=((1, 0),), at=OLD):
+    round_id = sql(
+        "INSERT INTO rounds (task_id, n, trigger, base_sha, created_at) VALUES (?, ?, ?, 'abc1234', ?)"
+        " RETURNING id", (task_id, n, trigger, at),
+    )[0][0]
+    for i, (additions, deletions) in enumerate(files):
+        sql("INSERT INTO round_files (round_id, path, change, additions, deletions, patch)"
+            " VALUES (?, ?, 'modified', ?, ?, '')", (round_id, f"f{i}.py", additions, deletions))
+    return round_id
+
+
+def add_verdict(round_id, reviewer, verdict, body_md="", at=OLD):
+    sql("INSERT INTO verdicts (round_id, reviewer, verdict, body_md, created_at) VALUES (?, ?, ?, ?, ?)",
+        (round_id, reviewer, verdict, body_md, at))
+
+
+def add_comment(task_id, round_id, author, body_md, path=None, line=None, at=OLD, id=None):
+    side = None if path is None else "new"
+    sql("INSERT INTO comments (id, task_id, round_id, author, path, line, side, body_md, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (id, task_id, round_id, author, path, line, side, body_md, at))
+
+
+def add_inline(task, round_id, author, path, line, side, body):
+    sql("INSERT INTO comments (task_id, round_id, author, path, line, side, body_md, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (task, round_id, author, path, line, side, body, OLD))
+
+
+def add_decision(task_id, round_id, actor, decision, body_md="", at=OLD):
+    sql("INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (task_id, round_id, actor, decision, body_md, at))
+
+
+def add_event(task_id, from_status, to_status, stage=None, at=OLD, id=None):
+    sql("INSERT INTO events (id, task_id, actor, from_status, to_status, stage, created_at)"
+        " VALUES (?, ?, 'app', ?, ?, ?, ?)", (id, task_id, from_status, to_status, stage, at))
+
+
+def add_run(task_id, status, error=None, session="s", started=STARTED):
+    return sql("INSERT INTO runs (task_id, session_id, status, error, log_path, started_at)"
+               " VALUES (?, ?, ?, ?, 'l', ?) RETURNING id", (task_id, session, status, error, started))[0][0]
+
+
+def submit(client, task, patch):
+    """POST the patch as the task's next round; the new round's id."""
+    r = client.post(f"/api/tasks/{task}/rounds", json={"base_sha": "abc1234", "patch": patch}, headers=H)
+    assert r.status_code == 201, r.text
+    return sql("SELECT id FROM rounds WHERE task_id = ? AND n = ?", (task, r.json()["round"]))[0][0]
+
+
+# --- This file's own helpers ----------------------------------------------------------
 
 
 def api(client, url, status=200):
@@ -44,6 +151,32 @@ def flags(card):
     return card["waiting"], card["escalated"], card["stalled"]
 
 
+def ago(days):
+    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def done_task(project_id, days, rounds=0):
+    """A task done `days` ago, with rounds 1..rounds."""
+    tid = add_task(project_id, status="done")
+    sql("UPDATE tasks SET done_at = ? WHERE id = ?", (ago(days), tid))
+    for n in range(1, rounds + 1):
+        add_round(tid, n)
+    return tid
+
+
+@pytest.fixture
+def unready(client, tmp_path, fake):
+    """unready("uncommitted" | "none") → a project on its own repo whose factory is in that state."""
+    def make(state):
+        path = tmp_path / f"repo-{state}"
+        git(tmp_path, "init", "-q", "-b", "main", str(path))
+        git(path, "commit", "-q", "--allow-empty", "-m", "init")
+        if state == "uncommitted":
+            write(path, {SKILL: "# factory\n"})
+        return connect(client, path)
+    return make
+
+
 # --- GET /api/auth -------------------------------------------------------------------
 
 
@@ -58,16 +191,30 @@ def test_auth_not_claude_ai(client, fake, auth):  # AC2
     assert api(client, "/api/auth") == {"auth_method": None, "plan": None, "runs_enabled": False}
 
 
-def test_auth_shares_badge_cache(client, tmp_path, monkeypatch):  # AC3
+def test_auth_check_env_and_cwd(client, fake, monkeypatch):  # 026 AC12
+    for name in STRIPPED:
+        monkeypatch.setenv(name, "x")
+    api(client, "/api/auth")
+    seen = fake.recorded("auth")
+    assert seen["argv"] == ["auth", "status"]
+    assert not set(STRIPPED) & set(seen["env"])
+    assert os.path.realpath(seen["cwd"]) == os.path.realpath(os.environ["FCTL_HOME"])
+
+
+def test_auth_cached_60s(client, tmp_path, monkeypatch):  # AC3, 026 AC13
     calls = tmp_path / "auth-calls"
     claude = tmp_path / "bin" / "claude"  # appends a line per call, so every call counts
     claude.write_text(f"#!/bin/sh\necho x >> {shlex.quote(str(calls))}\necho {shlex.quote(PRO)}\n")
     clock = [1000.0]
     monkeypatch.setattr(pages, "monotonic", lambda: clock[0])
+    count = lambda: len(calls.read_text().splitlines())  # noqa: E731
     assert api(client, "/api/auth")["plan"] == "pro"
     clock[0] += 59
-    assert badge(get_html(client, "/"))[1] == "Claude: Pro ✓"
-    assert len(calls.read_text().splitlines()) == 1
+    assert api(client, "/api/auth")["plan"] == "pro"
+    assert count() == 1
+    clock[0] += 2  # 61 s after the first
+    assert api(client, "/api/auth")["plan"] == "pro"
+    assert count() == 2
 
 
 # --- GET /api/pages/dashboard --------------------------------------------------------
@@ -123,6 +270,35 @@ def test_dashboard_runs_week_and_bogus(client, project):  # AC6
     assert (page["show"], page["listed"]) == ("", None)
 
 
+def test_dashboard_escalated_and_running_counts(client, project):  # 026 AC17
+    add_task(project, status="review", stage="escalated")
+    add_task(project, status="review", stage="human_review")
+    add_run(add_task(project, status="in_progress", stage="build"), "running")
+    add_run(add_task(project, status="in_progress", stage="build"), "succeeded")
+    add_run(add_task(project), "failed")
+    counts = api(client, "/api/pages/dashboard")["counts"]
+    assert (counts["escalated"], counts["running"]) == (1, 1)
+
+
+def test_dashboard_week_windows(client, project):  # 026 AC18
+    done_task(project, 6)
+    done_task(project, 8)
+    tid = add_task(project, status="in_progress", stage="build")
+    for days in (0, 6, 8):
+        add_run(tid, "succeeded", started=ago(days))
+    counts = api(client, "/api/pages/dashboard")["counts"]
+    assert (counts["done_week"], counts["runs_week"]) == (1, 2)
+
+
+def test_dashboard_done_list(client, project):  # 026 AC19
+    older, newer = done_task(project, 29, rounds=2), done_task(project, 3, rounds=1)
+    done_task(project, 31, rounds=3)
+    add_round(add_task(project, status="review", stage="human_review"), 1)
+    done_task(project, 1)  # no rounds
+    done = api(client, "/api/pages/dashboard")["done"]
+    assert [(d["id"], d["rounds"]) for d in done] == [(newer, 1), (older, 2)]
+
+
 # --- GET /api/pages/workspaces/{id} ---------------------------------------------------
 
 
@@ -141,6 +317,23 @@ def test_workspace(client, project, repo):  # AC7
              "done": 0, "last_activity": created[bare], "factory": "none"},
         ],
     }
+
+
+def test_workspace_last_activity(client):  # 026 AC20: 002 AC19's three cases
+    ids = {}
+    for name, created in (("a", "2026-01-01T00:00:00Z"), ("b", "2026-05-05T08:09:00Z"), ("c", "2026-02-02T10:20:00Z")):
+        r = client.post("/api/projects/connect", headers=H, json={
+            "path": f"/{name}", "workspace": "personal", "name": name, "default_branch": "main"})
+        ids[name] = r.json()["id"]
+        sql("UPDATE projects SET created_at = ? WHERE id = ?", (created, ids[name]))
+    for name, updated in (("a", "2026-03-04T05:06:07Z"), ("a", "2025-12-31T00:00:00Z"), ("b", "2026-01-01T00:00:00Z")):
+        sql("UPDATE tasks SET updated_at = ? WHERE id = ?", (updated, add_task(ids[name])))
+    page = api(client, f"/api/pages/workspaces/{ws_id('personal')}")
+    assert [(p["name"], p["last_activity"]) for p in page["projects"]] == [
+        ("a", "2026-03-04T05:06:07Z"),  # a later task
+        ("b", "2026-05-05T08:09:00Z"),  # a later creation
+        ("c", "2026-02-02T10:20:00Z"),  # no tasks
+    ]
 
 
 # --- GET /api/pages/projects/{id} -----------------------------------------------------
@@ -195,6 +388,18 @@ def test_card_stalled(client, project):  # AC12
     assert found[failed]["stalled"] is True
     assert found[running]["stalled"] is False
     assert flags(found[backlog]) == (False, False, False)
+
+
+@pytest.mark.parametrize("state, hint", [("uncommitted", UNCOMMITTED), ("none", NONE)])
+def test_board_factory_not_ready(client, unready, state, hint):  # 026 AC14
+    page = api(client, f"/api/pages/projects/{unready(state)}")
+    assert (page["can_run"], page["hint"]) == (False, hint)
+
+
+def test_board_console_auth(client, project, fake):  # 026 AC15
+    fake(auth=CONSOLE)
+    page = api(client, f"/api/pages/projects/{project}")
+    assert (page["factory"], page["can_run"], page["hint"]) == ("ready", False, None)
 
 
 # --- GET /api/pages/tasks/{id} --------------------------------------------------------
@@ -285,6 +490,16 @@ def test_task_takeover_on_host(client, project, monkeypatch, value):  # 028 AC3
 
 def test_isolated_unsets_in_docker():  # 028 AC6: fails under `FCTL_IN_DOCKER=1 uv run pytest` without it
     assert "FCTL_IN_DOCKER" not in os.environ
+
+
+@pytest.mark.parametrize("case", ["uncommitted", "console"])
+def test_task_runs_disabled(client, project, unready, fake, case):  # 026 AC16
+    if case == "uncommitted":
+        project = unready("uncommitted")
+    else:
+        fake(auth=CONSOLE)
+    page = api(client, f"/api/pages/tasks/{add_task(project)}")
+    assert (page["can_run"], page["hint"]) == (False, UNCOMMITTED if case == "uncommitted" else None)
 
 
 # --- GET /api/pages/tasks/{id}/review -------------------------------------------------
@@ -388,6 +603,45 @@ def test_review_commit_hint(client, project):  # AC22
     assert api(client, f"/api/pages/tasks/{tid}/review")["task"]["commit_hint"] == r.json()["commit_hint"]
 
 
+def note(text):
+    """A diff `note` row: no line numbers, no side, no anchor."""
+    return {"kind": "note", "old": None, "new": None, "side": None, "anchor": None, "text": text, "comments": []}
+
+
+def files_at(client, task, query=""):
+    """{path: file} of the review view-model's files."""
+    return {f["path"]: f for f in api(client, f"/api/pages/tasks/{task}/review{query}")["files"]}
+
+
+@pytest.fixture
+def sample(client, project):
+    """A factory task with 008's SAMPLE patch as round 1."""
+    task = review_task(project, branch="factory/12-x")
+    submit(client, task, SAMPLE)
+    return task
+
+
+def test_review_binary_and_rename_notes(client, sample):  # 026 AC21
+    files = files_at(client, sample)
+    assert files["logo.png"]["rows"] == [note("Binary file not shown.")]
+    assert files["new_name"]["rows"] == [note("No content changes.")]
+
+
+def test_review_no_newline_note(client, sample):  # 026 AC22
+    assert files_at(client, sample)["app/limits.py"]["rows"][-1] == note("\\ No newline at end of file")
+
+
+def test_review_crlf(client, sample):  # 026 AC23
+    submit(client, sample, "diff --git a/win.txt b/win.txt\n--- a/win.txt\n+++ b/win.txt\n@@ -1 +1 @@\n-old\r\n+new\r\n")
+    [add] = [r for r in files_at(client, sample, "?round=2")["win.txt"]["rows"] if r["kind"] == "add"]
+    assert add["text"] == "new" and "\r" not in add["text"]
+
+
+def test_review_huge_hunk_number(client, sample):  # 026 AC24: no 500 on a 5000-digit hunk header
+    submit(client, sample, f"diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -{'9' * 5000} +1 @@\n-x\n+y\n")
+    assert files_at(client, sample, "?round=2")["a.py"]["rows"] == [note("No content changes.")]
+
+
 # --- GET /api/pages/projects/{id}/code ------------------------------------------------
 
 
@@ -423,6 +677,95 @@ def test_code_untracked_404(client, code_project, repo, tmp_path, path):  # AC25
     r = client.get(f"/api/pages/projects/{code_project}/code", params={"path": path})
     assert (r.status_code, r.json()) == (404, {"detail": f"{path} is not a tracked file in repo"})
     assert "TOP-SECRET" not in r.text
+
+
+SECRET = "TOP-SECRET-7f3a"
+APP = 'def main():\n    x = "<b>&</b>"\n    return x\n'
+OUTSIDE = {"note": "Not shown: points outside the project."}
+
+
+@pytest.fixture
+def fixture_repo(repo, tmp_path):
+    """021's code fixture: 4 tracked files, an untracked notes.txt, an ignored .env, and a secret next to the repo."""
+    commit(repo, {"README.md": "# Hello\n", "src/app.py": APP, "docs/guide.md": "Guide\n", ".gitignore": ".env\n"})
+    write(repo, {"notes.txt": "untracked notes", ".env": "API=ignored-env"})
+    (tmp_path / "secret.txt").write_text(SECRET)
+    return repo
+
+
+def code(client, project_id, path=None, status=200):
+    """The code view-model's response, checked for status and JSON."""
+    r = client.get(f"/api/pages/projects/{project_id}/code", params=None if path is None else {"path": path})
+    assert (r.status_code, r.headers["content-type"]) == (status, "application/json"), r.text
+    return r
+
+
+def test_code_symlink_outside(client, fixture_repo, tmp_path):  # 026 AC25
+    os.symlink(tmp_path / "secret.txt", fixture_repo / "leak")
+    commit(fixture_repo)
+    r = code(client, connect(client, fixture_repo), "leak")
+    assert r.json()["view"] == OUTSIDE
+    assert SECRET not in r.text
+
+
+def test_code_readme_symlink_outside(client, repo, tmp_path):  # 026 AC26
+    (tmp_path / "secret.txt").write_text(SECRET)
+    os.symlink(tmp_path / "secret.txt", repo / "README.md")
+    commit(repo)
+    r = code(client, connect(client, repo))
+    assert (r.json()["view"], r.json()["readme_html"]) == (OUTSIDE, None)
+    assert SECRET not in r.text
+
+
+def test_code_symlink_inside(client, fixture_repo):  # 026 AC27
+    os.symlink("src/app.py", fixture_repo / "alias.py")
+    commit(fixture_repo)
+    assert code(client, connect(client, fixture_repo), "alias.py").json()["view"]["text"] == APP
+
+
+def test_code_untracked_paths_404(client, fixture_repo, tmp_path):  # 026 AC28
+    pid = connect(client, fixture_repo)
+    for path in (str(tmp_path / "secret.txt"), ".env", ".git/config", "src"):
+        r = code(client, pid, path, 404)
+        assert r.json() == {"detail": f"{path} is not a tracked file in repo"}
+        assert SECRET not in r.text and "ignored-env" not in r.text and "untracked notes" not in r.text
+
+
+def test_code_size_limit(client, repo):  # 026 AC29
+    commit(repo, {"big.txt": b"x" * (1024 * 1024 + 1), "max.txt": b"y" * (1024 * 1024)})
+    pid = connect(client, repo)
+    assert code(client, pid, "big.txt").json()["view"] == {"note": "File over 1 MB not shown."}
+    assert code(client, pid, "max.txt").json()["view"]["text"] == "y" * (1024 * 1024)
+
+
+@pytest.mark.parametrize("kind", ["missing", "not a repo"])
+def test_code_git_failure(client, tmp_path, kind):  # 026 AC30
+    """The JSON carries git's own message; the SPA prefixes "Can't list files in <path>: " (CodePage.jsx)."""
+    path = tmp_path / kind.replace(" ", "-")
+    if kind == "not a repo":
+        path.mkdir()
+    page = code(client, connect(client, path)).json()
+    assert page["error"].startswith("fatal: ")
+    assert page["tree"] == {}
+
+
+def test_code_branch(client, fixture_repo):  # 026 AC31
+    pid = connect(client, fixture_repo)
+    git(fixture_repo, "checkout", "-q", "-b", "feature-x")
+    assert code(client, pid).json()["branch"] == "feature-x"
+    git(fixture_repo, "checkout", "-q", "--detach")
+    assert code(client, pid).json()["branch"] == "detached HEAD"
+
+
+def test_code_no_readme(client, repo):  # 026 AC32
+    commit(repo, {"src/app.py": APP})
+    page = code(client, connect(client, repo)).json()
+    assert (page["view"], page["readme_html"]) == ({"note": "No README.md in this project."}, None)
+
+
+def test_code_non_utf8_replaced(client, repo):  # 026 AC33
+    commit(repo, {"latin.txt": b"caf\xe9\n"})
+    assert code(client, connect(client, repo), "latin.txt").json()["view"]["text"] == "caf\ufffd\n"
 
 
 # --- Shared ---------------------------------------------------------------------------

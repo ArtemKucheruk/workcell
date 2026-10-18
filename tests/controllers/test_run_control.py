@@ -6,14 +6,13 @@ from types import SimpleNamespace
 import pytest
 from conftest import sql
 from fastapi.testclient import TestClient
-from controllers.pages.test_review import add_round, header
+from controllers.test_pages_api import add_round
 from controllers.test_runs import (H, OLD, add_running_run, add_task, events, fake, project, run, run_row,  # noqa: F401
                        started, task_row, wait)
 
 from claude_factories.server.app import create_app
 
 BASE = "http://127.0.0.1:4545"
-FORM = H | {"Content-Type": "application/x-www-form-urlencoded"}
 NOTE = "Make the limit configurable via settings."
 
 
@@ -392,48 +391,15 @@ def test_rework_spawn_refused(client, factory_task, fake):  # AC21
     assert stage(task) == ("in_progress", "rework")
 
 
-def test_rework_form(client, factory_task):  # AC22
+def test_rework_fctl_url_ignores_host(client, factory_task, fake):  # 028 Q5: every spawn, not just /run
     task, first = factory_task
-    r = client.post(f"/tasks/{task}/request-changes", content=b"body_md=Make+it+configurable", headers=FORM)
-    assert (r.status_code, r.headers["HX-Redirect"]) == (204, f"/tasks/{task}/review")
-    [(new,)] = sql("SELECT id FROM runs WHERE task_id = ? AND id != ?", (task, first["run_id"]))
-    wait(new)
-
-
-@pytest.mark.parametrize("form", [False, True])
-def test_rework_fctl_url_ignores_host(client, factory_task, fake, form):  # 028 Q5: every spawn, not just /run
-    task, first = factory_task
-    if form:
-        client.post(f"/tasks/{task}/request-changes", content=b"body_md=x", headers=FORM | {"Host": "127.0.0.1"})
-    else:
-        client.post(f"/api/tasks/{task}/request-changes", json={"body_md": NOTE}, headers=H | {"Host": "127.0.0.1"})
+    client.post(f"/api/tasks/{task}/request-changes", json={"body_md": NOTE}, headers=H | {"Host": "127.0.0.1"})
     [(new,)] = sql("SELECT id FROM runs WHERE task_id = ? AND id != ?", (task, first["run_id"]))
     wait(new)
     assert fake.recorded("run")["env"]["FCTL_URL"] == BASE
 
 
 # --- Round 2 review findings ------------------------------------------------------
-
-
-def test_rework_form_refused_after_write(client, project, factory_task, fake):  # ux review, round 1
-    task, _ = factory_task
-    fake(auth='{"authMethod":"console"}')
-    url = f"{BASE}/tasks/{task}/review?round=1&tab=files"
-    r = client.post(f"/tasks/{task}/request-changes", content=b"body_md=Again",
-                    headers=FORM | {"HX-Request": "true", "HX-Current-URL": url})
-    assert r.status_code == 200
-    assert {k: r.headers[k] for k in ("HX-Retarget", "HX-Reselect", "HX-Reswap")} == {
-        "HX-Retarget": "header", "HX-Reselect": "header", "HX-Reswap": "outerHTML"}
-    shown = header(r.text)
-    assert "In progress · rework" in " ".join(shown.split())
-    assert '<p class="form-error" role="alert">not on subscription auth</p>' in shown
-    assert shown.count(" disabled") == 3  # the Summary and both buttons
-    assert '<input type="hidden" name="tab" value="files">' in shown
-    # refused before any write: still the plain 409, for the page's alert
-    sql("UPDATE tasks SET status = 'review', stage = 'human_review' WHERE id = ?", (task,))
-    running = add_running_run(add_task(project, "other", status="in_progress"))
-    r = client.post(f"/tasks/{task}/request-changes", content=b"body_md=Again", headers=FORM)
-    assert (r.status_code, r.json()) == (409, {"detail": f"run #{running} active"})
 
 
 def test_stop_skips_reaped_leader(client, project, sleeper):  # security review, round 1

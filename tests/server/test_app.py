@@ -1,6 +1,9 @@
 import re
 
 import pytest
+from conftest import sql
+from controllers.test_pages_api import add_round
+from controllers.test_runs import H, add_task, fake, project  # noqa: F401
 from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -16,13 +19,13 @@ HEADER_ERROR = {"detail": "X-Requested-By: fctl header required"}
 
 
 @pytest.mark.parametrize("host", ["127.0.0.1:4545", "localhost:4545", "localhost", "127.0.0.1:5000"])
-def test_local_hosts_allowed(client, host):  # AC18
-    assert client.get("/", headers={"Host": host}).status_code == 200
+def test_local_hosts_allowed(client, host):  # AC18, 026 AC6
+    assert client.get("/api/workspaces", headers={"Host": host}).status_code == 200
 
 
 @pytest.mark.parametrize("host", ["evil.example", "localhost.evil.example", "127.0.0.1.evil.example"])
-def test_foreign_hosts_rejected(client, host):  # AC19
-    r = client.get("/", headers={"Host": host})
+def test_foreign_hosts_rejected(client, host):  # AC19, 026 AC6
+    r = client.get("/api/workspaces", headers={"Host": host})
     assert r.status_code == 403
     assert r.json() == HOST_ERROR
 
@@ -44,8 +47,8 @@ def test_mutating_with_header_passes(client):  # AC22
     assert client.post("/anything", headers={"X-Requested-By": "fctl"}).status_code == 404
 
 
-def test_get_needs_no_header(client):  # AC23
-    assert client.get("/").status_code == 200
+def test_get_needs_no_header(client):  # AC23, 026 AC6
+    assert client.get("/api/workspaces").status_code == 200
 
 
 # --- 034: create_app, routes, domain errors ------------------------------------------
@@ -101,7 +104,7 @@ def test_domain_errors_as_json(error, status, detail):  # 034 AC11
     assert (r.status_code, r.json()) == (status, {"detail": detail})
 
 
-def test_not_found_page_outside_api():  # 034 AC12
+def test_not_found_json_outside_api():  # 034 AC12, 026 AC5
     app = create_app()
 
     @app.get("/gone")
@@ -114,10 +117,9 @@ def test_not_found_page_outside_api():  # 034 AC12
 
     with TestClient(app, base_url=BASE) as c:
         r, same = c.get("/gone"), c.get("/gone-http")
-    assert r.status_code == 404
-    assert r.template.name == "error.html"
-    assert "<h1>Gone</h1>" in r.text
-    assert (r.status_code, r.text) == (same.status_code, same.text)
+    for found in (r, same):
+        assert (found.status_code, found.headers["content-type"], found.json()) == (
+            404, "application/json", {"detail": "Gone"})
 
 
 def test_035_response_models_from_dto():  # 035 AC2
@@ -137,23 +139,49 @@ def test_035_response_models_from_dto():  # 035 AC2
 
 # --- 036: every route from controllers/ ------------------------------------------------
 
-PAGE_ROUTES = [
-    ("GET", "/"), ("GET", "/workspaces/{workspace_id}"), ("GET", "/projects/{project_id}"),
-    ("GET", "/projects/{project_id}/code"), ("GET", "/tasks/{task_id}"), ("GET", "/tasks/{task_id}/review"),
-    ("POST", "/workspaces"), ("POST", "/projects/{project_id}/tasks"), ("POST", "/projects/{project_id}/workspace"),
-    ("POST", "/projects/{project_id}/factory"), ("POST", "/tasks/{task_id}/approve"),
-    ("POST", "/tasks/{task_id}/request-changes"), ("POST", "/tasks/{task_id}/comments"),
-]
 
-
-def test_every_route_from_controllers():  # 036 AC3
+def test_every_route_from_controllers():  # 036 AC3, 026 AC2
     found = [r for r in routes(create_app().routes) if isinstance(r, APIRoute)]
     assert found
     for r in found:
         assert r.endpoint.__module__.startswith("claude_factories.controllers."), (r.path, r.endpoint.__module__)
+        assert r.path.startswith("/api/"), r.path
     modules = {(m, r.path): r.endpoint.__module__ for r in found for m in r.methods}
-    for key in PAGE_ROUTES:
-        assert modules[key].startswith("claude_factories.controllers.pages."), key
     for key in [*RUN_ROUTES, ("POST", "/api/tasks/{task_id}/request-changes")]:
         assert modules[key].startswith("claude_factories.controllers."), key
-        assert not modules[key].startswith("claude_factories.controllers.pages."), key
+
+
+# --- 026: the Jinja pages and their form posts are gone ---------------------------------
+
+OLD_PAGES = ["/", "/workspaces/1", "/projects/1", "/projects/1/code", "/tasks/1", "/tasks/1/review",
+             "/static/htmx.min.js"]
+OLD_FORMS = ["/workspaces", "/projects/{p}/tasks", "/projects/{p}/workspace", "/projects/{p}/factory",
+             "/tasks/{t}/approve", "/tasks/{t}/request-changes", "/tasks/{t}/comments"]
+NOT_FOUND = (404, "application/json", {"detail": "Not Found"})
+
+
+def json_404(r):
+    return r.status_code, r.headers["content-type"], r.json()
+
+
+@pytest.mark.parametrize("url", OLD_PAGES)
+def test_old_pages_json_404(client, url):  # 026 AC3
+    assert json_404(client.get(url)) == NOT_FOUND
+
+
+def test_old_form_posts_json_404(client, project, repo):  # 026 AC4
+    task = add_task(project, status="review", stage="human_review")
+    add_round(task, 1)
+    data = {"name": "new", "title": "x", "description_md": "x", "workspace_id": "1", "overwrite": "1",
+            "body_md": "x"}
+
+    def state():
+        counts = [sql(f"SELECT COUNT(*) FROM {t}")[0][0] for t in ("workspaces", "tasks", "decisions", "comments")]
+        return counts, sorted(p for p in (repo / ".claude").rglob("*"))
+
+    before = state()
+    for path in OLD_FORMS:
+        r = client.post(path.format(p=project, t=task), data=data, headers=H)
+        assert r.request.headers["content-type"] == "application/x-www-form-urlencoded"
+        assert json_404(r) == NOT_FOUND, path
+    assert state() == before

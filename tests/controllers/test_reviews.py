@@ -1,7 +1,11 @@
 import re
+import shlex
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import sql
+from controllers.test_pages_api import add_round as add_page_round
+from controllers.test_pages_api import review_task
 
 H = {"X-Requested-By": "fctl"}
 OLD = "2026-01-01T00:00:00Z"
@@ -464,3 +468,232 @@ def test_context_from_own_project(client, project):  # 033 AC16
     assert text.startswith(f"## Project context\nStack A\n\n# #{a} a\n")
     assert "Stack B" not in text
     assert context(client, b).text.startswith(f"## Project context\nStack B\n\n# #{b} b\n")
+
+
+# --- 009: approve and request changes (026 AC9: from pages/test_review_actions.py) ---
+
+NOTE = "Make the limit configurable via settings."
+WT = "/code/api/.claude/worktrees/12-rate-limit-login"
+BRANCH = "factory/12-rate-limit-login"
+PATCH = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"
+# 013 Q12: /code/api isn't a repo, so a factory task's rework spawn gets run_task's no-factory 409 (015 wording)
+NO_FACTORY = "factory isn't committed on main: Create factory on the project board, then commit it on main"
+
+
+def task_with_rounds(project_id, n=2, status="review", stage="human_review", **kw):
+    """A task with rounds 1..n; (task id, [round ids])."""
+    task = review_task(project_id, status=status, stage=stage, **kw)
+    return task, [add_page_round(task, i, "initial" if i == 1 else "agent") for i in range(1, n + 1)]
+
+
+@pytest.fixture
+def factory_task(project):
+    return task_with_rounds(project, title="Rate-limit login endpoint", branch=BRANCH, worktree=WT)
+
+
+@pytest.fixture
+def standalone(project):
+    return task_with_rounds(project, title="Fix open redirect after login", branch=None, worktree=None)
+
+
+def approve(client, task, body=None, headers=H):
+    return client.post(f"/api/tasks/{task}/approve", json={"body_md": ""} if body is None else body, headers=headers)
+
+
+def rework(client, task, body=None, headers=H):
+    return client.post(f"/api/tasks/{task}/request-changes", json={"body_md": NOTE} if body is None else body,
+                       headers=headers)
+
+
+def row(task):
+    return sql("SELECT status, stage, position, done_at, updated_at FROM tasks WHERE id = ?", (task,))[0]
+
+
+def action_snapshot(task):
+    """What "nothing written" compares: the decisions and events counts and the task row."""
+    return sql("SELECT COUNT(*) FROM decisions")[0][0], sql("SELECT COUNT(*) FROM events")[0][0], row(task)
+
+
+def decisions(task):
+    return sql("SELECT actor, decision, round_id, body_md FROM decisions WHERE task_id = ? ORDER BY id", (task,))
+
+
+def events(task):
+    return sql("SELECT actor, from_status, to_status, stage FROM events WHERE task_id = ? ORDER BY id", (task,))
+
+
+def current(ts):
+    """A YYYY-MM-DDTHH:MM:SSZ timestamp from the last few seconds."""
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", ts), ts
+    return datetime.now(UTC) - datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC) < timedelta(seconds=5)
+
+
+# --- 009: Approve API -----------------------------------------------------------
+
+
+def test_approve(client, factory_task):  # 009 AC1, moved by 026
+    task, _ = factory_task
+    r = approve(client, task)
+    assert r.status_code == 200
+    assert list(r.json()) == ["status", "commit_hint"] and r.json()["status"] == "done"
+    status, stage, position, done_at, updated_at = row(task)
+    assert (status, stage, position) == ("done", None, 1.0)
+    assert current(done_at) and current(updated_at)
+
+
+def test_approve_decision(client, project, factory_task):  # 009 AC2, moved by 026
+    task, (_, r2) = factory_task
+    approve(client, task, {"body_md": "Ship it."})
+    assert decisions(task) == [("me", "APPROVE", r2, "Ship it.")]
+    other, (_, o2) = task_with_rounds(project)
+    assert approve(client, other, {}).status_code == 200
+    assert decisions(other) == [("me", "APPROVE", o2, "")]
+
+
+def test_approve_event(client, factory_task):  # 009 AC3, moved by 026
+    task, _ = factory_task
+    approve(client, task)
+    assert events(task) == [("me", "review", "done", None)]
+
+
+def test_approve_escalated(client, project):  # 009 AC4, moved by 026
+    task, _ = task_with_rounds(project, stage="escalated")
+    r = approve(client, task)
+    assert (r.status_code, r.json()["status"], row(task)[0]) == (200, "done", "done")
+
+
+def test_commit_hint_factory(client, factory_task):  # 009 AC5, moved by 026
+    task, _ = factory_task
+    assert approve(client, task).json()["commit_hint"] == (
+        "cd /code/api/.claude/worktrees/12-rate-limit-login\n"
+        "git add -A && git commit -m 'Rate-limit login endpoint'\n"
+        "git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally\n"
+        "cd /code/api && git worktree remove .claude/worktrees/12-rate-limit-login"
+    )
+
+
+def test_commit_hint_quoted(client, project):  # 009 AC6, moved by 026
+    title = """it's $(touch x) "q\""""
+    task, _ = task_with_rounds(project, title=title, branch="factory/12-x", worktree="/code/api/.claude/worktrees/12 x")
+    lines = approve(client, task).json()["commit_hint"].split("\n")
+    assert lines[0] == "cd '/code/api/.claude/worktrees/12 x'"
+    assert lines[1] == "git add -A && git commit -m " + shlex.quote(title)
+    assert shlex.split(lines[1])[-1] == title
+    assert lines[3] == "cd /code/api && git worktree remove '.claude/worktrees/12 x'"
+
+
+def test_commit_hint_standalone(client, standalone):  # 009 AC7, moved by 026
+    task, _ = standalone
+    assert approve(client, task).json()["commit_hint"] == "git add -A && git commit -m 'Fix open redirect after login'"
+
+
+@pytest.mark.parametrize("status, stage", [("backlog", None), ("in_progress", "build"), ("done", None)])
+def test_approve_not_in_review(client, project, status, stage):  # 009 AC8, moved by 026
+    task, _ = task_with_rounds(project, status=status, stage=stage)
+    before = action_snapshot(task)
+    r = approve(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": f"#{task} is not in review"})
+    assert action_snapshot(task) == before
+
+
+def test_approve_twice(client, factory_task):  # 009 AC8, moved by 026
+    task, _ = factory_task
+    assert approve(client, task).status_code == 200
+    r = approve(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": f"#{task} is not in review"})
+    assert [d[1] for d in decisions(task)] == ["APPROVE"]
+
+
+def test_approve_missing(client, project):  # 009 AC9, moved by 026
+    assert approve(client, 999).status_code == 404
+    task, _ = task_with_rounds(project, n=0)
+    before = action_snapshot(task)
+    r = approve(client, task)
+    assert (r.status_code, r.json()) == (404, {"detail": f"#{task} has no rounds"})
+    assert action_snapshot(task) == before
+
+
+# --- 009: Request changes API ---------------------------------------------
+
+
+def test_request_changes(client, factory_task):  # 009 AC10, moved by 026
+    task, _ = factory_task
+    r = rework(client, task)
+    # 013 Q12: /code/api isn't a repo, so the rework spawn is refused after the move is recorded
+    assert (r.status_code, r.json()) == (409, {"detail": NO_FACTORY})
+    status, stage, position, done_at, updated_at = row(task)
+    assert (status, stage, position, done_at) == ("in_progress", "rework", 1.0, None)
+    assert current(updated_at)
+
+
+def test_request_changes_rows(client, factory_task):  # 009 AC11, moved by 026
+    task, (_, r2) = factory_task
+    rework(client, task)
+    assert decisions(task) == [("me", "CHANGES_REQUESTED", r2, NOTE)]
+    assert events(task) == [("me", "review", "in_progress", "rework")]
+
+
+def test_request_changes_standalone(client, factory_task, standalone):  # 009 AC12, moved by 026
+    task, (_, r2) = standalone
+    r = rework(client, task)
+    assert (r.status_code, r.json()) == (202, {"status": "in_progress", "stage": "rework", "run_id": None})
+    assert row(task)[:4] == ("in_progress", "rework", 1.0, None)
+    assert decisions(task) == [("me", "CHANGES_REQUESTED", r2, NOTE)]
+    assert events(task) == [("me", "review", "in_progress", "rework")]
+    r = rework(client, factory_task[0])  # 013: a factory task's spawn is tried, and refused here
+    assert (r.status_code, r.json()) == (409, {"detail": NO_FACTORY})
+    assert sql("SELECT COUNT(*) FROM runs") == [(0,)]
+
+
+@pytest.mark.parametrize("body, detail", [({}, None), ({"body_md": ""}, "body_md must not be blank"),
+                                          ({"body_md": "  \n"}, "body_md must not be blank")])
+def test_request_changes_blank(client, factory_task, body, detail):  # 009 AC13, moved by 026
+    task, _ = factory_task
+    before = action_snapshot(task)
+    r = rework(client, task, body)
+    assert r.status_code == 422
+    if detail:
+        assert r.json() == {"detail": detail}
+    assert action_snapshot(task) == before
+
+
+def test_request_changes_refused(client, project):  # 009 AC14, moved by 026
+    for status, stage in (("backlog", None), ("in_progress", "build"), ("done", None)):
+        task, _ = task_with_rounds(project, status=status, stage=stage)
+        before = action_snapshot(task)
+        r = rework(client, task)
+        assert (r.status_code, r.json()) == (409, {"detail": f"#{task} is not in review"})
+        assert action_snapshot(task) == before
+    assert rework(client, 999).status_code == 404
+    task, _ = task_with_rounds(project, n=0)
+    before = action_snapshot(task)
+    r = rework(client, task)
+    assert (r.status_code, r.json()) == (404, {"detail": f"#{task} has no rounds"})
+    assert action_snapshot(task) == before
+
+
+def test_request_changes_feedback(client, factory_task):  # 009 AC15, moved by 026
+    task, _ = factory_task
+    comment = {"round": 2, "author": "me", "path": "f0.py", "line": 1, "body_md": "Keep the old default."}
+    assert client.post(f"/api/tasks/{task}/comments", json=comment, headers=H).status_code == 201
+    rework(client, task)
+    text = client.get(f"/api/tasks/{task}/context?feedback=1").text
+    assert f"## Feedback on round 2\n{NOTE}\n\n## Comments\n\n### me on f0.py:1 (new)\nKeep the old default.\n" in text
+
+
+def test_request_changes_then_submit(client, standalone):  # 009 AC16, moved by 026
+    task, _ = standalone
+    rework(client, task)
+    r = client.post(f"/api/tasks/{task}/rounds", json={"base_sha": "abc1234", "patch": PATCH}, headers=H)
+    assert r.status_code == 201 and r.json()["round"] == 3
+    assert sql("SELECT trigger FROM rounds WHERE task_id = ? AND n = 3", (task,)) == [("human",)]
+    assert row(task)[:2] == ("review", "human_review")
+
+
+@pytest.mark.parametrize("path", ["/api/tasks/{}/approve", "/api/tasks/{}/request-changes"])
+def test_actions_need_fctl_header(client, factory_task, path):  # 009 AC17, moved by 026
+    task, _ = factory_task
+    before = action_snapshot(task)
+    r = client.post(path.format(task), json={"body_md": NOTE}, headers={})
+    assert r.status_code == 403
+    assert action_snapshot(task) == before

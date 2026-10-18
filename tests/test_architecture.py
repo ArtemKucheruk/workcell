@@ -77,6 +77,13 @@ def sql_outside(tree: ast.AST, path: Path) -> list[str]:
     return bad
 
 
+def html_ui(tree: ast.AST, path: Path) -> list[str]:
+    """026: the server-rendered UI's imports, in any layer."""
+    return [f"{path.relative_to(PKG)}:{line} imports {name}" for line, name in imported(tree, path)
+            if any(f"{name}.".startswith(f"{pkg}.{mod}.") for pkg in ("fastapi", "starlette")
+                   for mod in ("templating", "staticfiles"))]
+
+
 def section(text: str, heading: str, end: str) -> str:
     start = text.index(heading)
     return text[start:text.index(end, start + len(heading))]
@@ -85,14 +92,15 @@ def section(text: str, heading: str, end: str) -> str:
 # --- The docs ----------------------------------------------------------------------
 
 
-def test_mvp_code_layout_section():  # AC1
+def test_mvp_code_layout_section():  # AC1, 026 AC7
     mvp = (REPO / "docs" / "MVP.md").read_text()
     assert mvp.index("\n### 4.6 ") < mvp.index("\n### 4.7 Code layout\n") < mvp.index("\n## 9.")
     body = section(mvp, "\n### 4.7 Code layout\n", "\n## 9.")
     tree = body.split("```")[1]
     entries = {line.lstrip("│├└─ ").split()[0] for line in tree.strip().splitlines()[1:]}
-    assert entries >= {"server/", "controllers/", "pages/", "handlers/", "dto/", "repositories/", "adapters/",
+    assert entries >= {"server/", "controllers/", "handlers/", "dto/", "repositories/", "adapters/",
                        "git.py", "claude.py", "domain/", "lib/", "db/", "config.py", "cli/"}
+    assert "pages/" not in entries  # 026: the Jinja page routes are gone
     [domain] = [line for line in tree.splitlines() if line.startswith("├── domain/")]  # 035 AC4
     assert "Invalid" in domain.split()
     assert "`Invalid` → 422" in body
@@ -133,9 +141,17 @@ def test_checked_files():  # AC16
     for rel in ("handlers/runs.py", "handlers/pages.py", "controllers/runs.py", "lib/run_log.py",
                 "lib/diff.py"):  # 036 AC2
         assert PKG / rel in files
-    assert [f for f in files if f.parent == PKG / "controllers" / "pages" and f.name != "__init__.py"]
     assert "app" not in ALLOWED["server"]
     assert all(p.is_relative_to(PKG / "cli") for p in set(PKG.rglob("*.py")) - set(files))
+
+
+def test_jinja_pages_gone():  # 026 AC1
+    for rel in ("templates", "static", "controllers/pages"):
+        assert not (PKG / rel).exists(), rel
+    found = []
+    for path in PKG.rglob("*.py"):
+        found += html_ui(ast.parse(path.read_text()), path)
+    assert found == []
 
 
 def test_app_py_gone():  # 036 AC1
@@ -188,3 +204,14 @@ def test_fastapi_check(where, source, flagged):  # AC18
 ])
 def test_sql_check(where, source, flagged):  # AC19
     assert check(sql_outside, where, source) == flagged
+
+
+@pytest.mark.parametrize("source, flagged", [
+    ("from fastapi.templating import Jinja2Templates\n", True),
+    ("from starlette import staticfiles\n", True),
+    ("import fastapi.staticfiles\n", True),
+    ("from fastapi import APIRouter\n", False),
+    ("import jinja2\n", False),
+])
+def test_html_ui_check(source, flagged):  # 026 AC1
+    assert check(html_ui, "server", source) == flagged
