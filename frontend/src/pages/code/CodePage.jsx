@@ -1,0 +1,132 @@
+import hljs from 'highlight.js/lib/common'
+import { useCallback, useEffect, useMemo } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router'
+import { codePage } from '../../api/pages.js'
+import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { Markdown } from '../../components/Markdown.jsx'
+import { NotFound } from '../../components/NotFound.jsx'
+import { usePoll } from '../../hooks/usePoll.js'
+
+const muted = 'text-gray-600 dark:text-gray-400'
+// Q6: both <pre> share font, size, and line height, so the gutter's numbers line up with the code's lines
+const mono = 'm-0 p-2 font-mono text-[0.85rem]/[1.4]'
+
+/**
+ * Q4: the nested tree as sent, in `Object.entries` order; directory keys end in "/". A directory is open
+ * only if the URL's `path` is under it, and the URL's file is the current page.
+ */
+function Tree({ node, id, path, prefix = '' }) {
+  return (
+    <ul className={prefix ? 'pl-4' : ''}>
+      {Object.entries(node).map(([name, child]) => (
+        <li key={name}>
+          {name.endsWith('/') ? (
+            <details open={path.startsWith(prefix + name)}>
+              <summary className="cursor-pointer">{name}</summary>
+              <Tree node={child} id={id} path={path} prefix={prefix + name} />
+            </details>
+          ) : (
+            <Link
+              to={`/projects/${id}/code?${new URLSearchParams({ path: child.path })}`}
+              aria-current={child.path === path ? 'page' : undefined}
+              className="aria-[current=page]:font-semibold"
+            >
+              {name}
+            </Link>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Q5: the whole file at once, so multi-line strings and comments color right, and only for an extension
+ * highlight.js knows (no auto-detection). Its HTML escapes the text. ponytail: a 1 MB file is highlighted on
+ * the main thread in one go; add a size cap or a worker if that's slow.
+ */
+function highlight(text, lang) {
+  return lang && hljs.getLanguage(lang) ? hljs.highlight(text, { language: lang, ignoreIllegals: true }).value : null
+}
+
+/** Q6: code.html's markup; the box scrolls sideways and the sticky gutter stays put. */
+function Code({ view, lang }) {
+  const html = useMemo(() => highlight(view.text, lang), [view.text, lang])
+  return (
+    <div className="flex overflow-x-auto rounded-md border border-gray-300 dark:border-gray-700">
+      <pre
+        aria-hidden="true"
+        className={`${mono} sticky left-0 border-r border-gray-300 bg-[color:Canvas] text-right select-none dark:border-gray-700 ${muted}`}
+      >
+        {Array.from({ length: view.lines }, (_, i) => i + 1).join('\n')}
+      </pre>
+      <pre className={`${mono} grow`}>
+        {html == null ? <code>{view.text}</code> : <code dangerouslySetInnerHTML={{ __html: html }} />}
+      </pre>
+    </div>
+  )
+}
+
+/** Q3: decided from the view-model alone, so a stale one never renders as the wrong kind. */
+function Viewer({ page }) {
+  const { view, lang, readme_html } = page
+  if (view?.note != null) return <p className={muted}>{view.note}</p>
+  if (readme_html != null) return <Markdown html={readme_html} />
+  return view ? <Code view={view} lang={lang} /> : null
+}
+
+/** docs/ui.md §8 item 6: the main checkout's tracked files, the README landing, and one file at a time. */
+export function CodePage() {
+  const { id } = useParams()
+  const [params] = useSearchParams()
+  const path = params.get('path') ?? '' // Q2: an empty path is the landing
+  // Q1: no polling; fetches on first load and on each path change
+  const load = useCallback(() => codePage(id, path), [id, path])
+  const { data: page, error } = usePoll(load)
+  const name = page?.project.name
+  useEffect(() => {
+    if (name) document.title = `${path ? `${path} · ` : ''}${name} · Code · Claude Factories`
+  }, [name, path])
+
+  // Q8: a 404 (unknown project, or a path the backend refuses) is not-found; other errors replace the page
+  // only until the first good load
+  if (error?.status === 404) return <NotFound detail={error.message} />
+  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  const { project, branch, tree, shown } = page
+
+  return (
+    <>
+      <header className="mb-6">
+        <h1 className="text-2xl font-semibold wrap-anywhere">
+          <Link to={`/projects/${project.id}`}>{project.name}</Link> · Code
+        </h1>
+        {branch && (
+          <p className="mt-1">
+            Branch <code className="wrap-anywhere">{branch}</code>
+          </p>
+        )}
+      </header>
+      {error && <ErrorMessage error={error} />}
+      {page.error ? (
+        <ErrorMessage error={{ message: `Can't list files in ${project.path}: ${page.error}` }} />
+      ) : Object.keys(tree).length === 0 ? (
+        <p className={muted}>No tracked files.</p>
+      ) : (
+        // Q9: the review page's Files grid; minmax(0, 1fr) keeps a long line from widening the page
+        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">
+          <nav aria-label="Files" className="text-sm wrap-anywhere">
+            <Tree node={tree} id={project.id} path={path} />
+          </nav>
+          <div className="min-w-0">
+            {shown && (
+              <h2 className="mt-0 mb-1 text-base">
+                <code className="wrap-anywhere">{shown}</code>
+              </h2>
+            )}
+            <Viewer page={page} />
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
