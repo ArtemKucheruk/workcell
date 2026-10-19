@@ -22,6 +22,7 @@ from ..repositories.projects import ProjectsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TasksRepo
 from .factory import factory_hint, factory_state
+from .transcripts import collect
 
 PROMPT = "/factory {task_id}"  # MVP §10 OQ1: the one place the prompt lives
 ALLOWED_TOOLS = (  # §4.4; the test command's entry is added per project (Q7)
@@ -141,6 +142,7 @@ def finish(tx, run_id: int, proc, log_path: Path):
     session = event.get("session_id") if event and isinstance(event.get("session_id"), str) else None
     with tx() as conn:
         RunsRepo(conn).finish(run_id, status, error, session)
+    collect(tx, run_id)  # 030 Q7: again after Stop's copy, now that the session has ended
 
 
 def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> RunNextOut:
@@ -169,6 +171,7 @@ def stop(tx, claude: Claude, run_id: int) -> StopOut:
     # signalling; the run then finishes unstopped. Store the pid before the insert commits if that bites.
     if pid and exit_code is None:  # an exit code means the leader was reaped: its pgid may be reused
         claude.stop(pid)
+    collect(tx, run_id)  # 030 Q7: at once, since a shutdown's exit thread may die before it copies
     return StopOut(id=run_id, status="stopped")
 
 
@@ -190,7 +193,9 @@ def log(tx, run_id: int, after: int) -> LogOut:
 def fail_leftovers(tx):
     """013 Q5: at startup, a crash left these running; no signal, since the pid may be reused."""
     with tx() as conn:
-        RunsRepo(conn).fail_running("app restarted")
+        failed = RunsRepo(conn).fail_running("app restarted")
+    for run_id in failed:  # 030: the copy their exit thread never made
+        collect(tx, run_id)
 
 
 def stop_all(tx, claude: Claude):

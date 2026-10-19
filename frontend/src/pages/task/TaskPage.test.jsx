@@ -18,7 +18,7 @@ const TASK = {
 /** 020's TaskPage view-model; `task` overrides fields of the fixture task. */
 const taskPage = (task = {}, extra = {}) => ({
   task: { ...TASK, ...task }, can_run: true, hint: null, run: null, takeover: null, rounds: [], approver: null,
-  history: [], ...extra,
+  history: [], transcripts: [], ...extra,
 })
 /** RunDetail. */
 const run = (id, status, extra = {}) => ({
@@ -537,4 +537,71 @@ test('AC31: a failed first load shows only the alert; a failed later poll keeps 
   await advance(3000)
   expect(screen.queryByRole('alert')).toBeNull()
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+})
+
+// --- 030: Agents ------------------------------------------------------------------------
+
+/** 030's TranscriptOut. */
+const transcript = (id, round, extra = {}) => ({
+  id, run_id: 41, round, agent_type: 'builder', name: `builder-${id}`, model: 'claude-opus-4-1', turns: 38,
+  input_tokens: 1234, cache_read_tokens: 56789, output_tokens: 2345,
+  started_at: '2026-10-17T10:00:00Z', ended_at: '2026-10-17T10:04:12Z', ...extra,
+})
+const agentRows = (list) => [...list.querySelectorAll('li')]
+
+test('030 AC23: each round lists its agents: label linking to the transcript, model, turns, tokens, duration', async () => {
+  const transcripts = [
+    transcript(5, 1),
+    transcript(6, 2, { name: null, agent_type: 'review-code', started_at: '2026-10-17T09:00:00Z', ended_at: '2026-10-17T10:02:30Z' }),
+    transcript(7, 2, { name: null, agent_type: null, model: null, ended_at: '2026-10-17T10:00:12Z' }),
+    transcript(8, 1, { ended_at: null }),
+  ]
+  await open(taskPage({}, { rounds: [round(1), round(2)], transcripts }))
+  const [one, two] = rows()
+  const first = within(one).getByRole('list', { name: 'Round 1 agents' })
+  expect(agentRows(first).map((li) => li.textContent)).toEqual([
+    'builder-5 · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 4m 12s',
+    'builder-8 · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · —',
+  ])
+  expect(within(first).getByRole('link', { name: 'builder-5' }).getAttribute('href')).toBe('/transcripts/5')
+  const second = within(two).getByRole('list', { name: 'Round 2 agents' })
+  expect(agentRows(second).map((li) => li.textContent)).toEqual([
+    'review-code · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 1h 2m',
+    'agent · unknown model · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 12s',
+  ])
+  expect(within(second).getByRole('link', { name: 'agent' }).getAttribute('href')).toBe('/transcripts/7')
+  expect(screen.queryByRole('region', { name: 'Other agents' })).toBeNull()
+})
+
+test('030 AC24: null-round transcripts list under Other agents after Rounds with their run; none, no lists', async () => {
+  const transcripts = [
+    transcript(5, null, { name: null, agent_type: 'orchestrator', run_id: 40 }),
+    transcript(6, 1),
+    transcript(7, null, { name: null, agent_type: 'spec-writer', run_id: 41 }),
+  ]
+  const view = await open(taskPage({}, { rounds: [round(1)], transcripts }))
+  const other = section('Other agents')
+  expect(within(other).getByRole('heading', { level: 2 }).textContent).toBe('Other agents')
+  expect(agentRows(other).map((li) => li.textContent)).toEqual([
+    'orchestrator · run #40 · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 4m 12s',
+    'spec-writer · run #41 · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 4m 12s',
+  ])
+  expect(within(other).getByRole('link', { name: 'orchestrator' }).getAttribute('href')).toBe('/transcripts/5')
+  expect(section('Rounds').compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(agentRows(within(rows()[0]).getByRole('list', { name: 'Round 1 agents' }))).toHaveLength(1)
+  view.unmount()
+
+  const none = await open(taskPage({}, { rounds: [round(1)], transcripts: [] }))
+  expect(screen.queryByRole('region', { name: 'Other agents' })).toBeNull()
+  expect(screen.queryByText('Other agents')).toBeNull()
+  expect(screen.queryAllByRole('list', { name: /agents$/ })).toEqual([])
+  expect(screen.queryByText('Agents')).toBeNull()
+  none.unmount()
+})
+
+test('030 Q4: a transcript whose round has no Round row yet shows under Other agents with its round', async () => {
+  await open(taskPage({}, { rounds: [], transcripts: [transcript(5, 1)] }))
+  expect(agentRows(section('Other agents')).map((li) => li.textContent)).toEqual([
+    'builder-5 · run #41 · round 1 · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 4m 12s',
+  ])
 })

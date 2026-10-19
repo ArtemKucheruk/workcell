@@ -83,3 +83,17 @@ CREATE TABLE IF NOT EXISTS events (                     -- status/stage history
   actor TEXT NOT NULL,                    -- 'me', 'app', 'orchestrator'
   from_status TEXT, to_status TEXT, stage TEXT, note TEXT,
   created_at TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS transcripts (  -- 030: a run's copied Claude Code transcripts
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES runs(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  agent_type TEXT,                        -- 'orchestrator' for the run's own session, else the agent type
+  name TEXT,                              -- a teammate's name, e.g. builder-12
+  round INTEGER,                          -- n from "Job|Task <id>, round <n>." in its first prompt
+  path TEXT NOT NULL,                     -- the copy, relative to FCTL_HOME/transcripts/
+  model TEXT,
+  turns INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+  started_at TEXT, ended_at TEXT,
+  UNIQUE (run_id, path));                 -- a re-copy updates the row

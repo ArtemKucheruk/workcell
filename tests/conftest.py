@@ -12,13 +12,14 @@ from claude_factories.server.app import create_app
 
 @pytest.fixture(autouse=True)
 def isolated(tmp_path, monkeypatch):
-    """Every test gets its own FCTL_HOME and HOME (so nothing touches the real ~/.claude), a
-    do-nothing fake `claude` first on PATH, and git without the user's config (Q17). 014: an empty
-    claude_login() cache, since tests swap fakes."""
+    """Every test gets its own FCTL_HOME, HOME, and CLAUDE_CONFIG_DIR (so nothing touches the real ~/.claude
+    or the developer's config dir, 030 AC1), a do-nothing fake `claude` first on PATH, and git without the user's
+    config (Q17). 014: an empty claude_login() cache, since tests swap fakes."""
     LOGIN.clear()
     monkeypatch.setenv("FCTL_HOME", str(tmp_path / "fctl-home"))
     (tmp_path / "home").mkdir()
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
     monkeypatch.delenv("FCTL_URL", raising=False)
     monkeypatch.delenv("FCTL_IN_DOCKER", raising=False)  # 028 AC6: tests run inside the image too
     bin_dir = tmp_path / "bin"

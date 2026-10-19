@@ -35,7 +35,7 @@ def test_schema_has_every_table_and_index():  # AC10
     with closing(db.connect()) as conn:
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files",
-              "verdicts", "comments", "decisions", "events"}
+              "verdicts", "comments", "decisions", "events", "transcripts"}  # 030 AC15
     assert {("table", t) for t in tables} <= rows
     assert ("index", "one_active_run") in rows
 
@@ -112,3 +112,35 @@ def test_startup_adds_context_column():  # 033 AC2
     start_app()
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT id, context_md FROM projects").fetchall() == [(1, "")]
+
+
+TRANSCRIPT_COLUMNS = [  # 030 AC15: (name, type, notnull)
+    ("id", "INTEGER", 0), ("run_id", "INTEGER", 1), ("task_id", "INTEGER", 1), ("agent_type", "TEXT", 0),
+    ("name", "TEXT", 0), ("round", "INTEGER", 0), ("path", "TEXT", 1), ("model", "TEXT", 0),
+    ("turns", "INTEGER", 1), ("input_tokens", "INTEGER", 1), ("cache_read_tokens", "INTEGER", 1),
+    ("output_tokens", "INTEGER", 1), ("started_at", "TEXT", 0), ("ended_at", "TEXT", 0),
+]
+
+
+def transcript_columns():
+    with closing(db.connect()) as conn:
+        return [(name, kind, notnull) for _, name, kind, notnull, _, _ in conn.execute("PRAGMA table_info(transcripts)")]
+
+
+def test_startup_creates_transcripts_table():  # 030 AC15
+    start_app()
+    assert transcript_columns() == TRANSCRIPT_COLUMNS
+    with closing(db.connect()) as conn:
+        [unique] = [i for i in conn.execute("PRAGMA index_list(transcripts)") if i[2]]
+        assert [c[2] for c in conn.execute(f"PRAGMA index_info({unique[1]})")] == ["run_id", "path"]
+
+
+def test_old_db_gets_transcripts_table():  # 030 AC15: a factory.db made before this job
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    start_app()
+    assert transcript_columns() == TRANSCRIPT_COLUMNS
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]

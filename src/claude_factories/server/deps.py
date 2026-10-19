@@ -16,6 +16,7 @@ from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TasksRepo
+from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
 
 
@@ -57,6 +58,10 @@ def get_runs(conn: Conn) -> RunsRepo:
     return RunsRepo(conn)
 
 
+def get_transcripts(conn: Conn) -> TranscriptsRepo:
+    return TranscriptsRepo(conn)
+
+
 def get_git() -> Git:
     return SubprocessGit()
 
@@ -71,5 +76,6 @@ Tasks = Annotated[TasksRepo, Depends(get_tasks)]
 Rounds = Annotated[RoundsRepo, Depends(get_rounds)]
 Reviews = Annotated[ReviewsRepo, Depends(get_reviews)]
 Runs = Annotated[RunsRepo, Depends(get_runs)]
+Transcripts = Annotated[TranscriptsRepo, Depends(get_transcripts)]
 GitAdapter = Annotated[Git, Depends(get_git)]
 ClaudeAdapter = Annotated[Claude, Depends(get_claude)]

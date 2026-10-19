@@ -309,6 +309,12 @@ claude -p "/factory 12" \
   `failed: app restarted`.
 - The task page shows a takeover command:
   `cd <worktree> && claude --resume <session-id>`.
+- When a run ends, on exit, on **Stop**, and in the startup cleanup (`failed: app restarted`),
+  the app copies the run's Claude Code transcripts into `FCTL_HOME/transcripts/<run-id>/` and
+  indexes each in `transcripts`. Claude Code prunes old transcripts and the worktree gets
+  removed, so the copy is the record. They come from the worktree's folder under
+  `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude`): the run's own session, its teammates,
+  and their subagents. A failed copy leaves that file out and never fails the run.
 
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.
@@ -323,13 +329,17 @@ Single user and no auth still need these, because the API can start processes th
   passes the browser's `X-Requested-By` through without adding it. This follows the CSRF
   rule above: the header has to come from the page's own code.
 - The frontend server serves files only inside `dist/`, falling back to `index.html`.
-- Markdown (READMEs, agent output, project context) is rendered with raw HTML off. The code
-  viewer escapes everything.
+- Markdown (READMEs, agent output, project context, transcripts) is rendered with raw HTML
+  off. The code viewer escapes everything.
 - The SPA inserts HTML only from the backend's `*_html` fields and highlight.js output.
   Everything else renders as text, because React escapes it.
 - The code page resolves paths inside the project root only: no `..`, and no symlinks that
   point outside it.
 - The server rejects patches over 5 MB and project context over 16 KB with `413`.
+- Transcript text is shown escaped. Text blocks go through `lib/markdown.render` with raw HTML
+  off, and the SPA inserts only their `*_html`. Tool inputs, tool results, and thinking are
+  plain text. `/api/transcripts/{id}/raw` serves only files that resolve inside
+  `FCTL_HOME/transcripts/`, and the copy skips symlinks in Claude Code's folder.
 
 ### 4.6 Containers
 `docker compose up` runs the app (§3.0).
@@ -366,9 +376,9 @@ src/claude_factories/
 │   ├── git.py      git
 │   └── claude.py   the claude CLI
 ├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge / Failed
-├── lib/            pure parsers and renderers: patch split, diff rows, run log, markdown, slug
+├── lib/            pure parsers and renderers: patch split, diff rows, run log, transcripts, markdown, slug
 ├── db/             connection, now(), and schema.sql, applied at startup
-├── config.py       env and limits: data_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT
+├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT
 └── cli/            fctl, stdlib only (§4.2)
 ```
 
