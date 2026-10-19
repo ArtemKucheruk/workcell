@@ -1,7 +1,16 @@
 """git, run as a subprocess with an argument list (docs/MVP.md §4.1)."""
 
+import os
 import subprocess
+import tempfile
 from typing import Protocol
+
+from ..domain.errors import Failed
+
+# cli/git.py capture()'s pinned diff flags (§7.4, 038 Q10): adapters can't import cli/
+DIFF_FLAGS = ("-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
+              "--dst-prefix=b/")
+SEED_IDENTITY = ("-c", "user.name=fctl seed", "-c", "user.email=seed@example.com", "-c", "commit.gpgsign=false")
 
 
 def git_stdout(root: str, *args: str) -> tuple[bytes | None, str | None]:
@@ -17,12 +26,27 @@ def git_stdout(root: str, *args: str) -> tuple[bytes | None, str | None]:
     return r.stdout, None
 
 
+def git_ok(*args: str, env: dict | None = None) -> bytes:
+    """038: git's stdout. Failed with the first line of its stderr, or why git didn't start."""
+    try:
+        r = subprocess.run(["git", *args], capture_output=True, env=env, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:  # no git on PATH, a hung repo
+        raise Failed(f"can't run git: {e}")
+    if r.returncode:
+        first = next(iter(r.stderr.decode(errors="replace").strip().splitlines()), f"exit code {r.returncode}")
+        raise Failed(f"git failed: {first}")
+    return r.stdout
+
+
 class Git(Protocol):
     def committed(self, path: str, branch: str, file: str) -> bool: ...
     def exclude_path(self, repo: str) -> str: ...
     def add_worktree(self, repo: str, branch: str, path: str, base: str) -> str | None: ...
     def ls_files(self, root: str) -> tuple[bytes | None, str | None]: ...
     def current_branch(self, root: str) -> tuple[bytes | None, str | None]: ...
+    def init(self, path: str) -> None: ...
+    def commit_all(self, path: str, message: str) -> None: ...
+    def capture(self, path: str) -> tuple[str, str]: ...
 
 
 class SubprocessGit:
@@ -54,3 +78,24 @@ class SubprocessGit:
 
     def current_branch(self, root: str) -> tuple[bytes | None, str | None]:
         return git_stdout(root, "branch", "--show-current")
+
+    def init(self, path: str) -> None:
+        """038: a new repo at `path` (parents created) on `main`."""
+        git_ok("init", "-q", "-b", "main", path)
+
+    def commit_all(self, path: str, message: str) -> None:
+        """038 Q10: everything in the tree, committed with a fixed identity, unsigned, and no hooks."""
+        git_ok("-C", path, "add", "-A")
+        git_ok("-C", path, *SEED_IDENTITY, "commit", "-q", "--no-verify", "-m", message)
+
+    def capture(self, path: str) -> tuple[str, str]:
+        """§7.4 step 2, as cli/git.py capture() runs it in `path`: (HEAD, the patch of the tracked and
+        untracked changes against it), through a temp index so the real one is untouched."""
+        base = git_ok("-C", path, "rev-parse", "--verify", "-q", "HEAD^{commit}").decode().strip()
+        with tempfile.TemporaryDirectory() as tmp:
+            env = os.environ | {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+            pinned = ("-C", path, "-c", "core.quotePath=false")
+            git_ok(*pinned, "read-tree", base, env=env)
+            git_ok(*pinned, "add", "-A", env=env)
+            patch = git_ok(*pinned, "diff", "--cached", *DIFF_FLAGS, base, env=env)
+        return base, patch.decode(errors="replace")

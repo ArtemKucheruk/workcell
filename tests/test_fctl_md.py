@@ -124,3 +124,10 @@ def test_claude_code_links_the_page():  # AC15
     commands = doc[start:doc.index("### 7.3", start)]
     assert "/docs/fctl" in commands
     assert "](../src/claude_factories/fctl.md)" in commands
+
+
+def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example
+    assert "seed" in COMMANDS
+    assert "fctl seed" in section("seed")
+    [row] = [line for line in SECTIONS["fctl-url-and-fctl-home"].splitlines() if line.startswith("| `FCTL_HOME` |")]
+    assert "`fctl seed`" in row.split("|")[3]

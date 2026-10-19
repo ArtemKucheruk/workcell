@@ -18,11 +18,11 @@ class ProjectsRepo:
         return self.conn.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone() is not None
 
     def add(self, workspace_id: int, name: str, path: str, remote_url: str | None, default_branch: str,
-            test_cmd: str | None) -> int:
+            test_cmd: str | None, now: str | None = None) -> int:
         return self.conn.execute(
             "INSERT INTO projects (workspace_id, name, path, remote_url, default_branch, test_cmd,"
             " created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (workspace_id, name, path, remote_url, default_branch, test_cmd, db.now()),
+            (workspace_id, name, path, remote_url, default_branch, test_cmd, now or db.now()),
         ).lastrowid
 
     def update(self, project_id: int, workspace_id: int, name: str, remote_url: str | None,

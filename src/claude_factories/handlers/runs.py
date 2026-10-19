@@ -42,16 +42,21 @@ def refuse_if_running(runs: RunsRepo):
         raise Conflict(f"run #{run[0]} active")
 
 
-def worktree(tx, git: Git, task) -> str:
-    """Q5: the exclude line, then Q4: the stored worktree, or a new one from the default branch, stored
-    right away so an auth refusal leaves it for the next run."""
-    path = task["path"]
-    exclude = Path(git.exclude_path(path))
+def exclude_worktrees(git: Git, repo: str) -> None:
+    """Q5, MVP §10 assumption 4: `.claude/worktrees/` in the repo's info/exclude, added once."""
+    exclude = Path(git.exclude_path(repo))
     exclude.parent.mkdir(parents=True, exist_ok=True)
     old = exclude.read_bytes() if exclude.exists() else b""
     if EXCLUDE_LINE not in old.splitlines():
         with exclude.open("ab") as f:
             f.write((b"\n" if old and not old.endswith(b"\n") else b"") + EXCLUDE_LINE + b"\n")
+
+
+def worktree(tx, git: Git, task) -> str:
+    """Q5: the exclude line, then Q4: the stored worktree, or a new one from the default branch, stored
+    right away so an auth refusal leaves it for the next run."""
+    path = task["path"]
+    exclude_worktrees(git, path)
     if task["worktree_path"]:  # reused as stored, even if the title changed since
         if not os.path.isdir(task["worktree_path"]):
             raise Conflict(f"worktree {task['worktree_path']} is missing")

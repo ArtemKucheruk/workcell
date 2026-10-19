@@ -1,7 +1,7 @@
 `fctl` is the Claude Factories command line. It starts the app's backend, installs the global
 skills, and is how you, the `/factory-connect` and `/factory-submit` skills, and the factory's
-agents read and write the app. Every command but `fctl serve` and `fctl setup` is a small HTTP
-client of the backend at `FCTL_URL`. `fctl --help` lists the commands, and
+agents read and write the app. Every command but `fctl serve`, `fctl setup`, and `fctl seed` is a
+small HTTP client of the backend at `FCTL_URL`. `fctl --help` lists the commands, and
 `fctl <command> --help` prints one command's arguments.
 
 ## Install
@@ -39,7 +39,7 @@ The app runs in Docker (see [Using fctl with Docker](#using-fctl-with-docker)). 
 | Variable | Default | Read by | What it is |
 |---|---|---|---|
 | `FCTL_URL` | `http://127.0.0.1:4545` | every command that calls the app | the backend's address; a trailing `/` is dropped |
-| `FCTL_HOME` | `~/.claude-factories` | `fctl serve` | the data dir: `factory.db`, and `runs/<id>.jsonl` for each run's log |
+| `FCTL_HOME` | `~/.claude-factories` | `fctl serve`, `fctl seed` | the data dir: `factory.db`, and `runs/<id>.jsonl` for each run's log |
 
 Set `FCTL_URL` when the backend isn't on port 4545, for example after `fctl serve --port 5000`:
 
@@ -51,8 +51,8 @@ The backend refuses any `Host` but `127.0.0.1` or `localhost`, so `FCTL_URL` nam
 Runs get their own `FCTL_URL`: the app starts every agent with `FCTL_URL=http://127.0.0.1:<port>`,
 the port the backend listens on.
 
-`FCTL_HOME` matters only to `fctl serve`. `fctl serve` creates the folder and `factory.db` on its
-first start. Every other command works through the API and never opens the data dir.
+`FCTL_HOME` matters only to `fctl serve` and `fctl seed`. Either creates the folder and `factory.db`
+when they're missing. Every other command works through the API and never opens the data dir.
 
 The links `fctl` prints (`fctl connect`, `fctl task add`, `fctl run`, `fctl submit`) start with
 `FCTL_URL`, the backend, which answers only `/api/` calls. The pages are on the frontend server:
@@ -204,6 +204,83 @@ me, once per machine and after updating `fctl`.
 
 ```sh
 fctl setup
+```
+
+## fctl seed
+
+Fills an empty `FCTL_HOME` with demo data, so every page and state of the app has something to show
+without running an agent. No HTTP: it writes `factory.db` and the demo repos itself, so the backend
+doesn't have to be up.
+
+**Synopsis**
+
+```
+fctl seed
+```
+
+**Arguments and flags**
+
+none
+
+**Stdin**
+
+none
+
+**Output**
+
+One line:
+
+```
+Seeded /Users/me/.claude-factories-demo: 2 workspaces, 3 projects, 14 tasks, 7 runs
+```
+
+What it writes, all in one transaction:
+
+- Two workspaces, `personal` and `work`, with three projects. Each is a small git repo on `main`
+  under `FCTL_HOME/demo/`, one per factory state: `api-server` is ready, `web-shop` has its
+  factory written but not committed, and `notes-cli` has none.
+- Tasks in every status and stage: specs, rounds whose diffs are real `git diff` output, verdicts,
+  inline and conversation comments, decisions, and ended runs (succeeded, failed, and stopped)
+  with their logs in `FCTL_HOME/runs/`. Each factory task has its worktree under
+  `api-server/.claude/worktrees/`.
+- Timestamps spread over the last 30 days.
+
+The demo is ordinary data. **Run** and **Retry** on a demo task start real runs against the demo
+repos. Delete the whole `FCTL_HOME` to remove it.
+
+Next, start the app on the same `FCTL_HOME`, with your own `fctl serve` stopped, since both use port
+4545. With Docker, seed a separate compose project instead (see the example).
+
+**Exit codes and errors**
+
+- `fctl: FCTL_HOME has data; seed an empty one`, exit `1`: the database already has a workspace.
+  Nothing is written.
+- `fctl: <FCTL_HOME>/demo exists; seed an empty FCTL_HOME`, exit `1`: probably left by a seed that
+  failed. Delete that folder and run `fctl seed` again.
+- `fctl: can't run git: <reason>`, `fctl: git failed: <git's error>`, and
+  `fctl: git worktree add failed: <git's error>`, exit `1`. No rows are written, but `demo/` may be
+  left behind.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me, to try the app or to work on its pages.
+
+**Example**
+
+```sh
+FCTL_HOME=~/.claude-factories-demo fctl seed
+FCTL_HOME=~/.claude-factories-demo fctl serve
+```
+
+With Docker, in a compose project of its own, so its volumes never touch your real data:
+
+```sh
+docker compose down                          # your own app; its data stays in its volumes
+docker compose -p claude-factories-demo up --build -d
+docker compose -p claude-factories-demo exec backend fctl seed
+docker compose -p claude-factories-demo down -v   # later: deletes the demo
 ```
 
 ## fctl connect

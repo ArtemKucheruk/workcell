@@ -36,6 +36,24 @@ def serve(args):
     uvicorn.run(create_app(), host=args.host, port=args.port)
 
 
+def seed(args):
+    """038: demo data straight into an empty FCTL_HOME. No HTTP, so it works with nothing serving."""
+    from ..adapters.git import SubprocessGit  # like serve's: the app's modules stay out of every other command
+    from ..config import data_dir
+    from ..db import init
+    from ..domain.errors import DomainError
+    from ..handlers.seed import seed as seed_demo
+    from ..server.deps import transaction
+
+    init()
+    try:
+        made = seed_demo(transaction, SubprocessGit())
+    except DomainError as e:  # a refusal, or a git failure: no rows written
+        fail(e.detail)
+    print(f"Seeded {data_dir()}: {made['workspaces']} workspaces, {made['projects']} projects,"
+          f" {made['tasks']} tasks, {made['runs']} runs")
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Every command and its flags. 029 Q11: tests/test_fctl_md.py walks it against fctl.md."""
     parser = argparse.ArgumentParser(prog="fctl", description="Claude Factories CLI.")
@@ -46,6 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=serve)
     p = commands.add_parser("setup", help="write the /factory-connect and /factory-submit skills to ~/.claude")
     p.set_defaults(func=setup)
+    p = commands.add_parser("seed", help="fill an empty FCTL_HOME with demo workspaces, projects, and tasks")
+    p.set_defaults(func=seed)
     p = commands.add_parser("connect", help="register the current git repo as a project")
     p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
     p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")

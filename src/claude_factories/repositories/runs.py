@@ -52,12 +52,13 @@ class RunsRepo:
         self.conn.execute("UPDATE runs SET status = 'failed', error = ?, ended_at = ? WHERE id = ?",
                           (error, db.now(), run_id))
 
-    def finish(self, run_id: int, status: str, error: str | None, session_id: str | None) -> None:
+    def finish(self, run_id: int, status: str, error: str | None, session_id: str | None,
+               now: str | None = None) -> None:
         """012 Q10: the outcome, unless Stop already ended the row (013 Q1)."""
         self.conn.execute(
             "UPDATE runs SET status = ?, error = ?, session_id = COALESCE(?, session_id), ended_at = ?"
             " WHERE id = ? AND status = 'running'",
-            (status, error, session_id, db.now(), run_id),
+            (status, error, session_id, now or db.now(), run_id),
         )
 
     def stop(self, run_id: int) -> sqlite3.Row | None:

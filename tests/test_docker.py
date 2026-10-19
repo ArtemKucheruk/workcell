@@ -262,3 +262,13 @@ def test_readme_docker_runs():  # 028 AC16; Q11: this claude has `auth login`, n
     assert "docker compose exec -w" in readme and "backend-home" in readme
     assert "Runs don't work inside Docker yet" not in readme
     assert "| `FCTL_IN_DOCKER` |" in readme
+
+
+def test_readme_demo_data():  # 038 AC38, Q8
+    readme = read("README.md")
+    start = readme.index("\n## Demo data\n")
+    demo = readme[start:readme.index("\n## ", start + 1)]
+    for text in ("FCTL_HOME=~/.claude-factories-demo fctl seed", "FCTL_HOME=~/.claude-factories-demo fctl serve",
+                 "docker compose -p claude-factories-demo up",
+                 "docker compose -p claude-factories-demo exec backend fctl seed"):
+        assert text in demo, text

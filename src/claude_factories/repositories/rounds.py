@@ -40,11 +40,11 @@ class RoundsRepo:
         ).fetchone()[0]
 
     def add(self, task_id: int, n: int, trigger: str, base_sha: str, build_md: str | None,
-            files: list[dict]) -> None:
+            files: list[dict], now: str | None = None) -> None:
         """The round and its round_files rows, in the given order."""
         round_id = self.conn.execute(
             "INSERT INTO rounds (task_id, n, trigger, base_sha, build_md, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, n, trigger, base_sha, build_md, db.now()),
+            (task_id, n, trigger, base_sha, build_md, now or db.now()),
         ).lastrowid
         self.conn.executemany(
             "INSERT INTO round_files (round_id, path, old_path, change, binary, additions, deletions, patch)"

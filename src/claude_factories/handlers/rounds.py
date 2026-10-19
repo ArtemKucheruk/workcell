@@ -20,7 +20,8 @@ def trigger(reviews: ReviewsRepo, task_id: int, n: int) -> str:
     return "human" if reviews.changes_requested(task_id, n - 1) else "agent"
 
 
-def insert_round(rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, body: RoundBody) -> dict:
+def insert_round(rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, body: RoundBody,
+                 now: str | None = None) -> dict:
     """Check the patch (005 Q4, Q5), number the round, and insert it with its files, inside the caller's
     BEGIN IMMEDIATE so any refusal writes nothing. {round, files_changed, additions, deletions}."""
     if len(body.patch.encode()) > config.MAX_PATCH:
@@ -29,7 +30,7 @@ def insert_round(rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, body: R
         raise Invalid("no changes to submit")
     files = split_patch(body.patch)
     n = rounds.next_n(task_id)
-    rounds.add(task_id, n, trigger(reviews, task_id, n), body.base_sha, body.build_md, files)
+    rounds.add(task_id, n, trigger(reviews, task_id, n), body.base_sha, body.build_md, files, now)
     return {"round": n, "files_changed": len(files), "additions": sum(f["additions"] for f in files),
             "deletions": sum(f["deletions"] for f in files)}
 

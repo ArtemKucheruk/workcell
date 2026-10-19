@@ -21,20 +21,20 @@ class ReviewsRepo:
             "SELECT reviewer, verdict, body_md FROM verdicts WHERE round_id = ?", (round_id,)
         ).fetchall()
 
-    def put_verdict(self, round_id: int, reviewer: str, verdict: str, body_md: str) -> int:
+    def put_verdict(self, round_id: int, reviewer: str, verdict: str, body_md: str, now: str | None = None) -> int:
         """006 Q2: one row per (round, reviewer); returns how many the round now has."""
         self.conn.execute(
             "INSERT OR REPLACE INTO verdicts (round_id, reviewer, verdict, body_md, created_at) VALUES (?, ?, ?, ?, ?)",
-            (round_id, reviewer, verdict, body_md, db.now()),
+            (round_id, reviewer, verdict, body_md, now or db.now()),
         )
         return self.conn.execute("SELECT COUNT(*) FROM verdicts WHERE round_id = ?", (round_id,)).fetchone()[0]
 
     def add_comment(self, task_id: int, round_id: int, author: str, path: str | None, line: int | None,
-                    side: str | None, body_md: str) -> int:
+                    side: str | None, body_md: str, now: str | None = None) -> int:
         return self.conn.execute(
             "INSERT INTO comments (task_id, round_id, author, path, line, side, body_md, created_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, round_id, author, path, line, side, body_md, db.now()),
+            (task_id, round_id, author, path, line, side, body_md, now or db.now()),
         ).lastrowid
 
     def comments(self, round_id: int, only_me: bool) -> list[sqlite3.Row]:
