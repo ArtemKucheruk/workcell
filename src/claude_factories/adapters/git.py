@@ -47,6 +47,7 @@ class Git(Protocol):
     def init(self, path: str) -> None: ...
     def commit_all(self, path: str, message: str) -> None: ...
     def capture(self, path: str) -> tuple[str, str]: ...
+    def merge_parent(self, root: str, pr: int) -> str | None: ...
 
 
 class SubprocessGit:
@@ -99,3 +100,10 @@ class SubprocessGit:
             git_ok(*pinned, "add", "-A", env=env)
             patch = git_ok(*pinned, "diff", "--cached", *DIFF_FLAGS, base, env=env)
         return base, patch.decode(errors="replace")
+
+    def merge_parent(self, root: str, pr: int) -> str | None:
+        """031 Q6: the first parent of gh's merge commit for PR #pr, on any ref; None if git fails or none matches."""
+        out, _ = git_stdout(root, "log", "--all", "--merges", "-F", "--grep", f"Merge pull request #{pr} from ",
+                            "--format=%P", "-n", "1")
+        parents = out.split() if out else []
+        return parents[0].decode() if parents else None

@@ -1,5 +1,6 @@
 import json
 import os
+import socket
 import urllib.parse
 
 import pytest
@@ -161,3 +162,47 @@ def test_context_set_too_large(server, repo, monkeypatch, capsys):  # 033 AC22
         fctl(monkeypatch, "context", "set", stdin="x" * 16385)
     assert e.value.code == 1
     assert capsys.readouterr().err == "fctl: 413 context over 16 KB\n"
+
+
+# --- fctl import-factory (031) ---------------------------------------------------------
+
+
+def imported(*jobs):
+    return reply({"imported": [dict(zip(("job", "task_id", "created", "rounds", "transcripts"), j)) for j in jobs]})
+
+
+def test_import_factory(server, repo, monkeypatch, capsys):  # 031 AC38
+    server.replies = [reply(PROJECT), imported(("001-a", 12, True, 2, 3), ("002-b", 13, False, 1, 1),
+                                               ("003-c", 14, True, 0, 0))]
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "import-factory")
+    assert requests(server) == [lookup(repo), ("POST", "/api/projects/3/import-factory", {})]
+    assert server.requests[1][2]["X-Requested-By"] == "fctl"
+    assert capsys.readouterr().out == (
+        "Imported 001-a → #12 (new, 2 rounds, 3 transcripts)\n"
+        "Imported 002-b → #13 (updated, 1 round, 1 transcript)\n"
+        "Imported 003-c → #14 (new, 0 rounds, 0 transcripts)\n")
+
+
+def test_import_factory_one_job(server, repo, monkeypatch, capsys):  # 031 AC39
+    server.replies = [reply(PROJECT), imported(("001-a", 12, False, 1, 0))]
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "import-factory", "--job", "001-a")
+    assert requests(server)[1] == ("POST", "/api/projects/3/import-factory", {"job": "001-a"})
+
+
+def test_import_factory_errors(server, repo, monkeypatch, capsys):  # 031 AC40
+    server.replies = [reply(PROJECT), reply({"detail": "no job nope in factory/board.json"}, 404)]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        fctl(monkeypatch, "import-factory", "--job", "nope")
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: 404 no job nope in factory/board.json\n"
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        url = f"http://127.0.0.1:{s.getsockname()[1]}"  # bound then closed: nothing listens there
+    monkeypatch.setenv("FCTL_URL", url)
+    with pytest.raises(SystemExit) as e:
+        fctl(monkeypatch, "import-factory")
+    assert e.value.code == 1
+    assert capsys.readouterr().err == f'fctl: can\'t reach {url} — is "fctl serve" running?\n'

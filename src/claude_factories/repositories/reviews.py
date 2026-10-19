@@ -29,6 +29,24 @@ class ReviewsRepo:
         )
         return self.conn.execute("SELECT COUNT(*) FROM verdicts WHERE round_id = ?", (round_id,)).fetchone()[0]
 
+    def replace_verdicts(self, round_id: int, verdicts: list[dict]) -> None:
+        """031 Q3: the round's verdicts become `verdicts` (reviewer, verdict, body_md, created_at)."""
+        self.conn.execute("DELETE FROM verdicts WHERE round_id = ?", (round_id,))
+        self.conn.executemany(
+            "INSERT INTO verdicts (round_id, reviewer, verdict, body_md, created_at)"
+            " VALUES (:round_id, :reviewer, :verdict, :body_md, :created_at)",
+            [v | {"round_id": round_id} for v in verdicts],
+        )
+
+    def replace_decisions(self, task_id: int, decisions: list[dict]) -> None:
+        """031 Q3: the task's decisions become `decisions` (round_id, actor, decision, body_md, created_at), in order."""
+        self.conn.execute("DELETE FROM decisions WHERE task_id = ?", (task_id,))
+        self.conn.executemany(
+            "INSERT INTO decisions (task_id, round_id, actor, decision, body_md, created_at)"
+            " VALUES (:task_id, :round_id, :actor, :decision, :body_md, :created_at)",
+            [d | {"task_id": task_id} for d in decisions],
+        )
+
     def add_comment(self, task_id: int, round_id: int, author: str, path: str | None, line: int | None,
                     side: str | None, body_md: str, now: str | None = None) -> int:
         return self.conn.execute(

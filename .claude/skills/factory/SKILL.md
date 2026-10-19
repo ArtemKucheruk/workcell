@@ -35,7 +35,7 @@ that ran the job; its builder lives there.
 | `/factory <feature>` | start gate → new job with the next free id → loop from spec |
 | `/factory next` | start gate → first `- [ ] <id>: <text>` line in factory/backlog.md that no active job blocks → loop from spec |
 | `/factory resume [<id>]` | continue an in_progress job whose session ended (default: the only in_progress job) |
-| `/factory approve <id>` | review job → merge its PR, done, tick its backlog line, stop its builder, remove worktree and branch |
+| `/factory approve <id>` | review job → merge its PR, done, tick its backlog line, stop its builder, remove worktree and branch, import it into the app |
 | `/factory rework <id> <note>` | review job → feedback-<n>.md, stage rework, loop from build round n, push to the same PR |
 
 No arguments or anything unclear: print this table and stop.
@@ -210,6 +210,9 @@ The job must be in review (human_review or escalated).
    git fetch origin --prune
    ```
    `worktree remove` refuses (dirty files) → stop and tell me; never `--force`.
+6. Import the job into the app: `fctl import-factory --job <id>`. Any non-zero exit (the app is
+   down, a 4xx, no `fctl` on PATH) only warns: print one `warning:` line with fctl's message and
+   finish approve normally. Nothing is undone.
 
 Report the merged PR URL, and that my main checkout isn't updated: `git pull` when I want it.
 

@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   stage TEXT CHECK (stage IN ('spec','build','agent_review','approval','rework','human_review','escalated')),
   position REAL NOT NULL,                 -- order within column; Run next = lowest backlog
   branch TEXT, worktree_path TEXT,        -- NULL for standalone (/factory-submit) tasks
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT);
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
+  import_key TEXT UNIQUE);                -- 031: factory:<job id> of an imported bootstrap job; db.init() adds it to old DBs
 
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY,

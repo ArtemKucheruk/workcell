@@ -4,6 +4,9 @@ import sqlite3
 
 from .. import db
 
+FILES = ("INSERT INTO round_files (round_id, path, old_path, change, binary, additions, deletions, patch)"
+         " VALUES (:round_id, :path, :old_path, :change, :binary, :additions, :deletions, :patch)")
+
 
 class RoundsRepo:
     def __init__(self, conn: sqlite3.Connection):
@@ -46,11 +49,20 @@ class RoundsRepo:
             "INSERT INTO rounds (task_id, n, trigger, base_sha, build_md, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (task_id, n, trigger, base_sha, build_md, now or db.now()),
         ).lastrowid
-        self.conn.executemany(
-            "INSERT INTO round_files (round_id, path, old_path, change, binary, additions, deletions, patch)"
-            " VALUES (:round_id, :path, :old_path, :change, :binary, :additions, :deletions, :patch)",
-            [f | {"round_id": round_id} for f in files],
-        )
+        self.conn.executemany(FILES, [f | {"round_id": round_id} for f in files])
+
+    def upsert(self, task_id: int, n: int, trigger: str, base_sha: str, build_md: str | None, created_at: str) -> int:
+        """031 Q3: round n of the task, added or rewritten in place, so its id (and my comments) stay; its id."""
+        return self.conn.execute(
+            "INSERT INTO rounds (task_id, n, trigger, base_sha, build_md, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (task_id, n) DO UPDATE SET trigger = excluded.trigger, base_sha = excluded.base_sha,"
+            " build_md = excluded.build_md, created_at = excluded.created_at RETURNING id",
+            (task_id, n, trigger, base_sha, build_md, created_at),
+        ).fetchone()[0]
+
+    def replace_files(self, round_id: int, files: list[dict]) -> None:
+        self.conn.execute("DELETE FROM round_files WHERE round_id = ?", (round_id,))
+        self.conn.executemany(FILES, [f | {"round_id": round_id} for f in files])
 
     def patches(self, round_id: int) -> list[str]:
         """The round's files' patches in rowid order."""
