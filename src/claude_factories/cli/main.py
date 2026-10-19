@@ -36,7 +36,8 @@ def serve(args):
     uvicorn.run(create_app(), host=args.host, port=args.port)
 
 
-def main(argv=None):
+def build_parser() -> argparse.ArgumentParser:
+    """Every command and its flags. 029 Q11: tests/test_fctl_md.py walks it against fctl.md."""
     parser = argparse.ArgumentParser(prog="fctl", description="Claude Factories CLI.")
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("serve", help="start the app's backend")
@@ -110,5 +111,9 @@ def main(argv=None):
     p.add_argument("id", type=int, help="the task")
     p.add_argument("note", help='what should change, e.g. "Make the limit configurable"')
     p.set_defaults(func=rework)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
     args.func(args)

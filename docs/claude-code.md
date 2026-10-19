@@ -17,6 +17,9 @@ Agent models are unchanged from FACTORY.md: opus for spec-writer, builder, secur
 approver; sonnet for ux, ui, and code.
 
 ### 7.2 Commands
+Each command's full reference (flags, stdin, output, exit codes, an example) is the app's
+`/docs/fctl` page, rendered from [`../src/claude_factories/fctl.md`](../src/claude_factories/fctl.md).
+
 | Command | Used by | Calls |
 |---|---|---|
 | `fctl serve [--host 127.0.0.1] [--port 4545]` | me | starts the app |

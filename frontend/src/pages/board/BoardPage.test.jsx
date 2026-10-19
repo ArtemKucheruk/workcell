@@ -82,7 +82,7 @@ test('AC1: /projects/3 shows the project, its workspace, path, title, and Code l
   expect(h1.textContent).toBe('api · personal')
   expect(within(h1).getByRole('link', { name: 'personal' }).getAttribute('href')).toBe('/workspaces/2')
   expect(screen.getByText('/Users/me/api')).toBeTruthy()
-  expect(document.title).toBe('api · Claude Factories')
+  await waitFor(() => expect(document.title).toBe('api · Claude Factories')) // the title is set in an effect, after the heading renders
   expect(screen.getByRole('link', { name: 'Code' }).getAttribute('href')).toBe('/projects/3/code')
 })
 

@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
@@ -40,7 +40,7 @@ test('AC20: / shows the 9 tiles in order with counts, each linking to its list',
   )
   expect(tiles.some((a) => a.hasAttribute('aria-current'))).toBe(false)
   expect(fetched(fetch)).toContain('/api/pages/dashboard')
-  expect(document.title).toBe('Claude Factories')
+  await waitFor(() => expect(document.title).toBe('Claude Factories')) // the title is set in an effect, after the heading renders
 })
 
 test('AC21: ?show=waiting lists tasks, marks its tile; another tile loads its own list', async () => {

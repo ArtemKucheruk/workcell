@@ -2,6 +2,7 @@ import { NotFound } from '../components/NotFound.jsx'
 import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { CodePage } from '../pages/code/CodePage.jsx'
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
+import { FctlDocsPage } from '../pages/docs/FctlDocsPage.jsx'
 import { ReviewPage } from '../pages/review/ReviewPage.jsx'
 import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { WorkspacePage } from '../pages/workspace/WorkspacePage.jsx'
@@ -18,6 +19,7 @@ export const routes = [
       { path: '/projects/:id/code', element: <CodePage /> },
       { path: '/tasks/:id', element: <TaskPage /> },
       { path: '/tasks/:id/review', element: <ReviewPage /> },
+      { path: '/docs/fctl', element: <FctlDocsPage /> },
       { path: '*', element: <NotFound /> },
     ],
   },
