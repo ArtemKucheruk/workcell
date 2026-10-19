@@ -3,14 +3,18 @@ import re
 import socket
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
 import uvicorn
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-from claude_factories import config
+from claude_factories import config, db
 from claude_factories.cli.main import main
+from claude_factories.repositories.workspaces import WorkspacesRepo
+from claude_factories.server.app import create_app
 
 FCTL = Path(sys.executable).parent / "fctl"
 
@@ -166,3 +170,88 @@ def test_setup_cant_write(server, capsys):  # 015 AC7
     err = capsys.readouterr().err
     assert err.startswith(f"fctl: can't write {skill('factory-connect')}: ")
     assert "Traceback" not in err
+
+
+# --- fctl seed (038) -----------------------------------------------------------------
+
+
+TABLES = ("workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
+          "decisions", "events")
+
+
+def row_counts() -> dict:
+    with closing(db.connect()) as conn:
+        return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in TABLES}
+
+
+def closed_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]  # bound then closed: nothing listens
+
+
+def refused(capsys) -> str:
+    """seed's exit 1 and its stderr."""
+    with pytest.raises(SystemExit) as e:
+        main(["seed"])
+    assert e.value.code == 1
+    return capsys.readouterr().err
+
+
+def test_seed_fresh_home(monkeypatch, capsys):  # AC1
+    home = config.data_dir()
+    assert not home.exists()
+    monkeypatch.setenv("FCTL_URL", f"http://127.0.0.1:{closed_port()}")
+    main(["seed"])  # returns: exit 0
+    assert (home / "factory.db").is_file() and (home / "demo").is_dir()
+    out = capsys.readouterr().out
+    assert out.startswith(f"Seeded {home}: ") and out.count("\n") == 1 and out.endswith("\n")
+
+
+def test_seed_twice(capsys):  # AC2
+    main(["seed"])
+    before = row_counts()
+    capsys.readouterr()
+    assert refused(capsys) == "fctl: FCTL_HOME has data; seed an empty one\n"
+    assert row_counts() == before
+
+
+def test_seed_refuses_a_workspace(capsys):  # AC3
+    db.init()
+    with closing(db.connect()) as conn, conn:
+        WorkspacesRepo(conn).get_or_create("personal")
+    before = row_counts()
+    assert refused(capsys) == "fctl: FCTL_HOME has data; seed an empty one\n"
+    assert not (config.data_dir() / "demo").exists()
+    assert row_counts() == before
+
+
+def test_seed_refuses_leftover_demo(capsys):  # AC4
+    db.init()
+    (config.data_dir() / "demo").mkdir()
+    assert refused(capsys) == f"fctl: {config.data_dir()}/demo exists; seed an empty FCTL_HOME\n"
+    assert set(row_counts().values()) == {0}
+    assert list((config.data_dir() / "demo").iterdir()) == []
+
+
+def test_seed_without_git(tmp_path, monkeypatch, capsys):  # AC5
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))  # conftest's fake claude only
+    err = refused(capsys)
+    assert err.startswith("fctl: ") and err.count("\n") == 1
+    assert "Traceback" not in err
+    assert row_counts()["workspaces"] == 0
+
+
+def test_seed_ignores_my_git_config(tmp_path, monkeypatch):  # AC6
+    (tmp_path / "gitconfig").write_text(  # conftest's GIT_CONFIG_GLOBAL
+        "[user]\n\tuseConfigOnly = true\n[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n"
+        "[diff]\n\tnoprefix = true\n[color]\n\tui = always\n")
+    for name in ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL", "EMAIL"):
+        monkeypatch.delenv(name, raising=False)
+    main(["seed"])  # returns: exit 0
+    with TestClient(create_app(), base_url="http://127.0.0.1:4545") as client:
+        with closing(db.connect()) as conn:
+            task_ids = [i for (i,) in conn.execute("SELECT DISTINCT task_id FROM rounds")]
+        assert len(task_ids) >= 9
+        for task_id in task_ids:
+            assert client.get(f"/api/tasks/{task_id}/rounds/latest/diff").text.startswith("diff --git a/")

@@ -117,6 +117,37 @@ To take over a stopped run, the task page gives a command like
 `docker compose exec -w <worktree> backend claude --resume <session-id>`. Run it from this
 checkout, next to `compose.yaml`.
 
+## Demo data
+
+`fctl seed` fills an empty data dir with demo data: two workspaces, three projects backed by small
+git repos, and tasks in every status and stage, with rounds, reviews, comments, and finished runs
+with their logs. Every page has something to show without running an agent. It refuses a data dir
+that already has a workspace, so the demo always gets a data dir of its own.
+
+On the host, with your own `fctl serve` stopped (both use port 4545):
+
+```sh
+FCTL_HOME=~/.claude-factories-demo fctl seed
+FCTL_HOME=~/.claude-factories-demo fctl serve
+```
+
+Then start the frontend server next to it (`node frontend/server.js`, see
+[Developing the app](#developing-the-app)) and open http://127.0.0.1:3000. To delete the demo,
+stop the server and run `rm -rf ~/.claude-factories-demo`.
+
+With Docker, run the demo as a separate compose project. It gets its own `fctl-home` and
+`backend-home` volumes, so your real data is never touched:
+
+```sh
+docker compose down                                   # your app; its data stays in its volumes
+docker compose -p claude-factories-demo up --build -d
+docker compose -p claude-factories-demo exec backend fctl seed
+```
+
+Open http://127.0.0.1:3000. The demo container has no Claude login, so its header shows
+`API key — runs disabled`. When you're done, `docker compose -p claude-factories-demo down -v`
+deletes the demo, and `docker compose up` brings your own app back.
+
 ## The factory loop
 
 ```
