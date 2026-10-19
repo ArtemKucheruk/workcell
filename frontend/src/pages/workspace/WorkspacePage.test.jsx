@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
@@ -24,7 +24,7 @@ test('AC27: /workspaces/2 shows the name, title, and one row per project', async
   renderAt('/workspaces/2')
   expect(await screen.findByRole('heading', { level: 1, name: 'personal' })).toBeTruthy()
   expect(fetched(fetch)).toContain('/api/pages/workspaces/2')
-  expect(document.title).toBe('personal · Claude Factories')
+  await waitFor(() => expect(document.title).toBe('personal · Claude Factories')) // the title is set in an effect, after the heading renders
   const rows = screen.getAllByRole('row').slice(1)
   expect(rows.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))).toEqual([
     ['api', '/Users/me/api', '2', '1', '0', '7', 'ready', '2026-10-18 18:05'],

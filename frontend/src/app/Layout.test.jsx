@@ -56,6 +56,20 @@ test('AC17: the header links Claude Factories to / on both pages', async () => {
   }
 })
 
+test('029 AC21: every page header links fctl reference to /docs/fctl', async () => {
+  mockFetch({
+    ...dashboard([500, {}]),
+    'GET /api/pages/workspaces/2': [200, { workspace: { id: 2, name: 'work' }, projects: [] }],
+    'GET /api/docs/fctl': [200, { body_html: '', headings: [] }],
+  })
+  for (const path of ['/', '/workspaces/2', '/docs/fctl']) {
+    const { unmount } = renderAt(path)
+    const link = within(screen.getByRole('banner')).getByRole('link', { name: 'fctl reference' })
+    expect(link.getAttribute('href')).toBe('/docs/fctl')
+    unmount()
+  }
+})
+
 test('AC18: an unknown route shows Page not found with a link home, and loads no page view-model', async () => {
   const fetch = mockFetch({ 'GET /api/auth': [500, {}] })
   renderAt('/nope')

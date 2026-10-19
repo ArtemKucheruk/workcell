@@ -1,8 +1,10 @@
-"""Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), and the header's
-login badge. Each page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
+"""Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), the header's
+login badge, and the fctl reference (§8 item 7). Each page returns the dict controllers/pages_api.py maps
+onto its dto/pages.py view-model."""
 
 import shlex
 from itertools import groupby
+from pathlib import Path
 from time import monotonic
 
 from .. import config
@@ -11,6 +13,7 @@ from ..adapters.git import Git
 from ..domain.enums import Reviewer, Status
 from ..domain.errors import NotFound
 from ..lib.diff import diff_rows, file_tree
+from ..lib.markdown import render_with_headings
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -59,6 +62,13 @@ def auth(claude: Claude) -> dict:
     plan = info.get("subscriptionType")
     return {"auth_method": info.get("authMethod"), "plan": plan if isinstance(plan, str) else None,
             "runs_enabled": bool(info)}
+
+
+def fctl_doc() -> dict:
+    """029: the package's fctl.md rendered with heading ids, and its headings for the Contents nav.
+    Read on every request, no cache: the file only changes with the install."""
+    html, headings = render_with_headings((Path(__file__).parent.parent / "fctl.md").read_text(encoding="utf-8"))
+    return {"body_html": html, "headings": headings}
 
 
 def dashboard(tasks: TasksRepo, runs: RunsRepo, workspaces: WorkspacesRepo, show: str) -> dict:

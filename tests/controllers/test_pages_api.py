@@ -768,6 +768,25 @@ def test_code_non_utf8_replaced(client, repo):  # 026 AC33
     assert code(client, connect(client, repo), "latin.txt").json()["view"]["text"] == "caf\ufffd\n"
 
 
+# --- GET /api/docs/fctl (029) ----------------------------------------------------------
+
+
+def test_fctl_doc(client):  # 029 AC5: a GET, so no X-Requested-By
+    doc = api(client, "/api/docs/fctl")
+    assert set(doc) == {"body_html", "headings"}
+    assert all(set(h) == {"id", "text", "level"} for h in doc["headings"])
+    assert {"id": "fctl-serve", "text": "fctl serve", "level": 2} in doc["headings"]
+    assert '<h2 id="fctl-serve">fctl serve</h2>' in doc["body_html"]
+
+
+def test_fctl_doc_ids_unique(client):  # 029 AC6
+    doc = api(client, "/api/docs/fctl")
+    ids = [h["id"] for h in doc["headings"]]
+    assert all(ids) and len(ids) == len(set(ids))
+    for i in ids:
+        assert doc["body_html"].count(f'id="{i}"') == 1, i
+
+
 # --- Shared ---------------------------------------------------------------------------
 
 

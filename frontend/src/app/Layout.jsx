@@ -20,7 +20,13 @@ export function Layout() {
         <Link to="/" className="font-semibold text-inherit">
           Claude Factories
         </Link>
-        {auth && <AuthBadge auth={auth} />}
+        <div className="flex items-center gap-4">
+          {/* docs/ui.md §8: every page header links to the fctl reference (Q7) */}
+          <Link to="/docs/fctl" className="text-sm">
+            fctl reference
+          </Link>
+          {auth && <AuthBadge auth={auth} />}
+        </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-6">
         <Outlet />

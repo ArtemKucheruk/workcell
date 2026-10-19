@@ -16,3 +16,6 @@ export const reviewPage = (id, round) =>
 /** 025 Q2: `?path=` only when the URL has one; without it the backend shows the README landing. */
 export const codePage = (id, path) =>
   api(`/api/pages/projects/${encodeURIComponent(id)}/code${path ? `?${new URLSearchParams({ path })}` : ''}`)
+
+/** 029: the fctl reference, pre-rendered with heading ids, and its headings for the Contents nav. */
+export const fctlDoc = () => api('/api/docs/fctl')

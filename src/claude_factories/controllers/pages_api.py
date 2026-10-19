@@ -1,6 +1,6 @@
-"""docs/data-model-and-api.md §6.4: /api/auth and one view-model per SPA page. Each route calls its page
-handler in handlers/pages.py and maps the dict onto dto/pages.py (020 Q2): rows become objects, markdown gets
-`*_html`."""
+"""docs/data-model-and-api.md §6.4: /api/auth, /api/docs/fctl, and one view-model per SPA page. Each route
+calls its page handler in handlers/pages.py and maps the dict onto dto/pages.py (020 Q2): rows become objects,
+markdown gets `*_html`."""
 
 from fastapi import APIRouter, Query
 
@@ -50,6 +50,12 @@ def diff_file(f: dict) -> dict:
 @router.get("/api/auth")
 def auth(claude: ClaudeAdapter) -> dto.AuthOut:
     return handler.auth(claude)
+
+
+@router.get("/api/docs/fctl")
+def fctl_doc() -> dto.FctlDoc:
+    """029 Q8: docs/ui.md §8 item 7's reference, next to the page view-models."""
+    return handler.fctl_doc()
 
 
 @router.get("/api/pages/dashboard")

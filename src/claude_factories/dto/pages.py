@@ -18,6 +18,20 @@ class AuthOut(BaseModel):
     runs_enabled: bool
 
 
+# --- GET /api/docs/fctl (docs/ui.md §8 item 7) -----------------------------------------
+
+
+class Heading(BaseModel):
+    id: str
+    text: str  # plain text: the SPA renders it as React text, never as HTML
+    level: int
+
+
+class FctlDoc(BaseModel):
+    body_html: str
+    headings: list[Heading]  # every heading, in document order
+
+
 # --- GET /api/pages/dashboard (docs/ui.md §8 item 1) -----------------------------------
 
 
