@@ -144,3 +144,42 @@ def test_old_db_gets_transcripts_table():  # 030 AC15: a factory.db made before 
     assert transcript_columns() == TRANSCRIPT_COLUMNS
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]
+
+
+TASK = ("INSERT INTO tasks (project_id, title, status, position, created_at, updated_at, import_key)"
+        " VALUES (1, 't', 'backlog', 1, ?, ?, ?)")
+
+
+def test_import_key_unique():  # 031 AC1
+    start_app()
+    with closing(db.connect()) as conn:
+        conn.executescript("INSERT INTO workspaces VALUES (1, 'w', 'x');"
+                           "INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at)"
+                           " VALUES (1, 1, 'p', '/p', 'main', 'x');")
+        for _ in range(3):
+            conn.execute(TASK, (NOW, NOW, None))
+        conn.execute(TASK, (NOW, NOW, "factory:001-a"))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(TASK, (NOW, NOW, "factory:001-a"))
+        assert conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0] == 4
+
+
+def test_old_db_gets_import_key():  # 031 AC2
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + f"""
+CREATE TABLE tasks (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), title TEXT NOT NULL,
+  description_md TEXT NOT NULL DEFAULT '', spec_md TEXT, status TEXT NOT NULL, stage TEXT, position REAL NOT NULL,
+  branch TEXT, worktree_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT);
+INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)
+  VALUES (1, 1, 'old', 'backlog', 1, '{NOW}', '{NOW}'), (2, 1, 'old2', 'backlog', 2, '{NOW}', '{NOW}');
+""")
+    start_app()
+    start_app()  # a second startup skips the ALTER
+    with closing(db.connect()) as conn:
+        assert "import_key" in [c[1] for c in conn.execute("PRAGMA table_info(tasks)")]
+        assert conn.execute("SELECT id, import_key FROM tasks").fetchall() == [(1, None), (2, None)]
+        conn.execute(TASK, (NOW, NOW, "factory:001-a"))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(TASK, (NOW, NOW, "factory:001-a"))

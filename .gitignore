@@ -4,3 +4,5 @@ __pycache__/
 dist/
 frontend/node_modules/
 compose.override.yaml
+factory/jobs/
+factory/board.json

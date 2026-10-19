@@ -336,6 +336,9 @@ Single user and no auth still need these, because the API can start processes th
 - The code page resolves paths inside the project root only: no `..`, and no symlinks that
   point outside it.
 - The server rejects patches over 5 MB and project context over 16 KB with `413`.
+- `fctl import-factory` reads only inside `<project>/factory/`, which must resolve inside the project
+  root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as
+  missing, and a file over 5 MB is refused with `413`.
 - Transcript text is shown escaped. Text blocks go through `lib/markdown.render` with raw HTML
   off, and the SPA inserts only their `*_html`. Tool inputs, tool results, and thinking are
   plain text. `/api/transcripts/{id}/raw` serves only files that resolve inside

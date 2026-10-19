@@ -32,3 +32,7 @@ def init() -> None:
         # 033 Q1: CREATE TABLE IF NOT EXISTS skips a factory.db made before projects.context_md
         if "context_md" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
             conn.execute("ALTER TABLE projects ADD COLUMN context_md TEXT NOT NULL DEFAULT ''")
+        # 031: the same for tasks.import_key; ALTER can't add UNIQUE, so an index enforces it
+        if "import_key" not in {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}:
+            conn.execute("ALTER TABLE tasks ADD COLUMN import_key TEXT")
+            conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS tasks_import_key ON tasks(import_key)")

@@ -425,6 +425,68 @@ Python 3.12 with uv. Tests: uv run pytest -q. FastAPI, no ORM.
 EOF
 ```
 
+## fctl import-factory
+
+Imports the repo's bootstrap factory, `factory/board.json` and `factory/jobs/<id>/`, as tasks in its
+project: each job's board entry, history, spec, rounds with their diffs and reviews, decisions, and
+feedback, plus copies of the Claude Code transcripts of the sessions that ran it. Calls
+`GET /api/projects?path=…`, then `POST /api/projects/{id}/import-factory`.
+
+**Synopsis**
+
+```
+fctl import-factory [--job ID]
+```
+
+Run it in the connected repo. A job becomes the task whose import key is `factory:<job id>`, so a
+rerun updates that task in place: the files win over moves and decisions made in the app, and
+comments are kept. A new task, or one whose status changed, goes to the bottom of its column.
+
+**Arguments and flags**
+
+- `--job ID`: only this job, for example `014-run-ui`. Without it, every job in `board.json`, in
+  its order.
+
+**Stdin**
+
+none
+
+**Output**
+
+One line per job:
+
+```
+Imported 001-a → #12 (new, 2 rounds, 3 transcripts)
+Imported 002-b → #13 (updated, 1 round, 0 transcripts)
+```
+
+`No jobs in factory/board.json` when the board is empty.
+
+**Exit codes and errors**
+
+- `fctl: 404 no factory/board.json in <path>`, also when `factory/` or `board.json` is a symlink
+  that leads outside the repo, exit `1`.
+- `fctl: 404 no job <id> in factory/board.json`, exit `1`.
+- `fctl: 422 <job or problem>`: `board.json` isn't JSON or has no `jobs` list, a job's id, title,
+  status, or stage is bad, or a `diff.patch` isn't a git diff. Nothing is imported, exit `1`.
+- `fctl: 413 <job>/round-<n>/diff.patch over 5 MB`, exit `1`.
+- `fctl: 409 factory:<id> is imported in project #<n>`: another repo already imported that job id,
+  exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+`/factory approve`, as its last step, for the job it just merged; a failure there only warns.
+Also me, once, for every job.
+
+**Example**
+
+```sh
+fctl import-factory --job 014-run-ui
+```
+
 ## fctl task add
 
 Adds a task to the bottom of the current repo's Backlog, and with `--run` starts a factory run on

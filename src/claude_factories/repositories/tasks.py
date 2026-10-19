@@ -95,6 +95,39 @@ class TasksRepo:
             (task_id, actor, from_status, to_status, stage, now),
         )
 
+    def by_import_key(self, key: str) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT id, project_id, status FROM tasks WHERE import_key = ?", (key,)
+        ).fetchone()
+
+    def put_imported(self, task_id: int | None, row: dict) -> int:
+        """031 Q3: a new imported task (task_id None), or the fields a rerun rewrites. A None position keeps
+        the stored one. `row`: project_id, import_key, title, description_md, spec_md, status, stage, position,
+        branch, created_at, updated_at, done_at."""
+        if task_id is None:
+            return self.conn.execute(
+                "INSERT INTO tasks (project_id, import_key, title, description_md, spec_md, status, stage, position,"
+                " branch, created_at, updated_at, done_at) VALUES (:project_id, :import_key, :title, :description_md,"
+                " :spec_md, :status, :stage, :position, :branch, :created_at, :updated_at, :done_at)",
+                row,
+            ).lastrowid
+        self.conn.execute(
+            "UPDATE tasks SET title = :title, description_md = :description_md, spec_md = :spec_md, status = :status,"
+            " stage = :stage, position = COALESCE(:position, position), branch = :branch, done_at = :done_at,"
+            " updated_at = :updated_at WHERE id = :id",
+            row | {"id": task_id},
+        )
+        return task_id
+
+    def replace_events(self, task_id: int, events: list[dict]) -> None:
+        """031 Q3: the task's events become `events` (actor, from_status, to_status, stage, created_at)."""
+        self.conn.execute("DELETE FROM events WHERE task_id = ?", (task_id,))
+        self.conn.executemany(
+            "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
+            " VALUES (:task_id, :actor, :from_status, :to_status, :stage, :created_at)",
+            [e | {"task_id": task_id} for e in events],
+        )
+
     def for_run(self, task_id: int) -> sqlite3.Row | None:
         """What a run needs: the task, its project's path and default branch, and the test command."""
         return self.conn.execute(

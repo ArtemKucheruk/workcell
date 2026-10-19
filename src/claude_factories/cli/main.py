@@ -2,7 +2,7 @@ import argparse
 from pathlib import Path
 
 from .commands.agent import DECISIONS, REVIEWERS, STAGES, comment, decide, round_status, show, spec, stage, verdict
-from .commands.projects import connect, context, context_set
+from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
 from .commands.runs import run
 from .commands.submit import diff, submit
@@ -75,6 +75,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=context)
     p = context_commands.add_parser("set", help="save the current repo's project context (stdin)")
     p.set_defaults(func=context_set)
+    p = commands.add_parser("import-factory", help="import this repo's bootstrap factory/ jobs as tasks")
+    p.add_argument("--job", help="only this job, e.g. 014-run-ui (default: every job in factory/board.json)")
+    p.set_defaults(func=import_factory)
     p = commands.add_parser("task", help="manage tasks")
     task_commands = p.add_subparsers(dest="task_command", required=True)
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")

@@ -270,6 +270,7 @@ What `/factory approve` runs:
     git worktree remove .claude/worktrees/<job-id>
     git branch -D factory/<type>/<job-id> && git push origin --delete factory/<type>/<job-id>
     git fetch origin --prune
+    fctl import-factory --job <job-id>
 
 ## Dashboard
 One self-contained HTML file, served with `python3 -m http.server` from factory/.

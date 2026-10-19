@@ -39,3 +39,19 @@ def context_set(args):
     project = project_at(main_checkout())
     saved = api("PUT", f"/api/projects/{project['id']}/context", {"context_md": text})
     print(f"Context saved on {project['name']} ({saved['bytes']} bytes)")
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def import_factory(args):
+    """031 Q1: one line per imported job."""
+    project = project_at(main_checkout())
+    body = {} if args.job is None else {"job": args.job}
+    imported = api("POST", f"/api/projects/{project['id']}/import-factory", body)["imported"]
+    for j in imported:
+        print(f"Imported {j['job']} → #{j['task_id']} ({'new' if j['created'] else 'updated'},"
+              f" {plural(j['rounds'], 'round')}, {plural(j['transcripts'], 'transcript')})")
+    if not imported:
+        print("No jobs in factory/board.json")

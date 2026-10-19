@@ -44,13 +44,15 @@ def blocks(event: dict) -> list[dict]:
     return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
 
 
+def first_prompt(evts: list[dict]) -> str:
+    """The first user message's text blocks joined with newlines; "" without one."""
+    first = next((e for e in evts if e.get("type") == "user"), {})
+    return "\n".join(b["text"] for b in blocks(first) if b.get("type") == "text" and isinstance(b.get("text"), str))
+
+
 def first_round(evts: list[dict]) -> int | None:
     """Q3: n from `Job|Task <id>, round <n>.` anywhere in the first user message, else None."""
-    first = next((e for e in evts if e.get("type") == "user"), None)
-    if first is None:
-        return None
-    text = "\n".join(b["text"] for b in blocks(first) if b.get("type") == "text" and isinstance(b.get("text"), str))
-    found = ROUND.search(text)
+    found = ROUND.search(first_prompt(evts))
     return int(found[1]) if found else None
 
 

@@ -39,6 +39,22 @@ class RunsRepo:
             (task_id, session_id, now),
         ).fetchone()[0]
 
+    def imported(self, task_id: int, session_id: str, started_at: str, ended_at: str | None) -> int:
+        """031 Q8: the task's run for a bootstrap session, added once as succeeded with no log, its times kept
+        current on a rerun; its id."""
+        found = self.conn.execute(
+            "SELECT id FROM runs WHERE task_id = ? AND session_id = ? ORDER BY id LIMIT 1", (task_id, session_id)
+        ).fetchone()
+        if found:
+            self.conn.execute("UPDATE runs SET started_at = ?, ended_at = ? WHERE id = ?",
+                              (started_at, ended_at, found[0]))
+            return found[0]
+        return self.conn.execute(
+            "INSERT INTO runs (task_id, session_id, status, log_path, started_at, ended_at)"
+            " VALUES (?, ?, 'succeeded', '', ?, ?) RETURNING id",
+            (task_id, session_id, started_at, ended_at),
+        ).fetchone()[0]
+
     def set_log_path(self, run_id: int, log_path: str) -> None:
         self.conn.execute("UPDATE runs SET log_path = ? WHERE id = ?", (log_path, run_id))
 

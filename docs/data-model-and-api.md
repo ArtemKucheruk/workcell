@@ -30,7 +30,8 @@ CREATE TABLE tasks (
   stage TEXT CHECK (stage IN ('spec','build','agent_review','approval','rework','human_review','escalated')),
   position REAL NOT NULL,                 -- order within column; Run next = lowest backlog
   branch TEXT, worktree_path TEXT,        -- NULL for standalone (/factory-submit) tasks
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT);
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
+  import_key TEXT UNIQUE);                -- factory:<job id> for a job fctl import-factory brought in, else NULL
 
 CREATE TABLE runs (
   id INTEGER PRIMARY KEY,
@@ -168,6 +169,12 @@ PUT  /api/projects/3/context                                      (fctl context 
 ← 200 {"context_md":"…","context_html":"…","bytes":22,"max_bytes":16384}
   # 413 {"detail":"context over 16 KB"} over 16384 UTF-8 bytes; "" clears it
   # 404 {"detail":"Project #99 not found"} for an unknown id, on GET too
+
+POST /api/projects/3/import-factory                               (fctl import-factory, /factory approve)
+→ {"job":"014-run-ui"}                                            # {} imports every job in factory/board.json
+← 200 {"imported":[{"job":"014-run-ui","task_id":12,"created":true,"rounds":1,"transcripts":9}]}
+  # 404 unknown project, no factory/board.json, or no such job · 422 bad board.json, job id, or patch
+  # 413 a file over 5 MB · 409 the import_key belongs to another project's task
 ```
 
 ### 6.2 Tasks & runs
