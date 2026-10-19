@@ -31,6 +31,11 @@ links to the fctl reference (item 7) and shows the login runs will use, from
    - Header: title, status · stage, branch, Run / Stop / Retry, run status.
    - Spec (rendered markdown).
    - Rounds: build notes (collapsible), 4 chips that open the verdict, and +/−.
+   - Agents per round: one row per transcript of that round, with its name (else agent type,
+     else `agent`) linking to its transcript, model, turns, tokens
+     (`in 1,234 · cache 56,789 · out 2,345`), and duration (`4m 12s`). Transcripts with no
+     round (the orchestrator, the spec-writer, the reviewers, the approver) are listed under
+     **Other agents** after Rounds, each with its `run #`.
    - The approver's decision.
    - Status history (`events`).
    - Run log tail (collapsed).
@@ -54,6 +59,13 @@ links to the fctl reference (item 7) and shows the login runs will use, from
    - Install (`uv tool install`, `fctl setup`), `FCTL_URL` and `FCTL_HOME`, and using
      `fctl` with Docker (§4.6).
    - Its content comes from `GET /api/docs/fctl` (§6.4).
+8. **Transcript** (`/transcripts/{id}`)
+   - Header: the agent's label, `run #N`, a link to its task, model, turns, tokens, duration,
+     and **Download raw** (`GET /api/transcripts/{id}/raw`).
+   - Each message's role and blocks: text as rendered markdown, a tool call's name and its
+     input as text, a tool result as text, and thinking in a closed `<details>`.
+   - Tool results over 4096 characters arrive cut; **Show all** reloads with `?full=1`.
+   - Loaded once, not polled (§6.2 `GET /api/transcripts/{id}`).
 
 ### 8.1 Board
 ```

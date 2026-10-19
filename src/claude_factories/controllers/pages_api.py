@@ -9,7 +9,7 @@ from ..dto import pages as dto
 from ..handlers import code as code_handler
 from ..handlers import pages as handler
 from ..lib.markdown import render
-from ..server.deps import ClaudeAdapter, GitAdapter, Projects, Reviews, Rounds, Runs, Tasks, Workspaces
+from ..server.deps import ClaudeAdapter, GitAdapter, Projects, Reviews, Rounds, Runs, Tasks, Transcripts, Workspaces
 
 router = APIRouter()
 KINDS = ("event", "round", "verdict", "decision", "comment")  # Q8: the timeline SQL's 0–4 sort key
@@ -83,9 +83,9 @@ def board(project_id: int, projects: Projects, tasks: Tasks, rounds: Rounds, rev
 
 
 @router.get("/api/pages/tasks/{task_id}")
-def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs, git: GitAdapter,
-         claude: ClaudeAdapter) -> dto.TaskPage:
-    page = handler.task(tasks, rounds, reviews, runs, git, claude, task_id)
+def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs, transcripts: Transcripts,
+         git: GitAdapter, claude: ClaudeAdapter) -> dto.TaskPage:
+    page = handler.task(tasks, rounds, reviews, runs, transcripts, git, claude, task_id)
     return page | {
         "task": obj(page["task"], "description", "spec"), "run": obj(page["run"]),
         "rounds": [r | obj({"build_md": page["build"].get(r["n"])}, "build") | {"posted": posted(page, r["n"])}

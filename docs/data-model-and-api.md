@@ -91,8 +91,23 @@ CREATE TABLE events (                     -- status/stage history
   actor TEXT NOT NULL,                    -- 'me', 'app', 'orchestrator'
   from_status TEXT, to_status TEXT, stage TEXT, note TEXT,
   created_at TEXT NOT NULL);
+
+CREATE TABLE transcripts (                -- a run's Claude Code transcripts, copied when it ends (§4.4)
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES runs(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  agent_type TEXT,                        -- 'orchestrator' for the run's own session, else the agent type
+  name TEXT,                              -- a teammate's name, e.g. builder-12
+  round INTEGER,                          -- n from "Job|Task <id>, round <n>." in its first prompt
+  path TEXT NOT NULL,                     -- the copy, relative to FCTL_HOME/transcripts/
+  model TEXT,
+  turns INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
+  started_at TEXT, ended_at TEXT,
+  UNIQUE (run_id, path));                 -- a re-copy updates the row
 ```
-Relations: workspace 1–n project 1–n task. A task has 1–n runs and 1–n rounds. A round has
+Relations: workspace 1–n project 1–n task. A task has 1–n runs and 1–n rounds. A run has 0–n
+transcripts. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
 ordered by `created_at`.
@@ -195,6 +210,22 @@ POST /api/runs/41/stop
 
 GET  /api/runs/41/log?after=120                                   (run log panel, polled)
 ← 200 {"next":134,"lines":[{"t":"tool","text":"builder-12 · Bash pytest -q"},{"t":"text","text":"…"}]}
+
+GET  /api/tasks/12/transcripts                                    (task page Agents)
+← 200 [{"id":5,"run_id":41,"round":1,"agent_type":"builder","name":"builder-12","model":"claude-opus-…",
+        "turns":38,"input_tokens":412,"cache_read_tokens":1830211,"output_tokens":20977,
+        "started_at":"2026-10-17T10:04:11Z","ended_at":"2026-10-17T10:21:40Z"}]
+  # ordered by run_id, started_at, id
+
+GET  /api/transcripts/5[?full=1]                                  (transcript page)
+← 200 {…the same fields, "task_id":12,
+       "messages":[{"role":"assistant","at":"…","blocks":[{"type":"text","text_html":"<p>…</p>"},
+                     {"type":"thinking","text":"…"},{"type":"tool_use","name":"Bash","input":"{\n  \"command\": \"pytest -q\"\n}"}]},
+                   {"role":"user","at":"…","blocks":[{"type":"tool_result","text":"3 passed","is_error":false,"truncated":false}]}]}
+  # without full=1, each tool result is cut at 4096 characters with "truncated":true
+
+GET  /api/transcripts/5/raw                                       (Download) → the copied .jsonl as an attachment
+← 404 {"detail":"Transcript #99 not found"}
 ```
 
 ### 6.3 Rounds, verdicts, decisions
@@ -232,8 +263,9 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
 `/projects/{id}` board · `/projects/{id}/code?path=` · `/tasks/{id}` ·
-`/tasks/{id}/review?round=&tab=files` · `/docs/fctl`. Any other path outside `/api` gets the
-SPA's not-found page.
+`/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl`. Any other path
+outside `/api` gets the SPA's not-found page. `/transcripts/{id}` loads
+`GET /api/transcripts/{id}` (§6.2).
 
 Each page loads one view-model from the backend. Markdown fields arrive rendered as `*_html`
 (raw HTML off, §4.5). Unknown ids get a JSON 404.
@@ -244,7 +276,8 @@ GET  /api/auth                                                    (every page he
 GET  /api/pages/dashboard                       tiles, open tasks per workspace → project, rounds per task
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
 GET  /api/pages/projects/{id}                   board cards with stage, chips per round, +/−, waiting, escalated, stalled
-GET  /api/pages/tasks/{id}                      spec_html, rounds, decision, history, the active run and takeover command
+GET  /api/pages/tasks/{id}                      spec_html, rounds, decision, history, the active run and takeover command,
+                                                transcripts (as GET /api/tasks/{id}/transcripts)
 GET  /api/pages/tasks/{id}/review?round=        timeline; files with diff rows carrying side, old/new line, kind,
                                                 text, and the path:side:line anchor; inline comments
 GET  /api/pages/projects/{id}/code?path=        tree, README or file, branch

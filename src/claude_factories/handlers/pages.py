@@ -19,11 +19,13 @@ from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TILE_TASKS, TasksRepo
+from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_hint, factory_state
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
 from .tasks import list_tasks
+from .transcripts import for_task
 
 COLUMNS = tuple(Status)
 REVIEWERS = tuple(Reviewer)
@@ -143,11 +145,11 @@ def page_task(tasks: TasksRepo, task_id: int):
     return task
 
 
-def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, git: Git, claude: Claude,
-         task_id: int) -> dict:
+def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, transcripts: TranscriptsRepo,
+         git: Git, claude: Claude, task_id: int) -> dict:
     """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, spec,
-    rounds with build notes and verdict popovers, the approver's latest decision, the status history,
-    the takeover command (Q9), and the run log."""
+    rounds with build notes, verdict popovers, and agents (030), the approver's latest decision, the status
+    history, the takeover command (Q9), and the run log."""
     found = page_task(tasks, task_id)
     run = runs.latest_detail(task_id)
     factory = factory_state(git, found["path"], found["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
@@ -163,6 +165,7 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
         "build": {r["n"]: r["build_md"] for r in rounds.all(task_id)},
         "reviewers": REVIEWERS, "approver": reviews.approver_latest(task_id),
         "history": [e for e in tasks.timeline(task_id) if e["kind"] == 0],  # Q8: events only
+        "transcripts": [t.model_dump() for t in for_task(tasks, transcripts, task_id)],  # 030 Q11
     }
 
 

@@ -30,7 +30,8 @@ Use this one (docs/MVP.md §4.2):
   jsdom. `server.js` uses Node built-ins only. Any other package needs a reason in the spec.
 - Test commands: `uv run pytest -q`, plus `npm --prefix frontend test` once
   `frontend/package.json` exists. Tests use a temp data dir (`FCTL_HOME`) and a fake
-  `claude` on PATH. They never call the real `claude`, the network, or `~/.claude*`.
+  `claude` on PATH. They never call the real `claude`, the network, or `~/.claude*`, and
+  `CLAUDE_CONFIG_DIR` points into the test's temp dir.
   Frontend tests mock fetch and never call the backend or the network.
 
 docs/ is the source of truth for what to build. Specs cite doc sections, for example

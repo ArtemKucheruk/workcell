@@ -12,6 +12,11 @@ def data_dir() -> Path:
     return Path(os.environ.get("FCTL_HOME") or Path.home() / ".claude-factories")
 
 
+def claude_config_dir() -> Path:
+    """030: where Claude Code keeps its transcripts, `projects/<folder>/<session_id>.jsonl`."""
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
 def in_docker() -> bool:
     """028 Q6: the backend image sets FCTL_IN_DOCKER=1; only that exact value counts."""
     return os.environ.get("FCTL_IN_DOCKER") == "1"

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { taskPage } from '../../api/pages.js'
 import { runLog, runTask, stopRun } from '../../api/runs.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
+import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
@@ -63,11 +64,32 @@ function Takeover({ page }) {
 }
 
 /**
- * `Round n trigger chips +A −D`, the verdict popovers, and the build notes. Q2: keyed by `n` with chips keyed
+ * 030: one row per transcript: its label linking to the transcript page, then its stats. `other` rows (Other agents)
+ * also name their run, and their round when it has no Round row yet.
+ */
+function Agents({ transcripts, label, other = false }) {
+  return (
+    <ul aria-label={label} className="grid gap-1 text-sm">
+      {transcripts.map((t) => (
+        <li key={t.id}>
+          <Link to={`/transcripts/${t.id}`}>{agentLabel(t)}</Link>
+          {other && ` · run #${t.run_id}${t.round != null ? ` · round ${t.round}` : ''}`}
+          <span className={muted}>
+            {' · '}
+            <AgentStats t={t} />
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * `Round n trigger chips +A −D`, the verdict popovers, the build notes, and the round's agents (030). Q2: keyed by `n` with chips keyed
  * by reviewer and an uncontrolled <details>, so open notes and popovers survive the polls.
  * claude-code.md §7.4: a standalone task (no worktree) with nothing posted says "no agent review".
  */
-function Round({ round, standalone }) {
+function Round({ round, standalone, agents }) {
   const { n, posted } = round
   const bodies = Object.entries(posted).filter(([, p]) => !blank(p.body_md))
   return (
@@ -107,6 +129,12 @@ function Round({ round, standalone }) {
           <summary className="cursor-pointer text-sm">Build notes</summary>
           <Markdown html={round.build_html} className="mt-2 border-l-2 border-gray-200 pl-3 dark:border-gray-700" />
         </details>
+      )}
+      {agents.length > 0 && (
+        <div className="mt-1">
+          <p className={`text-sm ${muted}`}>Agents</p>
+          <Agents transcripts={agents} label={`Round ${n} agents`} />
+        </div>
       )}
     </li>
   )
@@ -165,6 +193,9 @@ export function TaskPage() {
   if (error?.status === 404) return <NotFound detail={error.message} />
   if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
   const { task } = page
+  // Q4: no round, or a round with no Round row yet (a build that hasn't submitted), goes under Other agents
+  const rounds = new Set(page.rounds.map((r) => r.n))
+  const other = page.transcripts.filter((t) => !rounds.has(t.round))
 
   /** Q4: a success clears the alert and refetches at once; a refusal shows in it, and the 3 s poll catches up. */
   async function runAction(call) {
@@ -208,13 +239,24 @@ export function TaskPage() {
         {page.rounds.length ? (
           <ol className="grid gap-3">
             {page.rounds.map((round) => (
-              <Round key={round.n} round={round} standalone={task.worktree_path == null} />
+              <Round
+                key={round.n}
+                round={round}
+                standalone={task.worktree_path == null}
+                agents={page.transcripts.filter((t) => t.round === round.n)}
+              />
             ))}
           </ol>
         ) : (
           <p className={muted}>No rounds yet.</p>
         )}
       </section>
+      {other.length > 0 && (
+        <section aria-labelledby="task-other-agents">
+          <h2 id="task-other-agents">Other agents</h2>
+          <Agents transcripts={other} label="Other agents" other />
+        </section>
+      )}
       {page.approver && (
         <section aria-label="Approver" className="mt-8 rounded-md border border-gray-200 p-3 dark:border-gray-800">
           <p>
