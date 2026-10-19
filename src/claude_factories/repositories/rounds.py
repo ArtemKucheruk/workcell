@@ -23,7 +23,7 @@ class RoundsRepo:
 
     def all(self, task_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT id, n, build_md FROM rounds WHERE task_id = ? ORDER BY n", (task_id,)
+            "SELECT id, n, build_md, created_at FROM rounds WHERE task_id = ? ORDER BY n", (task_id,)
         ).fetchall()
 
     def latest(self, task_id: int) -> sqlite3.Row | None:

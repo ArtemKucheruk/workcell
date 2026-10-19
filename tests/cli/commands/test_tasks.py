@@ -122,3 +122,64 @@ def test_task_add_without_run(server, repo, monkeypatch, capsys):  # 015 AC17
     main(["task", "add", "T"])
     assert [(m, p) for m, p, _ in requests(server)][1:] == [("POST", "/api/projects/3/tasks")]
     assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+
+
+# --- 032: fctl export, fctl import -------------------------------------------------------------
+
+ZIP = b"PK\x05\x06" + b"\x00" * 18  # an empty zip's bytes
+IMPORTED = {"task_id": 12, "title": "Rate-limit login", "import_key": "task:7@2026-10-17T10:03:00Z", "created": True,
+            "status": "backlog", "rounds": 2, "transcripts": 0}
+
+
+def test_export(server, tmp_path, monkeypatch, capsys):  # AC41
+    server.reply = (200, "application/zip", ZIP)
+    monkeypatch.chdir(tmp_path)
+    main(["export", "12"])
+    assert [(m, p) for m, p, _, _ in server.requests] == [("GET", "/api/tasks/12/export")]
+    assert (tmp_path / "task-12.zip").read_bytes() == ZIP
+    assert capsys.readouterr().out == "Exported #12 → task-12.zip\n"
+
+
+def test_export_output_and_transcripts(server, tmp_path, monkeypatch, capsys):  # AC42
+    server.reply = (200, "application/zip", ZIP)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "out.zip").write_bytes(b"old and longer than the new bytes" * 10)
+    main(["export", "12", "-o", "out.zip", "--transcripts"])
+    assert [(m, p) for m, p, _, _ in server.requests] == [("GET", "/api/tasks/12/export?transcripts=1")]
+    assert (tmp_path / "out.zip").read_bytes() == ZIP
+    assert capsys.readouterr().out == "Exported #12 → out.zip\n"
+    main(["export", "12", "--output", "long.zip"])
+    assert (tmp_path / "long.zip").read_bytes() == ZIP
+
+
+def test_import(server, repo, monkeypatch, capsys):  # AC43
+    (repo / "b.zip").write_bytes(ZIP)
+    monkeypatch.chdir(repo)
+    lines = []
+    for got, said in [(IMPORTED, "new, backlog, 2 rounds, 0 transcripts"),
+                      (IMPORTED | {"created": False, "status": "review", "rounds": 1, "transcripts": 1},
+                       "updated, review, 1 round, 1 transcript")]:
+        server.requests.clear()
+        server.replies = [reply(PROJECT), reply(got)]
+        main(["import", "b.zip"])
+        lines.append(f"Imported #12 Rate-limit login ({said})\n")
+        (_, lookup, _, _), (method, path, headers, body) = server.requests
+        assert lookup == "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)})
+        assert (method, path, body) == ("POST", "/api/projects/3/import", ZIP)
+        assert (headers["Content-Type"], headers["X-Requested-By"]) == ("application/zip", "fctl")
+    assert capsys.readouterr().out == "".join(lines)
+
+
+def test_import_errors(server, repo, monkeypatch, capsys):  # AC44
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        main(["import", "missing.zip"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == f"fctl: can't read missing.zip: {os.strerror(2)}\n"
+    assert server.requests == []
+    (repo / "b.zip").write_bytes(b"nope")
+    server.replies = [reply(PROJECT), reply({"detail": "not a zip file"}, 422)]
+    with pytest.raises(SystemExit) as e:
+        main(["import", "b.zip"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: 422 not a zip file\n"

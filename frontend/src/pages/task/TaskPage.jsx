@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { taskPage } from '../../api/pages.js'
 import { runLog, runTask, stopRun } from '../../api/runs.js'
+import { exportUrl } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
 import { Chip } from '../../components/Chip.jsx'
@@ -184,6 +185,7 @@ export function TaskPage() {
   const load = useCallback(() => taskPage(id), [id, tick])
   const { data: page, error } = usePoll(load, 3000)
   const [actionError, setActionError] = useState(null)
+  const [withTranscripts, setWithTranscripts] = useState(false) // 032 Q10: Export leaves them out unless ticked
   const heading = page && `#${page.task.id} ${page.task.title}`
   useEffect(() => {
     if (heading) document.title = `${heading} · Claude Factories`
@@ -220,6 +222,13 @@ export function TaskPage() {
           <StatusLine task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           <Link to={`/tasks/${task.id}/review`}>Review</Link>
+          <a href={exportUrl(task.id, withTranscripts)} download>
+            Export
+          </a>
+          <label className="flex items-center gap-1 text-sm">
+            <input type="checkbox" checked={withTranscripts} onChange={(event) => setWithTranscripts(event.target.checked)} />
+            Include transcripts <span className={muted}>(can hold paths, env, and secrets)</span>
+          </label>
         </p>
         <RunControls page={page} onAction={runAction} />
         {actionError && <ErrorMessage error={actionError} />}

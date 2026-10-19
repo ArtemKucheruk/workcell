@@ -6,7 +6,7 @@ from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
 from .commands.runs import run
 from .commands.submit import diff, submit
-from .commands.tasks import task_add
+from .commands.tasks import export, import_bundle, task_add
 from .output import fail
 
 SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
@@ -78,6 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = commands.add_parser("import-factory", help="import this repo's bootstrap factory/ jobs as tasks")
     p.add_argument("--job", help="only this job, e.g. 014-run-ui (default: every job in factory/board.json)")
     p.set_defaults(func=import_factory)
+    p = commands.add_parser("export", help="write a task as a zip bundle another app can import")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("-o", "--output", metavar="FILE", help="the file to write (default: task-<id>.zip here)")
+    p.add_argument("--transcripts", action="store_true",
+                   help="include its agent transcripts, which can hold paths, env, and secrets")
+    p.set_defaults(func=export)
+    p = commands.add_parser("import", help="import a task bundle into the current repo's project")
+    p.add_argument("file", help="the bundle, e.g. task-12.zip")
+    p.set_defaults(func=import_bundle)
     p = commands.add_parser("task", help="manage tasks")
     task_commands = p.add_subparsers(dest="task_command", required=True)
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")

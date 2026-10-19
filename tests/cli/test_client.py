@@ -76,3 +76,10 @@ def test_api_unreachable(monkeypatch, capsys):  # AC28
         api("GET", "/api/workspaces")
     assert e.value.code == 1
     assert capsys.readouterr().err == f'fctl: can\'t reach {url} — is "fctl serve" running?\n'
+
+
+def test_api_raw_bytes_and_zip(server):  # 032 AC43, AC41
+    server.reply = (200, "application/zip", b"PK\x05\x06zip")
+    assert api("POST", "/api/z", data=b"\x00raw", content_type="application/zip") == b"PK\x05\x06zip"
+    _, _, headers, body = server.requests[0]
+    assert (body, headers["Content-Type"], headers["X-Requested-By"]) == (b"\x00raw", "application/zip", "fctl")

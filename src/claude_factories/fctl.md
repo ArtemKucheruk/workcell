@@ -487,6 +487,110 @@ Also me, once, for every job.
 fctl import-factory --job 014-run-ui
 ```
 
+## fctl export
+
+Writes a task as a zip bundle that another Claude Factories app can import with
+[fctl import](#fctl-import): its spec, each round's build notes, diff, and reviews, my change
+requests, the approver's decision, and a `task.json` with the title, description, status, events,
+and comments. Calls `GET /api/tasks/{id}/export`.
+
+**Synopsis**
+
+```
+fctl export <id> [-o FILE] [--transcripts]
+```
+
+Task ids are global, so it runs anywhere, not only in the task's repo.
+
+**Arguments and flags**
+
+- `id`: the task, for example `12`.
+- `-o FILE`, `--output FILE`: the file to write. Default: `task-<id>.zip` in the current
+  directory. An existing file is overwritten.
+- `--transcripts`: also put in the copies of its agents' Claude Code transcripts. They can hold
+  paths, env, and secrets, so read them before you share the bundle.
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+Exported #12 → task-12.zip
+```
+
+**Exit codes and errors**
+
+- `fctl: 404 Task #12 not found`, exit `1`.
+- `fctl: can't write <file>: <reason>`, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl export 12 -o rate-limit.zip --transcripts
+```
+
+## fctl import
+
+Imports a task bundle from [fctl export](#fctl-export) into the current repo's project. Calls
+`GET /api/projects?path=…`, then `POST /api/projects/{id}/import` with the file as the body.
+
+**Synopsis**
+
+```
+fctl import FILE
+```
+
+Run it in the connected repo. The bundle's import key names the task, so importing an updated
+bundle again updates the task it made: the bundle wins over moves, decisions, and comments made
+since. A done or review task keeps its status; any other lands in Backlog. Imported tasks have no
+branch or worktree.
+
+**Arguments and flags**
+
+- `FILE`: the bundle, for example `task-12.zip`.
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+Imported #12 Rate-limit login endpoint (new, backlog, 2 rounds, 0 transcripts)
+```
+
+`updated` in place of `new` when the bundle's task was imported before.
+
+**Exit codes and errors**
+
+- `fctl: can't read <file>: <reason>`, with no call to the app, exit `1`.
+- `fctl: 413 bundle over 50 MB`, `bundle unpacks to over 500 MB`, or `<file> over 5 MB`, exit `1`.
+- `fctl: 422 <detail>`: not a zip, an entry that isn't in the layout, is unsafe or a symlink, or
+  can't be read, or a bad `task.json` field. Nothing is imported, exit `1`.
+- `fctl: 409 <key> is imported in project #<n>`, or `fctl: 409 run #<id> active` while that task
+  runs, exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl import task-12.zip
+```
+
 ## fctl task add
 
 Adds a task to the bottom of the current repo's Backlog, and with `--run` starts a factory run on

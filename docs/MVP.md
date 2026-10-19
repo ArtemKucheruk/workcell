@@ -339,6 +339,13 @@ Single user and no auth still need these, because the API can start processes th
 - `fctl import-factory` reads only inside `<project>/factory/`, which must resolve inside the project
   root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as
   missing, and a file over 5 MB is refused with `413`.
+- A task bundle import (`POST /api/projects/{id}/import`) refuses a body over `MAX_BUNDLE` (50 MB)
+  with `413`, on its `Content-Length` and again as the stream comes in. Every zip entry must be a
+  name the layout has (`task.json`, 031's job files, and `transcripts/…` files `task.json` lists),
+  with no absolute path, no `..`, no symlink, and no encryption, or it is refused with `422`. The
+  entries' declared sizes may sum to `MAX_UNPACKED` (500 MB) at most, else `413`. It unpacks into
+  a temp folder that is removed afterwards. Export leaves transcripts out unless asked
+  (`?transcripts=1`), since they can hold paths, env, and secrets.
 - Transcript text is shown escaped. Text blocks go through `lib/markdown.render` with raw HTML
   off, and the SPA inserts only their `*_html`. Tool inputs, tool results, and thinking are
   plain text. `/api/transcripts/{id}/raw` serves only files that resolve inside
@@ -381,7 +388,7 @@ src/claude_factories/
 ├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge / Failed
 ├── lib/            pure parsers and renderers: patch split, diff rows, run log, transcripts, markdown, slug
 ├── db/             connection, now(), and schema.sql, applied at startup
-├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT
+├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT, MAX_BUNDLE, MAX_UNPACKED
 └── cli/            fctl, stdlib only (§4.2)
 ```
 

@@ -29,6 +29,8 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl context` | me | `GET /api/projects/{id}/context` → prints `context_md` as stored |
 | `fctl context set` (stdin) | me | `PUT /api/projects/{id}/context`; refuses blank stdin (clear it on the board) |
 | `fctl import-factory [--job ID]` | me, `/factory approve` | `POST /api/projects/{id}/import-factory`: the bootstrap `factory/` jobs become tasks |
+| `fctl export <id> [-o FILE] [--transcripts]` | me | `GET /api/tasks/{id}/export` → writes the task bundle, `task-<id>.zip` by default |
+| `fctl import FILE` | me | `POST /api/projects/{id}/import` with the bundle as the body: a new task, or an update of the one it made before |
 | `fctl task add "title" [--run]` | me | `POST /api/projects/{id}/tasks` (+ `/run`) |
 | `fctl run <id>` / `fctl run next` | me | `POST /api/tasks/{id}/run`, `/api/projects/{id}/run-next` |
 | `fctl rework <id> "note"` | me | `POST /api/tasks/{id}/request-changes` |

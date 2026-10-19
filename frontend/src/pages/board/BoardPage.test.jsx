@@ -679,3 +679,58 @@ test('033 AC31: with project id = workspace id, two polls keep one Project conte
   expect(contextBox().value).toBe('# Stack\n- é')
   expect(screen.getByText('12 / 16384 bytes')).toBeTruthy()
 })
+
+// --- 032: Import a task bundle -----------------------------------------------------------
+
+const IMPORT = '/api/projects/3/import'
+const IMPORTED = { task_id: 12, title: 'Rate-limit <login>', import_key: 'task:7@2026-10-17T10:03:00Z', created: true,
+  status: 'backlog', rounds: 2, transcripts: 0 }
+const bundleFile = () => new File(['PK\x05\x06'], 'task-12.zip', { type: 'application/zip' })
+
+/** Chooses `file` in the Import input and clicks Import. */
+function importFile(file) {
+  fireEvent.change(screen.getByLabelText('Task bundle (.zip)'), { target: { files: [file] } })
+  fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+}
+
+test('032 AC47: Import is disabled until a file is chosen, then sends one POST with the File itself', async () => {
+  const { fetch } = await open(board(), { [`POST ${IMPORT}`]: [200, IMPORTED] })
+  const input = screen.getByLabelText('Task bundle (.zip)')
+  expect([input.type, input.getAttribute('accept')]).toEqual(['file', '.zip,application/zip'])
+  expect(input.closest('header')).toBe(header())
+  expect(screen.getByRole('button', { name: 'Import' }).disabled).toBe(true)
+  const file = bundleFile()
+  fireEvent.change(input, { target: { files: [file] } })
+  expect(screen.getByRole('button', { name: 'Import' }).disabled).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+  await screen.findByText(fullText('Imported #12 Rate-limit <login>'))
+  const calls = sends(fetch, 'POST', IMPORT)
+  expect(calls).toHaveLength(1)
+  expect(calls[0][1].body).toBe(file)
+  expect(calls[0][1].headers).toEqual({ 'X-Requested-By': 'fctl' })
+  expect(fetch.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toHaveLength(1)
+})
+
+test('032 AC48: a 200 shows Imported #12 title linking to the task and reloads the board', async () => {
+  const { fetch } = await open(board(), { [`POST ${IMPORT}`]: [200, IMPORTED] })
+  importFile(bundleFile())
+  const line = await screen.findByText(fullText('Imported #12 Rate-limit <login>'))
+  expect(line.closest('[aria-live]')).toBeTruthy()
+  expect(within(line).getByRole('link').getAttribute('href')).toBe('/tasks/12')
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+})
+
+test('032 AC49: a 413 or 422 shows its detail on the board, and the board stays', async () => {
+  for (const [status, detail] of [[413, 'bundle over 50 MB'], [422, 'unknown bundle entry "notes.txt"']]) {
+    const { fetch, unmount } = await open(board({ backlog: [card(1, 'backlog')] }), { [`POST ${IMPORT}`]: [status, { detail }] })
+    importFile(bundleFile())
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(detail)
+    expect(alert.closest('[aria-live]')).toBeTruthy()
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('api · personal')
+    expect(cardEl(1)).toBeTruthy()
+    expect(screen.queryByText(/^Imported/)).toBeNull()
+    expect(loads(fetch)).toBe(1)
+    unmount()
+  }
+})

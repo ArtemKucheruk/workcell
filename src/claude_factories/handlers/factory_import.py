@@ -122,25 +122,26 @@ def checked(job) -> dict:
     return job | {"history": history}
 
 
-def job_files(root: Path, jobs_dir: Path, jid: str) -> dict:
-    """The job's folder: spec, rounds (Q7: `round-<N>` folders, whatever they hold), and decisions (Q5)."""
-    folder = jobs_dir / jid
+def job_files(root: Path, folder: Path, jid: str | None = None) -> dict:
+    """The job's folder: spec, rounds (Q7: `round-<N>` folders, whatever they hold), and decisions (Q5).
+    032: a task bundle's unpacked folder has no `jid`, so its 413s and 422s name the file or round alone."""
+    at, where = (f"{jid}/", f"job {jid} ") if jid else ("", "")
     names = sorted(os.listdir(folder)) if inside(root, folder) and folder.is_dir() else []
     dirs, feedback = {}, {}
     for name in names:
         if (m := ROUND_DIR.fullmatch(name)) and inside(root, folder / name) and (folder / name).is_dir():
             dirs[int(m[1])] = folder / name
-        elif (m := FEEDBACK.fullmatch(name)) and (text := read(root, folder / name, f"{jid}/{name}")) is not None:
+        elif (m := FEEDBACK.fullmatch(name)) and (text := read(root, folder / name, f"{at}{name}")) is not None:
             feedback[int(m[1])] = {"body_md": text, "created_at": mtime(folder / name)}
     rounds = []
     for n, d in sorted(dirs.items()):
-        label = f"{jid}/round-{n}"
+        label = f"{at}round-{n}"
         build = read(root, d / "build.md", f"{label}/build.md")
         patch = read(root, d / "diff.patch", f"{label}/diff.patch") or ""
         try:
             files = split_patch(patch) if patch.strip() else []
         except Invalid as e:
-            raise Invalid(f"job {jid} round {n}: {e.detail}")
+            raise Invalid(f"{where}round {n}: {e.detail}")
         verdicts = []
         for r in Reviewer:
             path = d / f"review-{r}.md"
@@ -154,11 +155,11 @@ def job_files(root: Path, jobs_dir: Path, jid: str) -> dict:
     decisions = [f | {"n": n - 1, "actor": "me", "decision": "CHANGES_REQUESTED"}
                  for n, f in sorted(feedback.items()) if n - 1 in dirs]
     decision = folder / "decision.md"
-    if dirs and (text := read(root, decision, f"{jid}/decision.md")) is not None:
+    if dirs and (text := read(root, decision, f"{at}decision.md")) is not None:
         first, body = head(text)
         decisions.append({"n": max(dirs), "actor": "approver", "decision": "APPROVE" if first == "APPROVE" else "ESCALATE",
                           "body_md": body, "created_at": mtime(decision)})
-    return {"spec_md": read(root, folder / "spec.md", f"{jid}/spec.md"), "rounds": rounds, "decisions": decisions}
+    return {"spec_md": read(root, folder / "spec.md", f"{at}spec.md"), "rounds": rounds, "decisions": decisions}
 
 
 def base_sha(git: Git, project_path: str, pr: str | None) -> str:
@@ -270,7 +271,7 @@ def import_factory(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo,
     if dup := next((i for n, i in enumerate(ids) if i in ids[:n]), None):
         raise Invalid(f"factory/board.json lists job {dup} twice")
     jobs_dir = Path(path, "factory", "jobs")
-    files = {j["id"]: job_files(root, jobs_dir, j["id"]) | {"base_sha": base_sha(git, path, j.get("pr"))}
+    files = {j["id"]: job_files(root, jobs_dir / j["id"], j["id"]) | {"base_sha": base_sha(git, path, j.get("pr"))}
              for j in picked}
     found = sessions(path, ids)
     # ponytail: the copies happen inside the write lock, so a first import of every job holds it for seconds
@@ -283,31 +284,37 @@ def import_factory(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo,
     for job in picked:
         jid, f = job["id"], files[job["id"]]
         task = tasks.by_import_key(f"factory:{jid}")
-        task_id = save(tasks, rounds, reviews, project_id, job, f, task, now)
+        task_id = save(tasks, rounds, reviews, task, *board_task(project_id, job, f, now), f)
         count = copy_transcripts(runs, transcripts, task_id, found.get(jid, {}), now)
         imported.append(ImportedJob(job=jid, task_id=task_id, created=task is None, rounds=len(f["rounds"]),
                                     transcripts=count))
     return ImportOut(imported=imported)
 
 
-def save(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, project_id: int, job: dict, f: dict,
-         task, now: str) -> int:
-    """Q2, Q3: the task, its events, its rounds with their files and verdicts, and its decisions; its id."""
-    history, status, pr = job["history"], job["status"], job.get("pr")
+def board_task(project_id: int, job: dict, f: dict, now: str) -> tuple[dict, list[dict]]:
+    """Q2: a board entry's task row for `save`, and its history as events."""
+    history, pr = job["history"], job.get("pr")
     done = [h["at"] for h in history if h["status"] == "done"]
-    moved = task is None or task["status"] != status  # Q2: to the bottom of the new column, else kept
-    task_id = tasks.put_imported(task["id"] if task else None, {
+    row = {
         "project_id": project_id, "import_key": f"factory:{job['id']}", "title": job["title"],
         "description_md": (job.get("description") or "") + (f"\n\nPR: {pr}" if pr else ""),
-        "spec_md": f["spec_md"], "status": status, "stage": job.get("stage"),
-        "position": tasks.bottom_position(project_id, status) if moved else None, "branch": job.get("branch"),
+        "spec_md": f["spec_md"], "status": job["status"], "stage": job.get("stage"), "branch": job.get("branch"),
         "created_at": history[0]["at"] if history else now, "updated_at": history[-1]["at"] if history else now,
-        "done_at": done[-1] if done and status == "done" else None,
-    })
-    tasks.replace_events(task_id, [
-        {"actor": "orchestrator", "from_status": prev["status"] if prev else None, "to_status": h["status"],
-         "stage": h.get("stage"), "created_at": h["at"]}
-        for prev, h in zip([None, *history], history)])
+        "done_at": done[-1] if done and job["status"] == "done" else None,
+    }
+    events = [{"actor": "orchestrator", "from_status": prev["status"] if prev else None, "to_status": h["status"],
+               "stage": h.get("stage"), "created_at": h["at"]} for prev, h in zip([None, *history], history)]
+    return row, events
+
+
+def save(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task, row: dict, events: list[dict],
+         f: dict) -> int:
+    """Q2, Q3: the task (`row`: put_imported's fields but position), its events, its rounds with their files and
+    verdicts, and its decisions; its id. 032 shares it with task bundles."""
+    moved = task is None or task["status"] != row["status"]  # Q2: to the bottom of the new column, else kept
+    task_id = tasks.put_imported(task["id"] if task else None, row | {
+        "position": tasks.bottom_position(row["project_id"], row["status"]) if moved else None})
+    tasks.replace_events(task_id, events)
     round_ids = {}
     for r in f["rounds"]:
         round_id = round_ids[r["n"]] = rounds.upsert(task_id, r["n"], r["trigger"], f["base_sha"], r["build_md"],
