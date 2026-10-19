@@ -119,6 +119,20 @@ class TasksRepo:
         )
         return task_id
 
+    def for_export(self, task_id: int) -> sqlite3.Row | None:
+        """032: what a bundle's task.json and spec.md take from the task."""
+        return self.conn.execute(
+            "SELECT id, import_key, title, description_md, spec_md, status, stage, created_at FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+
+    def events(self, task_id: int) -> list[sqlite3.Row]:
+        """032: the task's events in id order."""
+        return self.conn.execute(
+            "SELECT actor, from_status, to_status, stage, created_at FROM events WHERE task_id = ? ORDER BY id",
+            (task_id,),
+        ).fetchall()
+
     def replace_events(self, task_id: int, events: list[dict]) -> None:
         """031 Q3: the task's events become `events` (actor, from_status, to_status, stage, created_at)."""
         self.conn.execute("DELETE FROM events WHERE task_id = ?", (task_id,))

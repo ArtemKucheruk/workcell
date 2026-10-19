@@ -35,3 +35,12 @@ test('AC11: errors carry the detail as message and the status', async () => {
   const plain = await api('/api/x').catch((e) => e)
   expect([plain.message, plain.status]).toEqual(['HTTP 500', 500])
 })
+
+test('032 AC47: raw sends a Blob or File unchanged, with X-Requested-By and no JSON Content-Type', async () => {
+  const fetch = ok({ task_id: 12 })
+  const file = new File(['PK'], 'task-12.zip', { type: 'application/zip' })
+  expect(await api('/api/projects/3/import', { method: 'POST', raw: file })).toEqual({ task_id: 12 })
+  const [url, init] = fetch.mock.calls[0]
+  expect([url, init.method, init.body]).toEqual(['/api/projects/3/import', 'POST', file])
+  expect(init.headers).toEqual({ 'X-Requested-By': 'fctl' })
+})

@@ -34,6 +34,13 @@ class TranscriptsRepo:
             f"SELECT {LISTED} FROM transcripts WHERE task_id = ? ORDER BY run_id, started_at, id", (task_id,)
         ).fetchall()
 
+    def for_export(self, task_id: int) -> list[sqlite3.Row]:
+        """032: the task's transcripts with their copy's path and their run's session, in for_task's order."""
+        return self.conn.execute(
+            "SELECT t.id, t.path, r.session_id, t.agent_type, t.name, t.round, t.started_at FROM transcripts t"
+            " JOIN runs r ON r.id = t.run_id WHERE t.task_id = ? ORDER BY t.run_id, t.started_at, t.id", (task_id,),
+        ).fetchall()
+
     def get(self, transcript_id: int) -> sqlite3.Row | None:
         return self.conn.execute(
             f"SELECT {LISTED}, task_id, path FROM transcripts WHERE id = ?", (transcript_id,)

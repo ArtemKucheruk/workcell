@@ -605,3 +605,18 @@ test('030 Q4: a transcript whose round has no Round row yet shows under Other ag
     'builder-5 · run #41 · round 1 · claude-opus-4-1 · 38 turns · in 1,234 · cache 56,789 · out 2,345 · 4m 12s',
   ])
 })
+
+test('032 AC46: Export downloads the bundle; Include transcripts adds ?transcripts=1 and warns about them', async () => {
+  await open(taskPage())
+  const exportLink = () => screen.getByRole('link', { name: 'Export' })
+  expect(exportLink().hasAttribute('download')).toBe(true)
+  expect(exportLink().getAttribute('href')).toBe('/api/tasks/12/export')
+  expect(exportLink().closest('header')).toBe(screen.getByRole('link', { name: 'Review' }).closest('header'))
+  const box = screen.getByRole('checkbox', { name: /^Include transcripts/ })
+  expect(box.checked).toBe(false)
+  expect(box.closest('label').textContent).toBe('Include transcripts (can hold paths, env, and secrets)')
+  fireEvent.click(box)
+  expect(exportLink().getAttribute('href')).toBe('/api/tasks/12/export?transcripts=1')
+  fireEvent.click(box)
+  expect(exportLink().getAttribute('href')).toBe('/api/tasks/12/export')
+})

@@ -9,10 +9,15 @@ function message(body, status) {
   return `HTTP ${status}`
 }
 
-/** fetch `path` as JSON. Rejects with an Error carrying `status` on a non-2xx. */
-export async function api(path, { method = 'GET', body } = {}) {
-  const headers = MUTATING.has(method) ? { 'X-Requested-By': 'fctl', 'Content-Type': 'application/json' } : {}
-  const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) })
+/**
+ * fetch `path`, sending `body` as JSON, or `raw` (a Blob or File, 032) unchanged so the browser sets its type.
+ * Resolves to the reply's JSON; rejects with an Error carrying `status` on a non-2xx.
+ */
+export async function api(path, { method = 'GET', body, raw } = {}) {
+  const json = raw === undefined && { 'Content-Type': 'application/json' }
+  const headers = MUTATING.has(method) ? { 'X-Requested-By': 'fctl', ...json } : {}
+  const sent = raw ?? (body === undefined ? undefined : JSON.stringify(body))
+  const res = await fetch(path, { method, headers, body: sent })
   const data = await res.json().catch(() => null)
   if (!res.ok) throw Object.assign(new Error(message(data, res.status)), { status: res.status })
   return data

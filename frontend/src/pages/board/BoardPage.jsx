@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
-import { createFactory, moveProject, projectContext, saveProjectContext } from '../../api/projects.js'
+import { createFactory, importBundle, moveProject, projectContext, saveProjectContext } from '../../api/projects.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, moveTask } from '../../api/tasks.js'
 import { ActionButton, button } from '../../components/ActionButton.jsx'
@@ -188,6 +188,45 @@ function NewTask({ projectId, onDone }) {
   )
 }
 
+/** 032 Q10: a task bundle from Export, posted as is; Import stays disabled until a file is chosen. */
+function ImportBundle({ onImport }) {
+  const [file, setFile] = useState(null)
+  const [busy, setBusy] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true)
+    try {
+      await onImport(file)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+      <input
+        type="file"
+        accept=".zip,application/zip"
+        aria-label="Task bundle (.zip)"
+        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        className="max-w-60 text-sm"
+      />
+      <button disabled={!file || busy} className={button}>
+        Import
+      </button>
+    </form>
+  )
+}
+
+/** 032 Q10: the imported task, linked; or the refusal's detail. */
+function ImportResult({ out }) {
+  if (out instanceof Error) return <ErrorMessage error={out} />
+  return (
+    <p>
+      Imported <Link to={`/tasks/${out.task_id}`}>{`#${out.task_id} ${out.title}`}</Link>
+    </p>
+  )
+}
+
 /** §8 item 2: move this project to another workspace. */
 function MoveProject({ project, workspaces, onDone }) {
   const [error, setError] = useState(null)
@@ -314,6 +353,7 @@ export function BoardPage() {
   const { data: page, error } = usePoll(load, 3000)
   const [actionError, setActionError] = useState(null)
   const [factoryOut, setFactoryOut] = useState(null)
+  const [importOut, setImportOut] = useState(null)
   const dragged = useRef(null)
   const name = page?.project.name
   useEffect(() => {
@@ -344,6 +384,15 @@ export function BoardPage() {
       refresh()
     } catch (err) {
       setFactoryOut(err)
+    }
+  }
+
+  async function importFile(file) {
+    try {
+      setImportOut(await importBundle(project.id, file))
+      refresh()
+    } catch (err) {
+      setImportOut(err) // the board stays; only this line says what went wrong
     }
   }
 
@@ -387,12 +436,16 @@ export function BoardPage() {
           <span>{`Factory: ${page.factory}${page.factory === 'ready' ? ' ✓' : ''}`}</span>
           {page.factory !== 'ready' && <FactoryForm create={makeFactory} />}
           <NewTask projectId={project.id} onDone={refresh} />
+          <ImportBundle onImport={importFile} />
           <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run}>
             Run next ▶
           </ActionButton>
           {page.hint && <span className={`text-sm ${muted}`}>{page.hint}</span>}
         </div>
-        <div aria-live="polite">{factoryOut && <FactoryResult out={factoryOut} />}</div>
+        <div aria-live="polite">
+          {factoryOut && <FactoryResult out={factoryOut} />}
+          {importOut && <ImportResult out={importOut} />}
+        </div>
       </header>
       {error && <ErrorMessage error={error} />}
       {actionError && <ErrorMessage error={actionError} />}

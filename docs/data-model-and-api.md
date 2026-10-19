@@ -175,6 +175,14 @@ POST /api/projects/3/import-factory                               (fctl import-f
 ← 200 {"imported":[{"job":"014-run-ui","task_id":12,"created":true,"rounds":1,"transcripts":9}]}
   # 404 unknown project, no factory/board.json, or no such job · 422 bad board.json, job id, or patch
   # 413 a file over 5 MB · 409 the import_key belongs to another project's task
+
+POST /api/projects/3/import                                       (Import, fctl import) → the zip as the raw body
+← 200 {"task_id":12,"title":"Rate-limit login endpoint","import_key":"task:12@2026-10-17T10:03:00Z",
+       "created":true,"status":"backlog","rounds":2,"transcripts":0}
+  # a bundle from GET /api/tasks/{id}/export (§6.2), read like an import-factory job and keyed on import_key:
+  # a second import updates that task. done and review land as they are; anything else lands in backlog (§5.2)
+  # 413 a body over 50 MB, over 500 MB unpacked, or a file over 5 MB · 422 not a zip, a refused entry, bad task.json
+  # 409 the import_key is another project's task, or that task has a run going · 404 unknown project
 ```
 
 ### 6.2 Tasks & runs
@@ -233,6 +241,13 @@ GET  /api/transcripts/5[?full=1]                                  (transcript pa
 
 GET  /api/transcripts/5/raw                                       (Download) → the copied .jsonl as an attachment
 ← 404 {"detail":"Transcript #99 not found"}
+
+GET  /api/tasks/12/export[?transcripts=1]                         (Export, fctl export) → application/zip
+← 200 attachment task-12.zip, every name at its root: task.json, spec.md, decision.md, feedback-<N>.md,
+      round-<N>/ with build.md, diff.patch, review-<security|ux|ui|code>.md; transcripts/<run>/<…>.jsonl
+  # task.json: import_key, title, description_md, status, stage, events, comments (+ transcripts)
+  # transcripts are in only with ?transcripts=1: they can hold paths, env, and secrets
+  # each entry's time is its row's created_at · 404 {"detail":"Task #99 not found"}
 ```
 
 ### 6.3 Rounds, verdicts, decisions

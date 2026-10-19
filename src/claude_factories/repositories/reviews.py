@@ -105,6 +105,30 @@ class ReviewsRepo:
             " WHERE r.task_id = ?", (task_id,),
         ).fetchall()
 
+    def export_verdicts(self, task_id: int) -> list[sqlite3.Row]:
+        """032: every verdict of the task's rounds with its round n and created_at."""
+        return self.conn.execute(
+            "SELECT r.n, v.reviewer, v.verdict, v.body_md, v.created_at FROM verdicts v"
+            " JOIN rounds r ON r.id = v.round_id WHERE r.task_id = ? ORDER BY r.n, v.reviewer", (task_id,),
+        ).fetchall()
+
+    def task_comments(self, task_id: int) -> list[sqlite3.Row]:
+        """032: the task's comments in id order, each with its round's n as `round`."""
+        return self.conn.execute(
+            "SELECT r.n AS round, c.author, c.path, c.line, c.side, c.body_md, c.created_at FROM comments c"
+            " JOIN rounds r ON r.id = c.round_id WHERE c.task_id = ? ORDER BY c.id", (task_id,),
+        ).fetchall()
+
+    def replace_comments(self, task_id: int, comments: list[dict]) -> None:
+        """032 Q6: the task's comments become `comments` (round_id, author, path, line, side, body_md,
+        created_at), in order."""
+        self.conn.execute("DELETE FROM comments WHERE task_id = ?", (task_id,))
+        self.conn.executemany(
+            "INSERT INTO comments (task_id, round_id, author, path, line, side, body_md, created_at)"
+            " VALUES (:task_id, :round_id, :author, :path, :line, :side, :body_md, :created_at)",
+            [c | {"task_id": task_id} for c in comments],
+        )
+
     def approver_latest(self, task_id: int) -> sqlite3.Row | None:
         """007 Q7: only the approver's latest decision, by id."""
         return self.conn.execute(

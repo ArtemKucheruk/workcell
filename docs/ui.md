@@ -27,8 +27,14 @@ links to the fctl reference (item 7) and shows the login runs will use, from
    (`GET`/`PUT /api/projects/{id}/context`): a textarea, a live UTF-8 byte count against the
    16 KB cap (`over the limit` disables Save), and **Save**. It loads when first opened, so
    the 3 s poll never touches a draft. A rendered preview of `context_html` is a follow-up.
+   After **+ New task**, **Import** takes a task bundle (a `.zip` from **Export**) from a file
+   input, disabled until a file is chosen, and posts it raw to `POST /api/projects/{id}/import`.
+   Below the toolbar, `Imported #12 <title>` links to the task, or the refusal's detail shows.
 4. **Task detail** (`/tasks/{id}`)
-   - Header: title, status · stage, branch, Run / Stop / Retry, run status.
+   - Header: title, status · stage, branch, Review, Run / Stop / Retry, run status. Next to
+     Review, **Export** downloads the task bundle (`GET /api/tasks/{id}/export`, a plain
+     `<a download>`), and an **Include transcripts** checkbox adds them, labelled with the
+     warning that they can hold paths, env, and secrets.
    - Spec (rendered markdown).
    - Rounds: build notes (collapsible), 4 chips that open the verdict, and +/−.
    - Agents per round: one row per transcript of that round, with its name (else agent type,
