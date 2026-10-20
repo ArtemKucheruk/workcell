@@ -33,7 +33,7 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20))
 
 const EMPTY_DASHBOARD = {
   tiles: { backlog: 'Backlog' }, counts: { backlog: 0 }, show: '', listed: null,
-  open_tasks: [], done: [], workspaces: [],
+  waiting: [], escalated: [], open_tasks: [], done: [],
 }
 const dashboard = (auth) => ({
   'GET /api/auth': auth,

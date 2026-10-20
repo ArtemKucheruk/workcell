@@ -154,8 +154,9 @@ def fctl_doc() -> dict:
     return {"body_html": html, "headings": headings}
 
 
-def dashboard(tasks: TasksRepo, runs: RunsRepo, workspaces: WorkspacesRepo, show: str) -> dict:
-    """docs/ui.md §8 item 1. `show` only picks one of the repositories' constant SQL fragments."""
+def dashboard(tasks: TasksRepo, runs: RunsRepo, show: str) -> dict:
+    """docs/ui.md §8 item 1. `show` only picks one of the repositories' constant SQL fragments; the Needs you
+    lists ignore it (045 Q10)."""
     counts = tasks.tile_counts()
     listed = None
     if show == "runs_week":  # Q3
@@ -168,7 +169,8 @@ def dashboard(tasks: TasksRepo, runs: RunsRepo, workspaces: WorkspacesRepo, show
                   groupby(tasks.open_by_project(), lambda r: (r["workspace_id"], r["workspace"]))]
     return {
         "tiles": TILES, "counts": counts, "show": show, "listed": listed,
-        "open_tasks": open_tasks, "done": tasks.done_recently(), "workspaces": workspaces.all(),
+        "waiting": tasks.needs_you("waiting"), "escalated": tasks.needs_you("escalated"),
+        "open_tasks": open_tasks, "done": tasks.done_recently(),
     }
 
 

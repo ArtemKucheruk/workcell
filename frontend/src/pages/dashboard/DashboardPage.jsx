@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { dashboardPage } from '../../api/pages.js'
-import { RunningBadge, TaskState } from '../../components/Badge.jsx'
+import { EscalatedPill, RunningBadge, TaskState, WaitingPill } from '../../components/Badge.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { muted } from '../../components/styles.js'
@@ -13,20 +13,93 @@ const num = 'text-right tabular-nums'
 const TaskLink = ({ id, title }) => <Link to={`/tasks/${id}`}>{`#${id} ${title}`}</Link>
 const ProjectLink = ({ id, name }) => <Link to={`/projects/${id}`}>{name}</Link>
 
+/** Q7: the split is frontend-only; the backend's TILES keep their order. */
+const GROUPS = [
+  ['Attention', ['waiting', 'escalated', 'running']],
+  ['Throughput', ['done_week', 'runs_week', 'backlog', 'in_progress', 'review', 'done']],
+]
+// Q6: an Attention count above 0 takes its token on the count and the border; class names in full for Tailwind's scanner
+const HOT = {
+  waiting: ['border-accent', 'text-accent'],
+  escalated: ['border-danger', 'text-danger'],
+  running: ['border-accent', 'text-accent'],
+}
+
 function Tiles({ tiles, counts, show }) {
   return (
-    <ul className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
-      {Object.entries(tiles).map(([key, label]) => (
-        <li key={key}>
-          <Link
-            to={`/?show=${key}`}
-            aria-current={key === show ? 'page' : undefined}
-            className="group grid h-full gap-1 rounded-md border border-line px-3 py-2 text-inherit hover:no-underline aria-[current=page]:border-accent aria-[current=page]:ring-1 aria-[current=page]:ring-accent"
-          >
-            <span className={`text-sm group-hover:underline ${muted}`}>{label}</span>{' '}
-            <strong className="text-3xl tabular-nums">{counts[key]}</strong>
-          </Link>
-        </li>
+    <div className="mt-8 grid gap-4">
+      {GROUPS.map(([group, keys]) => (
+        <div key={group}>
+          <p id={`tiles-${group.toLowerCase()}`} className={`mb-1.5 text-xs font-semibold tracking-wide uppercase ${muted}`}>
+            {group}
+          </p>
+          {/* both groups share one column grid, so their tiles line up */}
+          <ul aria-labelledby={`tiles-${group.toLowerCase()}`} className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
+            {keys.map((key) => {
+              const [border, count] = (counts[key] > 0 && HOT[key]) || ['border-line', '']
+              return (
+                <li key={key}>
+                  <Link
+                    to={`/?show=${key}`}
+                    aria-current={key === show ? 'page' : undefined}
+                    className={`group grid h-full gap-1 rounded-md border px-3 py-2 text-inherit hover:no-underline aria-[current=page]:border-accent aria-[current=page]:ring-1 aria-[current=page]:ring-accent ${border}`}
+                  >
+                    <span className={`text-sm group-hover:underline ${muted}`}>{tiles[key]}</span>{' '}
+                    <strong className={`text-3xl tabular-nums ${count}`}>{counts[key]}</strong>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Q4: floored minutes, hours, or days since `since`, from the clock at render; the future (clock skew) reads 0m. */
+function Age({ since }) {
+  const m = Math.max(0, Math.floor((Date.now() - Date.parse(since)) / 60000))
+  const text = m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`
+  return (
+    <time dateTime={since} className="tabular-nums">
+      {text}
+    </time>
+  )
+}
+
+/** Q3: links to the review, where Approve and Request changes are; an escalated row keeps the Reviews rows' red left bar. */
+function NeedsRow({ task, escalated }) {
+  return (
+    <li
+      className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 border-l-4 bg-surface px-4 py-2.5 ${escalated ? 'border-danger' : 'border-transparent'}`}
+    >
+      <Link to={`/tasks/${task.id}/review`} className="font-medium wrap-anywhere">
+        {`#${task.id} ${task.title}`}
+      </Link>
+      {escalated ? <EscalatedPill /> : <WaitingPill />}
+      <span className={`ml-auto flex flex-wrap items-baseline gap-x-3 text-sm ${muted}`}>
+        <ProjectLink id={task.project_id} name={task.project} />
+        {task.round != null && <span>{`round ${task.round}`}</span>}
+        <Age since={task.since} />
+      </span>
+    </li>
+  )
+}
+
+/** Q2: escalated first, then waiting, each in the backend's newest-first order. Q10: ignores ?show=. */
+function NeedsYou({ waiting, escalated }) {
+  if (!waiting.length && !escalated.length) {
+    return <p className={`rounded-md border border-line px-4 py-3 ${muted}`}>Nothing needs you.</p>
+  }
+  return (
+    // the 1px gaps show the list's `line` background as dividers, as on the Reviews page
+    <ul className="grid gap-px overflow-hidden rounded-md border border-line bg-line">
+      {escalated.map((t) => (
+        <NeedsRow key={t.id} task={t} escalated />
+      ))}
+      {waiting.map((t) => (
+        <NeedsRow key={t.id} task={t} />
       ))}
     </ul>
   )
@@ -78,38 +151,76 @@ function Listed({ page }) {
 function OpenTasks({ open }) {
   if (!open.length) return <p>No open tasks.</p>
   return (
-    <table>
-      <thead>
-        <tr><th scope="col">Project</th><th scope="col">Backlog</th><th scope="col">In progress</th><th scope="col">Review</th></tr>
-      </thead>
-      {open.map((ws) => (
-        <tbody key={ws.id}>
-          <tr>
-            <th colSpan={4} scope="rowgroup"><Link to={`/workspaces/${ws.id}`}>{ws.name}</Link></th>
-          </tr>
-          {ws.projects.map((p) => (
-            <tr key={p.id}>
-              <td className="pl-6"><ProjectLink id={p.id} name={p.name} /></td>
-              <td className={num}>{p.backlog}</td>
-              <td className={num}>{p.in_progress}</td>
-              <td className={num}>{p.review}</td>
+    // Q11: at every width; it scrolls only when the table is wider than the box
+    <div className="overflow-x-auto">
+      <table>
+        <thead>
+          <tr><th scope="col">Project</th><th scope="col">Backlog</th><th scope="col">In progress</th><th scope="col">Review</th></tr>
+        </thead>
+        {open.map((ws) => (
+          <tbody key={ws.id}>
+            <tr>
+              <th colSpan={4} scope="rowgroup"><Link to={`/workspaces/${ws.id}`}>{ws.name}</Link></th>
             </tr>
-          ))}
-        </tbody>
-      ))}
-    </table>
+            {ws.projects.map((p) => (
+              <tr key={p.id}>
+                <td className="pl-6"><ProjectLink id={p.id} name={p.name} /></td>
+                <td className={num}>{p.backlog}</td>
+                <td className={num}>{p.in_progress}</td>
+                <td className={num}>{p.review}</td>
+              </tr>
+            ))}
+          </tbody>
+        ))}
+      </table>
+    </div>
+  )
+}
+
+// in viewBox units, which are px until the svg shrinks to fit
+const BAR = 8
+const GAP = 4
+const TALL = 40
+
+/**
+ * Q8: one bar per done task, oldest left (the table's reverse), height rounds / max. aria-hidden: the table has the
+ * same numbers. BAR + GAP px per task, squeezed to the box's width when many tasks would overflow it.
+ */
+function Bars({ done, max }) {
+  const step = BAR + GAP
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox={`0 0 ${done.length * step - GAP} ${TALL}`}
+      preserveAspectRatio="none"
+      style={{ width: done.length * step - GAP }}
+      className="h-10 max-w-full min-w-0 fill-accent"
+    >
+      {[...done].reverse().map((t, i) => {
+        const h = (TALL * t.rounds) / max
+        return (
+          <rect key={t.id} x={i * step} y={TALL - h} width={BAR} height={h} rx={1}>
+            <title>{`#${t.id} ${t.title}: ${t.rounds} ${t.rounds === 1 ? 'round' : 'rounds'}`}</title>
+          </rect>
+        )
+      })}
+    </svg>
   )
 }
 
 function Rounds({ done }) {
   if (!done.length) return <p>No tasks done in the last 30 days.</p>
   const rounds = done.map((t) => t.rounds)
+  const max = Math.max(...rounds)
   return (
     <>
-      <p>
-        Average <strong>{(rounds.reduce((a, b) => a + b, 0) / rounds.length).toFixed(1)}</strong> · Max{' '}
-        <strong>{Math.max(...rounds)}</strong>
-      </p>
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+        <p>
+          Average <strong>{(rounds.reduce((a, b) => a + b, 0) / rounds.length).toFixed(1)}</strong> · Max{' '}
+          <strong>{max}</strong>
+        </p>
+        <Bars done={done} max={max} />
+      </div>
       <table>
         <thead>
           <tr><th scope="col">Task</th><th scope="col">Project</th><th scope="col">Rounds</th><th scope="col">Done</th></tr>
@@ -129,26 +240,6 @@ function Rounds({ done }) {
   )
 }
 
-function Workspaces({ workspaces }) {
-  if (!workspaces.length) {
-    return (
-      <p>
-        No projects yet. Run <code>{'fctl connect --workspace <name>'}</code> inside a repo.
-      </p>
-    )
-  }
-  return (
-    <ul className="grid gap-1">
-      {workspaces.map((w) => (
-        <li key={w.id}>
-          <Link to={`/workspaces/${w.id}`}>{w.name}</Link>{' '}
-          <span className={muted}>{w.projects === 1 ? '1 project' : `${w.projects} projects`}</span>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 /** docs/ui.md §8 item 1. */
 export function DashboardPage() {
   const [params] = useSearchParams()
@@ -164,6 +255,12 @@ export function DashboardPage() {
   return (
     <>
       <h1 className="mb-4">Dashboard</h1>
+      <section aria-labelledby="needs-you">
+        <h2 id="needs-you" className="mt-0">
+          Needs you
+        </h2>
+        <NeedsYou waiting={page.waiting} escalated={page.escalated} />
+      </section>
       <Tiles tiles={page.tiles} counts={page.counts} show={page.show} />
       {page.show && (
         <section aria-labelledby="listed">
@@ -180,10 +277,6 @@ export function DashboardPage() {
           Rounds per task <span className={`text-sm font-normal ${muted}`}>done in the last 30 days</span>
         </h2>
         <Rounds done={page.done} />
-      </section>
-      <section aria-labelledby="workspaces">
-        <h2 id="workspaces">Workspaces</h2>
-        <Workspaces workspaces={page.workspaces} />
       </section>
     </>
   )

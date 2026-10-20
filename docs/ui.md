@@ -55,12 +55,25 @@ The project pages (Board, Code, Reviews, Context, Settings) share one project he
 state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Settings.
 
 1. **Dashboard** (`/`)
-   - Tiles: tasks per status, waiting on me (`human_review`), escalated, running now, done
-     this week, and runs this week.
-   - A table of open tasks per workspace → project, by status.
-   - Rounds per task for tasks done in the last 30 days: average, max, and the list.
-   - Each tile links to a filtered list. A listed task's Status is its status pill and
-     stage, and a running run's is `● running`; ended runs say how they ended.
+   - First, **Needs you**: the escalated tasks, then the ones waiting on me (`human_review`),
+     each newest first. A row shows `#id title` linking to `/tasks/{id}/review`, its
+     `escalated` or `waiting on you` pill, the project linking to its board, `round N` (left
+     out when the task has no rounds), and the age since the task last changed (`5m`, `3h`,
+     `2d`). An escalated row keeps the red left bar. With none, it says `Nothing needs you.`
+     It ignores `?show=`.
+   - Tiles in two groups, each under a small `muted` label. **Attention**: waiting on me,
+     escalated, and running now. A count above 0 colors the tile's count and border,
+     `danger` for escalated and `accent` for the other two; at 0 they stay `fg` and `line`.
+     **Throughput**: done this week, runs this week, then tasks per status (Backlog, In
+     progress, Review, Done). Each count is large, and its label `muted`.
+   - Each tile links to a filtered list, shown after the tiles. A listed task's Status is
+     its status pill and stage, and a running run's is `● running`; ended runs say how they
+     ended.
+   - A table of open tasks per workspace → project, by status. It sits in its own box that
+     scrolls sideways when the table is wider than the screen.
+   - Rounds per task for tasks done in the last 30 days: average and max, with one small
+     inline-SVG bar per task beside them, oldest left, its height rounds / max, in `accent`,
+     and the list.
 2. **Workspace** (`/workspaces/{id}`): one row per project with name, path, counts per
    status, factory state (none / uncommitted / ready), and last activity. **+ Workspace**
    creates one. For each project, its Settings page (item 12) moves it to another workspace.

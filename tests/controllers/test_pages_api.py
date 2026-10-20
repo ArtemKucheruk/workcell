@@ -612,6 +612,7 @@ def test_dashboard(client, project):  # AC4
     add_round(done, 1)
     add_round(done, 2)
     page = api(client, "/api/pages/dashboard")
+    assert list(page) == ["tiles", "counts", "show", "listed", "waiting", "escalated", "open_tasks", "done"]  # 045 BE6
     assert list(page["tiles"].items()) == list(pages.TILES.items())
     assert list(page["counts"]) == list(pages.TILES)
     assert page["counts"]["backlog"] == 2 and page["counts"]["done"] == 1 and page["counts"]["runs_week"] == 0
@@ -625,8 +626,7 @@ def test_dashboard(client, project):  # AC4
     ]
     assert page["done"] == [{"id": done, "title": "d", "done_at": now, "project_id": project, "project": "repo",
                              "rounds": 2}]
-    assert page["workspaces"] == [{"id": ws_id("personal"), "name": "personal", "projects": 1},
-                                  {"id": ws_id("work"), "name": "work", "projects": 1}]
+    assert (page["waiting"], page["escalated"]) == ([], [])
 
 
 def test_dashboard_waiting(client, project):  # AC5
@@ -677,6 +677,84 @@ def test_dashboard_done_list(client, project):  # 026 AC19
     done_task(project, 1)  # no rounds
     done = api(client, "/api/pages/dashboard")["done"]
     assert [(d["id"], d["rounds"]) for d in done] == [(newer, 1), (older, 2)]
+
+
+def needs_you(project_id, stage, at=OLD, rounds=0, title="t", status="review"):
+    """045: a task at `status` · `stage` last updated `at`, with rounds 1..rounds."""
+    tid = add_task(project_id, title=title, status=status, stage=stage)
+    sql("UPDATE tasks SET updated_at = ? WHERE id = ?", (at, tid))
+    for n in range(1, rounds + 1):
+        add_round(tid, n)
+    return tid
+
+
+def test_dashboard_needs_you(client, project):  # 045 BE1
+    waiting = needs_you(project, "human_review", "2026-10-18T09:00:00Z", rounds=2, title="w")
+    escalated = needs_you(project, "escalated", "2026-10-17T08:30:00Z", rounds=1, title="e")
+    page = api(client, "/api/pages/dashboard")
+    assert page["waiting"] == [{"id": waiting, "title": "w", "project_id": project, "project": "repo", "round": 2,
+                                "since": "2026-10-18T09:00:00Z"}]
+    assert page["escalated"] == [{"id": escalated, "title": "e", "project_id": project, "project": "repo",
+                                  "round": 1, "since": "2026-10-17T08:30:00Z"}]
+
+
+def test_dashboard_needs_you_only_review_stages(client, project):  # 045 BE2
+    waiting, escalated = needs_you(project, "human_review"), needs_you(project, "escalated")
+    needs_you(project, None, status="backlog")
+    for stage in (None, "spec", "build", "agent_review", "approval", "rework"):
+        needs_you(project, stage, status="in_progress", rounds=1)
+    needs_you(project, None, rounds=1)
+    needs_you(project, None, status="done", rounds=1)
+    page = api(client, "/api/pages/dashboard")
+    assert [t["id"] for t in page["waiting"]] == [waiting]
+    assert [t["id"] for t in page["escalated"]] == [escalated]
+
+
+def test_dashboard_needs_you_order(client, project):  # 045 BE3
+    older = needs_you(project, "human_review", "2026-10-18T09:00:00Z")
+    newest = needs_you(project, "human_review", "2026-10-19T09:00:00Z")
+    tie = needs_you(project, "human_review", "2026-10-18T09:00:00Z")  # same since as `older`, higher id
+    assert [t["id"] for t in api(client, "/api/pages/dashboard")["waiting"]] == [newest, tie, older]
+
+
+def test_dashboard_needs_you_no_rounds(client, project):  # 045 BE4
+    tid = needs_you(project, "human_review")
+    assert [(t["id"], t["round"]) for t in api(client, "/api/pages/dashboard")["waiting"]] == [(tid, None)]
+
+
+def test_dashboard_needs_you_ignores_show(client, project):  # 045 BE5
+    needs_you(project, "human_review", rounds=2)
+    needs_you(project, "escalated", rounds=1)
+    add_run(add_task(project, status="in_progress", stage="build"), "succeeded", started=db.now())
+    base = api(client, "/api/pages/dashboard")
+    assert base["waiting"] and base["escalated"]
+    for show in ("runs_week", "waiting", "bogus"):
+        page = api(client, f"/api/pages/dashboard?show={show}")
+        assert (page["waiting"], page["escalated"]) == (base["waiting"], base["escalated"]), show
+
+
+def test_dashboard_docs():  # 045 BE7
+    ui = section("ui.md", "## 8.")
+    item = ui[ui.index("1. **Dashboard** (`/`)"):ui.index("2. **Workspace**")]
+    bullets = item.split("\n   - ")[1:]
+    assert bullets[0].startswith("First, **Needs you**")
+    needs = " ".join(bullets[0].split())
+    for part in ("`#id title` linking to `/tasks/{id}/review`", "the project linking to its board", "`round N`",
+                 "the age since the task last changed", "red left bar", "`Nothing needs you.`", "ignores `?show=`"):
+        assert part in needs, part
+    assert needs.index("escalated tasks") < needs.index("waiting on me")  # Q2
+    tiles = " ".join(bullets[1].split())
+    assert "**Attention**: waiting on me, escalated, and running now." in tiles
+    assert "`danger` for escalated and `accent` for the other two" in tiles  # Q6
+    assert "**Throughput**: done this week, runs this week, then tasks per status" in tiles  # Q7
+    flat = " ".join(item.split())
+    assert "scrolls sideways" in flat
+    assert "average and max, with one small inline-SVG bar per task beside them, oldest left" in flat  # Q8
+    assert "Workspaces" not in item and "No projects yet" not in item  # Q9
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    row = api_doc[api_doc.index("GET  /api/pages/dashboard"):api_doc.index("GET  /api/pages/workspaces/{id}")]
+    assert "the waiting and escalated lists" in row
+    assert "round, since}" in row
 
 
 # --- GET /api/pages/workspaces/{id} ---------------------------------------------------
