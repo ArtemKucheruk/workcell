@@ -34,7 +34,7 @@ beforeEach(() => {
 test('AC20: / shows the 9 tiles in order with counts, each linking to its list', async () => {
   const fetch = mockFetch({ 'GET /api/pages/dashboard': [200, page()] })
   renderAt('/')
-  const tiles = within((await screen.findAllByRole('list'))[0]).getAllByRole('link')
+  const tiles = within((await within(screen.getByRole('main')).findAllByRole('list'))[0]).getAllByRole('link')
   expect(tiles.map((a) => [a.textContent, href(a)])).toEqual(
     Object.entries(TILES).map(([key, label]) => [`${label} ${COUNTS[key]}`, `/?show=${key}`]),
   )

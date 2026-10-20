@@ -35,6 +35,15 @@ test('AC27: /workspaces/2 shows the name, title, and one row per project', async
   expect(rows[0].querySelector('time').getAttribute('datetime')).toBe('2026-10-18T09:05:00Z')
 })
 
+test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {
+  mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal', PROJECTS) })
+  renderAt('/workspaces/2')
+  await screen.findByRole('heading', { level: 1, name: 'personal' })
+  const main = within(screen.getByRole('main'))
+  expect(main.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
+  expect(main.queryByRole('link', { name: 'Claude Factories' })).toBeNull()
+})
+
 test('AC28: no projects says how to connect one to this workspace', async () => {
   mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal') })
   renderAt('/workspaces/2')

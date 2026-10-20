@@ -3,6 +3,7 @@
 import sqlite3
 
 from .. import db
+from .tasks import TILE_TASKS
 
 
 class ProjectsRepo:
@@ -62,6 +63,18 @@ class ProjectsRepo:
             " FROM projects p LEFT JOIN tasks t ON t.project_id = p.id"
             " WHERE p.workspace_id = ? GROUP BY p.id ORDER BY p.name",
             (workspace_id,),
+        ).fetchall()
+
+    def for_sidebar(self) -> list[sqlite3.Row]:
+        """041: every workspace by name, each of its projects by name then id (Q4) with their review, running,
+        and escalated counts (Q1). A workspace with no projects is one row whose project columns are NULL."""
+        return self.conn.execute(
+            "SELECT w.id AS workspace_id, w.name AS workspace, p.id, p.name,"
+            f" COUNT(t.id) FILTER (WHERE {TILE_TASKS['waiting']} OR {TILE_TASKS['escalated']}) AS review,"
+            f" COUNT(t.id) FILTER (WHERE {TILE_TASKS['running']}) AS running,"
+            f" COUNT(t.id) FILTER (WHERE {TILE_TASKS['escalated']}) AS escalated"
+            " FROM workspaces w LEFT JOIN projects p ON p.workspace_id = w.id LEFT JOIN tasks t ON t.project_id = p.id"
+            " GROUP BY w.id, p.id ORDER BY w.name, p.name, p.id"
         ).fetchall()
 
     def for_board(self, project_id: int) -> sqlite3.Row | None:

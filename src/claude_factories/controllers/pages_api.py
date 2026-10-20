@@ -89,6 +89,14 @@ def fctl_doc() -> dto.FctlDoc:
     return handler.fctl_doc()
 
 
+@router.get("/api/pages/sidebar")
+def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, task: int | None = None,
+            transcript: int | None = None) -> dto.SidebarPage:
+    """041: fetched on load and after each navigation, never polled. A non-integer id is FastAPI's 422 (Q3)."""
+    page = handler.sidebar(projects, tasks, transcripts, task, transcript)
+    return page | {"workspaces": [w | {"projects": objs(w["projects"])} for w in page["workspaces"]]}
+
+
 @router.get("/api/pages/dashboard")
 def dashboard(tasks: Tasks, runs: Runs, workspaces: Workspaces, show: str = "") -> dto.DashboardPage:
     page = handler.dashboard(tasks, runs, workspaces, show)

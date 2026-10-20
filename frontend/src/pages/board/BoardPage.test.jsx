@@ -86,6 +86,13 @@ test('AC1: /projects/3 shows the project, its workspace, path, title, and Code l
   expect(screen.getByRole('link', { name: 'Code' }).getAttribute('href')).toBe('/projects/3/code')
 })
 
+test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {
+  await open(board())
+  const main = within(screen.getByRole('main'))
+  expect(main.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
+  expect(main.queryByRole('link', { name: 'Claude Factories' })).toBeNull()
+})
+
 test('AC2: ready shows Factory: ready ✓ and no form; uncommitted and none show the Create factory form', async () => {
   const ready = await open(board())
   expect(screen.getByText('Factory: ready ✓')).toBeTruthy()

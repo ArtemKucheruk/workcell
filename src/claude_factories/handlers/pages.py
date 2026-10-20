@@ -1,5 +1,5 @@
-"""Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), the header's
-login badge, the Settings page's Claude login (§8 item 9), and the fctl reference (§8 item 7). Each page
+"""Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), the sidebar (041),
+its login badge, the Settings page's Claude login (§8 item 9), and the fctl reference (§8 item 7). Each page
 returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
 import re
@@ -170,6 +170,23 @@ def dashboard(tasks: TasksRepo, runs: RunsRepo, workspaces: WorkspacesRepo, show
         "tiles": TILES, "counts": counts, "show": show, "listed": listed,
         "open_tasks": open_tasks, "done": tasks.done_recently(), "workspaces": workspaces.all(),
     }
+
+
+def sidebar(projects: ProjectsRepo, tasks: TasksRepo, transcripts: TranscriptsRepo, task: int | None,
+            transcript: int | None) -> dict:
+    """041: every workspace with its projects, and `current`: the workspace and project of `task`, or of
+    `transcript`'s task. None without either, or for an unknown id (never a 404). No git, no claude."""
+    rows = projects.for_sidebar()
+    workspaces = [{"id": ws_id, "name": name, "projects": [r for r in group if r["id"] is not None]}
+                  for (ws_id, name), group in groupby(rows, lambda r: (r["workspace_id"], r["workspace"]))]
+    if task is None and transcript is not None:
+        found = transcripts.get(transcript)
+        task = found["task_id"] if found else None
+    found = tasks.for_page(task) if task is not None else None
+    project_id = found["project_id"] if found else None
+    owner = {r["id"]: r["workspace_id"] for r in rows if r["id"] is not None}
+    current = {"workspace_id": owner[project_id], "project_id": project_id} if project_id in owner else None
+    return {"workspaces": workspaces, "current": current}
 
 
 def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, workspace_id: int) -> dict:

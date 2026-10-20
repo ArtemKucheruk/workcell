@@ -42,6 +42,33 @@ class FctlDoc(BaseModel):
     headings: list[Heading]  # every heading, in document order
 
 
+# --- GET /api/pages/sidebar (docs/ui.md §8, §8.4; 041) ---------------------------------
+
+
+class SidebarProject(BaseModel):
+    id: int
+    name: str
+    review: int  # Q1: stage human_review or escalated
+    running: int  # with a running run
+    escalated: int  # stage escalated
+
+
+class SidebarWorkspace(BaseModel):
+    id: int
+    name: str
+    projects: list[SidebarProject]  # by name, then id (Q4)
+
+
+class SidebarCurrent(BaseModel):
+    workspace_id: int
+    project_id: int
+
+
+class SidebarPage(BaseModel):
+    workspaces: list[SidebarWorkspace]  # every workspace by name, the empty ones too
+    current: SidebarCurrent | None  # ?task= or ?transcript='s project; null without one or for an unknown id
+
+
 # --- GET /api/pages/dashboard (docs/ui.md §8 item 1) -----------------------------------
 
 

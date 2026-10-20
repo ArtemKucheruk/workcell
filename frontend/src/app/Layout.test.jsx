@@ -1,8 +1,35 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { fetched, mockFetch, renderAt } from '../test/render.jsx'
+
+// FE17: jsdom 30 has neither; these do what the drawer relies on: `open`, and close() firing `close` once
+const dialogProto = HTMLDialogElement.prototype
+dialogProto.showModal ??= function showModal() {
+  this.open = true
+}
+dialogProto.close ??= function close() {
+  if (!this.open) return
+  this.open = false
+  this.dispatchEvent(new Event('close'))
+}
+
+beforeEach(() => localStorage.clear())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.useRealTimers()
+})
+
+/** 041's GET /api/pages/sidebar, one workspace with one project. */
+const SIDEBAR = {
+  workspaces: [{ id: 2, name: 'personal', projects: [{ id: 3, name: 'api', review: 0, running: 0, escalated: 0 }] }],
+  current: null,
+}
+const nav = () => screen.getByRole('navigation', { name: 'Sidebar' })
+const sidebar = () => within(nav())
+const sidebarCalls = (fetch) => fetched(fetch).filter((url) => url.startsWith('/api/pages/sidebar'))
+const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)))
 
 const EMPTY_DASHBOARD = {
   tiles: { backlog: 'Backlog' }, counts: { backlog: 0 }, show: '', listed: null,
@@ -13,70 +40,72 @@ const dashboard = (auth) => ({
   'GET /api/pages/dashboard': [200, EMPTY_DASHBOARD],
 })
 
-test('AC14: a pro subscription shows Claude: Pro ✓', async () => {
+test('FE2 (AC14): a pro subscription shows Claude: Pro ✓ in the sidebar', async () => {
   mockFetch(dashboard([200, { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true }]))
   renderAt('/')
-  expect(await within(screen.getByRole('banner')).findByText('Claude: Pro ✓')).toBeTruthy()
+  expect(await sidebar().findByText('Claude: Pro ✓')).toBeTruthy()
 })
 
-test('AC14: plan null with runs enabled reads like the Jinja badge', async () => {
+test('FE2 (AC14): plan null with runs enabled reads like the Jinja badge', async () => {
   mockFetch(dashboard([200, { auth_method: 'claude.ai', plan: null, runs_enabled: true }]))
   renderAt('/')
-  expect(await screen.findByText('Claude: subscription ✓')).toBeTruthy()
+  expect(await sidebar().findByText('Claude: subscription ✓')).toBeTruthy()
 })
 
-test('AC15: runs disabled shows the red API key badge', async () => {
+test('FE2 (AC15): runs disabled shows the red API key badge', async () => {
   mockFetch(dashboard([200, { auth_method: null, plan: null, runs_enabled: false }]))
   renderAt('/')
-  const badge = await screen.findByText('API key — runs disabled')
+  const badge = await sidebar().findByText('API key — runs disabled')
   expect(badge.className).toMatch(/(^|\s)text-danger(\s|$)/)
 })
 
-test('AC16: a failed /api/auth shows no badge and the page still renders', async () => {
+test('FE2 (AC16): a failed /api/auth shows no badge and the page still renders', async () => {
   for (const auth of [[500, { detail: 'boom' }], new TypeError('Failed to fetch')]) {
     const fetch = mockFetch(dashboard(auth))
     const { unmount } = renderAt('/')
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeTruthy()
     await waitFor(() => expect(fetched(fetch)).toContain('/api/auth'))
     expect(screen.queryByText(/Claude:|API key/)).toBeNull()
+    expect(sidebar().getByRole('link', { name: 'Dashboard' })).toBeTruthy()
     unmount()
   }
 })
 
-test('AC17: the header links Claude Factories to / on both pages', async () => {
+test('FE1 (AC17, 029 AC21): the sidebar holds the app name, the workspace area, Dashboard, fctl reference, then the badge', async () => {
   mockFetch({
-    ...dashboard([500, {}]),
-    'GET /api/pages/workspaces/2': [200, { workspace: { id: 2, name: 'work' }, projects: [] }],
-  })
-  for (const path of ['/', '/workspaces/2']) {
-    const { unmount } = renderAt(path)
-    const link = within(screen.getByRole('banner')).getByRole('link', { name: 'Claude Factories' })
-    expect(link.getAttribute('href')).toBe('/')
-    unmount()
-  }
-})
-
-test('029 AC21: every page header links fctl reference to /docs/fctl', async () => {
-  mockFetch({
-    ...dashboard([500, {}]),
+    ...dashboard([200, PRO]),
     'GET /api/pages/workspaces/2': [200, { workspace: { id: 2, name: 'work' }, projects: [] }],
     'GET /api/docs/fctl': [200, { body_html: '', headings: [] }],
+    'GET /api/pages/sidebar': [200, SIDEBAR],
   })
-  for (const path of ['/', '/workspaces/2', '/docs/fctl']) {
+  for (const path of ['/', '/workspaces/2', '/docs/fctl', '/nope']) {
     const { unmount } = renderAt(path)
-    const link = within(screen.getByRole('banner')).getByRole('link', { name: 'fctl reference' })
-    expect(link.getAttribute('href')).toBe('/docs/fctl')
+    const badge = await sidebar().findByRole('link', { name: 'Claude: Pro ✓' })
+    const workspace = await sidebar().findByRole('combobox', { name: 'Workspace' })
+    const link = (name) => sidebar().getByRole('link', { name })
+    expect(link('Claude Factories').getAttribute('href')).toBe('/')
+    expect(link('Dashboard').getAttribute('href')).toBe('/')
+    expect(link('fctl reference').getAttribute('href')).toBe('/docs/fctl')
+    const order = [link('Claude Factories'), workspace, link('Dashboard'), link('fctl reference'), badge]
+    for (let i = 1; i < order.length; i++) {
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    // the old top header is gone: these links are only in the sidebar
+    for (const name of ['Claude Factories', 'Dashboard', 'fctl reference']) {
+      expect(screen.getAllByRole('link', { name })).toEqual([link(name)])
+    }
+    expect(screen.queryByRole('banner')).toBeNull()
     unmount()
   }
 })
 
-test('AC18: an unknown route shows Page not found with a link home, and loads no page view-model', async () => {
+test('AC18: an unknown route shows Page not found with a link home, and loads no page view-model but the sidebar', async () => {
   const fetch = mockFetch({ 'GET /api/auth': [500, {}] })
   renderAt('/nope')
   expect(screen.getByRole('heading', { name: 'Page not found' })).toBeTruthy()
   expect(screen.getByRole('link', { name: 'Go to the dashboard' }).getAttribute('href')).toBe('/')
   await waitFor(() => expect(fetched(fetch)).toContain('/api/auth'))
-  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages/'))).toEqual([])
+  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages/') && url !== '/api/pages/sidebar')).toEqual([])
 })
 
 test('AC19: the page declares light and dark, and dark: follows the system', () => {
@@ -92,20 +121,20 @@ test('AC19: the page declares light and dark, and dark: follows the system', () 
 const PRO = { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true, email: null }
 const OFF = { auth_method: null, plan: null, runs_enabled: false, email: null }
 
-test('039 AC17: the badge links to /settings, and the runs-disabled one stays red', async () => {
+test('FE2 (039 AC17): the badge links to /settings, and the runs-disabled one stays red', async () => {
   mockFetch(dashboard([200, PRO]))
   const { unmount } = renderAt('/')
-  const pro = await within(screen.getByRole('banner')).findByRole('link', { name: 'Claude: Pro ✓' })
+  const pro = await sidebar().findByRole('link', { name: 'Claude: Pro ✓' })
   expect(pro.getAttribute('href')).toBe('/settings')
   unmount()
   mockFetch(dashboard([200, OFF]))
   renderAt('/')
-  const off = await within(screen.getByRole('banner')).findByRole('link', { name: 'API key — runs disabled' })
+  const off = await sidebar().findByRole('link', { name: 'API key — runs disabled' })
   expect(off.getAttribute('href')).toBe('/settings')
   expect(off.className).toMatch(/(^|\s)text-danger(\s|$)/)
 })
 
-test('039 AC18: the header re-fetches /api/auth every 3 s and the badge follows it', async () => {
+test('FE2 (039 AC18): the sidebar re-fetches /api/auth every 3 s and the badge follows it', async () => {
   vi.useFakeTimers()
   try {
     const responses = dashboard([200, OFF])
@@ -114,16 +143,148 @@ test('039 AC18: the header re-fetches /api/auth every 3 s and the badge follows 
     const auths = () => fetched(fetch).filter((url) => url === '/api/auth').length
     renderAt('/')
     await advance(0)
-    const banner = within(screen.getByRole('banner'))
-    expect(banner.getByText('API key — runs disabled')).toBeTruthy()
+    const side = sidebar()
+    expect(side.getByText('API key — runs disabled')).toBeTruthy()
     responses['GET /api/auth'] = [200, PRO]
     await advance(2999)
     expect(auths()).toBe(1)
     await advance(1)
     expect(auths()).toBe(2)
-    expect(banner.getByText('Claude: Pro ✓')).toBeTruthy()
-    expect(banner.queryByText('API key — runs disabled')).toBeNull()
+    expect(side.getByText('Claude: Pro ✓')).toBeTruthy()
+    expect(side.queryByText('API key — runs disabled')).toBeNull()
   } finally {
     vi.useRealTimers()
+  }
+})
+
+test('FE3: each route fetches the sidebar once, with ?task= or ?transcript= only from an all-digit id', async () => {
+  for (const [path, url] of [
+    ['/tasks/12', '/api/pages/sidebar?task=12'],
+    ['/tasks/12/review', '/api/pages/sidebar?task=12'],
+    ['/transcripts/5', '/api/pages/sidebar?transcript=5'],
+    ['/', '/api/pages/sidebar'],
+    ['/projects/3', '/api/pages/sidebar'],
+    ['/tasks/abc', '/api/pages/sidebar'],
+  ]) {
+    const fetch = mockFetch({ [`GET ${url}`]: [200, SIDEBAR] })
+    const { unmount } = renderAt(path)
+    // anything but `url` is a 404, which shows no combobox
+    expect(await sidebar().findByRole('combobox', { name: 'Workspace' })).toBeTruthy()
+    await settle()
+    expect(sidebarCalls(fetch)).toEqual([url])
+    unmount()
+  }
+})
+
+test('FE4: a click on a sidebar link, or a ?path= change on the code page, sends one more sidebar request', async () => {
+  const fetch = mockFetch({
+    'GET /api/pages/sidebar': [200, SIDEBAR],
+    'GET /api/docs/fctl': [200, { body_html: '', headings: [] }],
+  })
+  const { router, unmount } = renderAt('/')
+  await sidebar().findByRole('combobox', { name: 'Workspace' })
+  expect(sidebarCalls(fetch)).toHaveLength(1)
+  fireEvent.click(sidebar().getByRole('link', { name: 'fctl reference' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/docs/fctl'))
+  await settle()
+  expect(sidebarCalls(fetch)).toEqual(['/api/pages/sidebar', '/api/pages/sidebar'])
+  unmount()
+
+  const code = mockFetch({ 'GET /api/pages/sidebar': [200, SIDEBAR] })
+  const view = renderAt('/projects/3/code')
+  await sidebar().findByRole('combobox', { name: 'Workspace' })
+  await act(() => view.router.navigate('/projects/3/code?path=src%2Fa.py'))
+  await settle()
+  expect(sidebarCalls(code)).toEqual(['/api/pages/sidebar', '/api/pages/sidebar'])
+})
+
+test('FE4: with no navigation, 10 s sends no sidebar request: it is not polled', async () => {
+  vi.useFakeTimers()
+  const fetch = mockFetch({ ...dashboard([200, PRO]), 'GET /api/pages/sidebar': [200, SIDEBAR] })
+  renderAt('/')
+  await act(() => vi.advanceTimersByTimeAsync(0))
+  expect(sidebarCalls(fetch)).toHaveLength(1)
+  await act(() => vi.advanceTimersByTimeAsync(10_000))
+  expect(sidebarCalls(fetch)).toHaveLength(1)
+  expect(fetched(fetch).filter((url) => url === '/api/auth').length).toBeGreaterThan(1) // the clock did run
+})
+
+/** Renders `path` and opens the drawer; returns the dialog, the Menu button, and the router. */
+async function openDrawer(path = '/nope') {
+  mockFetch({
+    'GET /api/pages/sidebar': [200, SIDEBAR],
+    'GET /api/docs/fctl': [200, { body_html: '', headings: [] }],
+  })
+  const { router } = renderAt(path)
+  await sidebar().findByRole('combobox', { name: 'Workspace' })
+  const menu = screen.getByRole('button', { name: 'Menu' })
+  fireEvent.click(menu)
+  const dialog = screen.getByRole('dialog', { name: 'Menu' })
+  await within(dialog).findByRole('combobox', { name: 'Workspace' })
+  return { dialog, menu, router }
+}
+
+test('FE17: Menu opens a <dialog> drawer through showModal, holding the sidebar; the column is hidden below md', async () => {
+  const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal')
+  mockFetch({ 'GET /api/pages/sidebar': [200, SIDEBAR] })
+  renderAt('/nope')
+  const menu = screen.getByRole('button', { name: 'Menu' })
+  expect(menu.getAttribute('aria-haspopup')).toBe('dialog')
+  expect(menu.className).toMatch(/(^|\s)md:hidden(\s|$)/)
+  const column = nav().parentElement
+  expect(column.className).toMatch(/(^|\s)hidden(\s|$)/)
+  expect(column.className).toMatch(/(^|\s)md:(block|flex|grid)(\s|$)/)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.click(menu)
+  expect(showModal).toHaveBeenCalledOnce()
+  const dialog = screen.getByRole('dialog', { name: 'Menu' })
+  expect(dialog.tagName).toBe('DIALOG')
+  const drawer = within(within(dialog).getByRole('navigation', { name: 'Sidebar' }))
+  expect(await drawer.findByRole('combobox', { name: 'Workspace' })).toBeTruthy()
+  expect(drawer.getByRole('link', { name: 'Claude Factories' }).getAttribute('href')).toBe('/')
+  expect(drawer.getByRole('link', { name: 'fctl reference' }).getAttribute('href')).toBe('/docs/fctl')
+})
+
+test('FE18: the close event that Esc raises closes the drawer and leaves focus on Menu', async () => {
+  const { dialog, menu } = await openDrawer()
+  within(dialog).getByRole('link', { name: 'Dashboard' }).focus()
+  act(() => dialog.close())
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(menu)
+  expect(screen.getAllByRole('navigation', { name: 'Sidebar' })).toHaveLength(1)
+})
+
+test("FE18: a click on the backdrop closes the drawer; a click inside its content doesn't", async () => {
+  const { dialog, menu } = await openDrawer()
+  fireEvent.click(within(dialog).getByRole('navigation', { name: 'Sidebar' }))
+  fireEvent.click(within(dialog).getByRole('combobox', { name: 'Workspace' }))
+  expect(dialog.open).toBe(true)
+  fireEvent.click(dialog)
+  expect(dialog.open).toBe(false)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(menu)
+})
+
+test('FE18: a link in the drawer navigates and closes it', async () => {
+  const { dialog, router } = await openDrawer()
+  fireEvent.click(within(dialog).getByRole('link', { name: 'fctl reference' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/docs/fctl'))
+  expect(dialog.open).toBe(false)
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('FE19: main drops max-w-6xl on the board, code, and review pages, and keeps mx-auto max-w-6xl elsewhere', () => {
+  mockFetch({})
+  const main = (path) => {
+    const { unmount } = renderAt(path)
+    const classes = screen.getByRole('main').className.split(/\s+/)
+    unmount()
+    return classes
+  }
+  for (const path of ['/projects/3', '/projects/3/code', '/tasks/12/review']) {
+    expect(main(path)).not.toContain('max-w-6xl')
+  }
+  for (const path of ['/', '/tasks/12', '/settings']) {
+    expect(main(path)).toEqual(expect.arrayContaining(['mx-auto', 'max-w-6xl']))
   }
 })

@@ -422,9 +422,6 @@ export function BoardPage() {
   return (
     <>
       <header className="mb-6 grid gap-3">
-        <nav aria-label="Breadcrumb" className="text-sm">
-          <Link to="/">Claude Factories</Link>
-        </nav>
         <h1>
           {project.name} · <Link to={`/workspaces/${project.workspace_id}`}>{project.workspace}</Link>
         </h1>
