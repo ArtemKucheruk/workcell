@@ -73,7 +73,7 @@ below is designed but not built yet. Each step lists the backlog job that adds i
 ```sh
 fctl setup                  # 015: installs the /factory-connect and /factory-submit skills
 /factory-connect personal   # 002: run in a repo's Claude Code session to register the repo
-                            # 011: board → Create factory writes .claude/ into the repo
+                            # 011: Settings → Create factory writes .claude/ into the repo
 ```
 
 The full walkthrough, from connecting a repo to approving a task, is in

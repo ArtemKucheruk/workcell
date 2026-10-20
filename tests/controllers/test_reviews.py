@@ -477,7 +477,7 @@ WT = "/code/api/.claude/worktrees/12-rate-limit-login"
 BRANCH = "factory/12-rate-limit-login"
 PATCH = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"
 # 013 Q12: /code/api isn't a repo, so a factory task's rework spawn gets run_task's no-factory 409 (015 wording)
-NO_FACTORY = "factory isn't committed on main: Create factory on the project board, then commit it on main"
+NO_FACTORY = "factory isn't committed on main: Create factory in the project's Settings, then commit it on main"
 
 
 def task_with_rounds(project_id, n=2, status="review", stage="human_review", **kw):

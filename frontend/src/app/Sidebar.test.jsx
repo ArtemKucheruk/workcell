@@ -166,7 +166,7 @@ test('FE10 (Q8): Cancel or Esc hides the field and returns focus to + New worksp
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('FE11: each project is a disclosure button for Board and Code, and no other project link', async () => {
+test('FE11, 042 FE34: each project is a disclosure button for Board, Code, Reviews, Context, and Settings', async () => {
   await open('/')
   const button = projectButton('api-server')
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -178,11 +178,24 @@ test('FE11: each project is a disclosure button for Board and Code, and no other
   expect(within(list).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
     ['Board', '/projects/3'],
     ['Code', '/projects/3/code'],
+    ['Reviews', '/projects/3/reviews'],
+    ['Context', '/projects/3/context'],
+    ['Settings', '/projects/3/settings'],
   ])
-  for (const name of ['Reviews', 'Context', 'Settings']) expect(sidebar().queryByRole('link', { name })).toBeNull()
   fireEvent.click(button)
   expect(button.getAttribute('aria-expanded')).toBe('false')
   expect(within(list).queryAllByRole('link')).toEqual([])
+})
+
+test("042 FE35: Reviews shows the project's review count above 0, and no number at 0", async () => {
+  const counted = { id: 2, name: 'personal', projects: [{ ...project(3, 'api-server'), review: 2 }, project(7, 'web')] }
+  await open('/', body(null, [counted]))
+  fireEvent.click(projectButton('api-server'))
+  fireEvent.click(projectButton('web'))
+  expect(linksOf('api-server').getByRole('link', { name: 'Reviews 2' }).getAttribute('href')).toBe('/projects/3/reviews')
+  const zero = linksOf('web').getByRole('link', { name: 'Reviews' })
+  expect(zero.textContent).toBe('Reviews')
+  expect(zero.getAttribute('href')).toBe('/projects/7/reviews')
 })
 
 test('FE12: on /projects/3 project 3 opens by itself and Board is the current link', async () => {

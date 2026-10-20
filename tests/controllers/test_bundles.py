@@ -674,8 +674,10 @@ def test_docs():  # AC50
     assert "| `fctl export <id> [-o FILE] [--transcripts]` |" in cc_doc
     assert "| `fctl import FILE` |" in cc_doc
     ui = (ROOT / "docs" / "ui.md").read_text()
-    board, task = between(ui, "\n3. **Project board**", "\n4. "), between(ui, "\n4. **Task detail**", "\n5. ")
-    assert "**Import**" in board and "**Export**" in task and "**Include transcripts**" in task
+    # 042: Import moved from the board (item 3) to the project's Settings page (item 12)
+    settings = between(ui, "\n12. **Project settings**", "\n### 8.1")
+    task = between(ui, "\n4. **Task detail**", "\n5. ")
+    assert "**Import**" in settings and "**Export**" in task and "**Include transcripts**" in task
     mvp = (ROOT / "docs" / "MVP.md").read_text()
     safety = between(mvp, "### 4.5", "### 4.6")
     assert "task bundle" in safety and "`MAX_BUNDLE`" in safety and "`MAX_UNPACKED`" in safety

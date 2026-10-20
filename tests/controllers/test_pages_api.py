@@ -30,7 +30,7 @@ SUMMARY_KEYS = {"n", "trigger", "files", "additions", "deletions", "verdicts"}
 CONSOLE = '{"authMethod":"console"}'
 UNCOMMITTED = ("factory isn't committed on main: on main, run git add .claude/skills/factory .claude/agents"
                ' && git commit -m "Add factory"')
-NONE = "factory isn't committed on main: Create factory on the project board, then commit it on main"
+NONE = "factory isn't committed on main: Create factory in the project's Settings, then commit it on main"
 STRIPPED = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK")
 STARTED = "2026-10-18T10:02:00Z"
 WORKTREE = "/code/api/.claude/worktrees/12-x"
@@ -566,6 +566,37 @@ def test_sidebar_docs():  # 041 BE8
     assert ui.index("### 8.3") < ui.index("### 8.4 Sidebar")
 
 
+def test_project_pages_docs():  # 042 BE6
+    ui = section("ui.md", "## 8.")
+    intro = ui[:ui.index("1. **Dashboard**")]
+    for text in ("Reviews", "Context", "project header"):
+        assert text in intro, text
+    board = ui[ui.index("3. **Project board**"):ui.index("4. **Task detail**")]
+    for text in ("**Code**", "Create factory", "Project context", "Import"):
+        assert text not in board, text
+    marks = [ui.index(m) for m in ("9. **Settings**", "10. **Reviews**", "11. **Project context**",
+                                   "12. **Project settings**", "### 8.1")]
+    assert marks == sorted(marks)
+    for i, route in enumerate(("/projects/{id}/reviews", "/projects/{id}/context", "/projects/{id}/settings"), 1):
+        assert route in ui[marks[i]:marks[i + 1]], route
+    assert ui.index("### 8.4 Sidebar") < ui.index("### 8.5 Reviews")
+    for text in ("Reviews", "Context", "Settings"):
+        assert text in section("ui.md", "### 8.4"), text
+    assert "[Code]" not in section("ui.md", "### 8.1")
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    routes = api_doc[:api_doc.index("```")]
+    for route in ("/projects/{id}/reviews?tab=closed", "/projects/{id}/context", "/projects/{id}/settings"):
+        assert route in routes, route
+    row = api_doc[api_doc.index("GET  /api/pages/projects/{id} "):api_doc.index("GET  /api/pages/tasks/{id}")]
+    for text in ("remote_url", "test_cmd", "stage, branch"):
+        assert text in row, text
+    assert "board editor" not in section("data-model-and-api.md", "### 6.1")
+    assert "Project board → **Create factory**" not in section("MVP.md", "### 3.2")
+    assert "clear it on the board" not in (REPO / "docs" / "claude-code.md").read_text(encoding="utf-8")
+    fctl = (PKG / "fctl.md").read_text(encoding="utf-8")
+    assert "on the project board" not in fctl and "board's editor" not in fctl
+
+
 # --- GET /api/pages/dashboard --------------------------------------------------------
 
 
@@ -693,7 +724,8 @@ def test_board(client, project, repo):  # AC8
     review = add_task(project, status="review", stage="human_review")
     page = api(client, f"/api/pages/projects/{project}")
     assert page["project"] == {"id": project, "name": "repo", "path": str(repo), "default_branch": "main",
-                               "workspace_id": ws_id("personal"), "workspace": "personal"}
+                               "workspace_id": ws_id("personal"), "workspace": "personal",
+                               "remote_url": None, "test_cmd": "pytest -q"}
     assert (page["factory"], page["hint"], page["can_run"]) == ("ready", None, True)
     assert page["workspaces"] == [{"id": ws_id("personal"), "name": "personal", "projects": 1}]
     assert list(page["columns"]) == ["backlog", "in_progress", "review", "done"]
@@ -713,9 +745,37 @@ def test_board_card(client, project):  # AC9
         "id": tid, "title": "t", "status": "in_progress", "stage": "build", "position": 1.0, "round": 1,
         "verdicts": {"security": "PASS", "ux": "CHANGES", "ui": "pending", "code": "pending"},
         "additions": 5, "deletions": 2, "run": {"id": run, "status": "running"}, "started_at": STARTED,
-        "waiting": False, "escalated": False, "stalled": False,
+        "waiting": False, "escalated": False, "stalled": False, "branch": None,
     }
     assert [found[bare][k] for k in ("round", "verdicts", "additions", "deletions", "run", "started_at")] == [None] * 6
+
+
+def test_board_project_facts(client):  # 042 BE1
+    r = client.post("/api/projects/connect", headers=H, json={
+        "path": "/code/api", "workspace": "personal", "name": "api", "default_branch": "main",
+        "remote_url": "git@github.com:me/repo.git", "test_cmd": "pytest -q"})
+    assert r.status_code == 200, r.text
+    p = r.json()["id"]
+    assert api(client, f"/api/pages/projects/{p}")["project"] == {  # dict equality: no extra keys
+        "id": p, "name": "api", "path": "/code/api", "default_branch": "main", "workspace_id": ws_id("personal"),
+        "workspace": "personal", "remote_url": "git@github.com:me/repo.git", "test_cmd": "pytest -q"}
+
+
+def test_board_project_facts_unset(client):  # 042 BE2
+    project = api(client, f"/api/pages/projects/{bare(client, 'personal', 'api')}")["project"]
+    assert project["remote_url"] is None and project["test_cmd"] is None
+
+
+def test_card_branch(client, project):  # 042 BE3
+    branched, plain = review_task(project, branch="factory/12-x"), add_task(project)
+    found = cards(client, project)
+    assert (found[branched]["branch"], found[plain]["branch"]) == ("factory/12-x", None)
+
+
+def test_task_list_keys(client, project):  # 042 BE4: the card's branch and position stay off §6.2's list
+    review_task(project, branch="factory/12-x")
+    [item] = api(client, f"/api/projects/{project}/tasks")
+    assert set(item) == {"id", "title", "status", "stage", "round", "verdicts", "additions", "deletions", "run"}
 
 
 def test_card_waiting(client, project):  # AC10
@@ -740,7 +800,7 @@ def test_card_stalled(client, project):  # AC12
 
 
 @pytest.mark.parametrize("state, hint", [("uncommitted", UNCOMMITTED), ("none", NONE)])
-def test_board_factory_not_ready(client, unready, state, hint):  # 026 AC14
+def test_board_factory_not_ready(client, unready, state, hint):  # 026 AC14, 042 BE5
     page = api(client, f"/api/pages/projects/{unready(state)}")
     assert (page["can_run"], page["hint"]) == (False, hint)
 
@@ -841,14 +901,14 @@ def test_isolated_unsets_in_docker():  # 028 AC6: fails under `FCTL_IN_DOCKER=1 
     assert "FCTL_IN_DOCKER" not in os.environ
 
 
-@pytest.mark.parametrize("case", ["uncommitted", "console"])
-def test_task_runs_disabled(client, project, unready, fake, case):  # 026 AC16
-    if case == "uncommitted":
-        project = unready("uncommitted")
-    else:
+@pytest.mark.parametrize("case, hint", [("uncommitted", UNCOMMITTED), ("none", NONE), ("console", None)])
+def test_task_runs_disabled(client, project, unready, fake, case, hint):  # 026 AC16, 042 BE5
+    if case == "console":
         fake(auth=CONSOLE)
+    else:
+        project = unready(case)
     page = api(client, f"/api/pages/tasks/{add_task(project)}")
-    assert (page["can_run"], page["hint"]) == (False, UNCOMMITTED if case == "uncommitted" else None)
+    assert (page["can_run"], page["hint"]) == (False, hint)
 
 
 # --- GET /api/pages/tasks/{id}/review -------------------------------------------------

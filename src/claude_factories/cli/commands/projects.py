@@ -34,7 +34,7 @@ def context(args):
 
 def context_set(args):
     text = stdin_text()
-    if not text.strip():  # 033 Q5: a hand-typed `fctl context set` can't wipe the context; the board editor can
+    if not text.strip():  # 033 Q5: a hand-typed `fctl context set` can't wipe the context; the Context page can
         fail("context is empty; pass it on stdin")
     project = project_at(main_checkout())
     saved = api("PUT", f"/api/projects/{project['id']}/context", {"context_md": text})

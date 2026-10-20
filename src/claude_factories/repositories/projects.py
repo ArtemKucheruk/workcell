@@ -79,8 +79,8 @@ class ProjectsRepo:
 
     def for_board(self, project_id: int) -> sqlite3.Row | None:
         return self.conn.execute(
-            "SELECT p.id, p.name, p.path, p.default_branch, p.workspace_id, w.name AS workspace FROM projects p"
-            " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
+            "SELECT p.id, p.name, p.path, p.default_branch, p.workspace_id, w.name AS workspace, p.remote_url,"
+            " p.test_cmd FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
             (project_id,),
         ).fetchone()
 

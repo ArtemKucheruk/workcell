@@ -159,11 +159,14 @@ class BoardProject(BaseModel):
     default_branch: str
     workspace_id: int
     workspace: str
+    remote_url: str | None
+    test_cmd: str | None
 
 
 class Card(TaskItem):
     position: float
     started_at: str | None
+    branch: str | None  # 042 Q1: for the Reviews rows
 
     @computed_field
     def waiting(self) -> bool:

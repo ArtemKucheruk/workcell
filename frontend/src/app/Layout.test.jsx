@@ -288,3 +288,45 @@ test('FE19: main drops max-w-6xl on the board, code, and review pages, and keeps
     expect(main(path)).toEqual(expect.arrayContaining(['mx-auto', 'max-w-6xl']))
   }
 })
+
+test('042 FE36: on Reviews, Context, and Settings the sidebar selects the project, opens it, and marks only its page', async () => {
+  const sidebarBody = {
+    workspaces: [
+      { id: 2, name: 'personal', projects: [{ id: 3, name: 'api', review: 0, running: 0, escalated: 0 }] },
+      { id: 5, name: 'work', projects: [{ id: 4, name: 'billing', review: 0, running: 0, escalated: 0 }] },
+    ],
+    current: null,
+  }
+  const accent = /(^|\s)text-accent(\s|$)/
+  for (const [path, current] of [
+    ['/projects/3/reviews?tab=closed', 'Reviews'],
+    ['/projects/3/context', 'Context'],
+    ['/projects/3/settings', 'Settings'],
+  ]) {
+    localStorage.setItem('sidebar.workspace', '5')
+    mockFetch({ 'GET /api/pages/sidebar': [200, sidebarBody] })
+    const { unmount } = renderAt(path)
+    const select = await sidebar().findByRole('combobox', { name: 'Workspace' })
+    await waitFor(() => expect(select.selectedOptions[0].textContent).toBe('personal'))
+    const button = sidebar().getByRole('button', { name: 'api' })
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    const links = within(document.getElementById(button.getAttribute('aria-controls'))).getAllByRole('link')
+    expect(links.map((a) => a.textContent)).toEqual(['Board', 'Code', 'Reviews', 'Context', 'Settings'])
+    for (const link of links) {
+      const on = link.textContent === current
+      expect([link.textContent, link.getAttribute('aria-current'), accent.test(link.className)]).toEqual([
+        link.textContent, on ? 'page' : null, on,
+      ])
+    }
+    unmount()
+  }
+})
+
+test('042 FE37: Reviews, Context, and Settings keep main at mx-auto max-w-6xl', () => {
+  mockFetch({})
+  for (const path of ['/projects/3/reviews', '/projects/3/context', '/projects/3/settings']) {
+    const { unmount } = renderAt(path)
+    expect(screen.getByRole('main').className.split(/\s+/)).toEqual(expect.arrayContaining(['mx-auto', 'max-w-6xl']))
+    unmount()
+  }
+})

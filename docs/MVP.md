@@ -95,7 +95,7 @@ node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run
    Running it again updates the project. An unknown workspace is created on the spot.
 
 ### 3.2 Create a factory
-1. Project board → **Create factory**.
+1. Project **Settings** (`/projects/{id}/settings`) → **Create factory**.
 2. The app renders its templates with the project's name, test command, and default branch,
    and writes 8 files: `.claude/skills/factory/SKILL.md` and `.claude/agents/*.md`.
    Existing files are skipped and listed, unless I tick *Overwrite*.

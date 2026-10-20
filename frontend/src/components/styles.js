@@ -9,3 +9,7 @@ export const smallButton = `${button} px-2 py-0.5 text-sm`
 
 // Q6: one field for every page; the opacity keeps a disabled box looking disabled
 export const field = 'rounded-md border border-line bg-surface px-2 py-1 disabled:opacity-50'
+
+// 042: a tab link in a tabs <nav>; the current one (aria-current="page") is underlined and bold
+export const tab =
+  '-mb-px border-b-2 border-transparent px-2 py-1 text-inherit hover:no-underline aria-[current=page]:border-current aria-[current=page]:font-semibold'

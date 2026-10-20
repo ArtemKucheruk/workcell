@@ -35,7 +35,8 @@ def factory_hint(state: str, branch: str) -> str | None:
     if state == "uncommitted":
         return f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}"
     if state == "none":
-        return f"factory isn't committed on {branch}: Create factory on the project board, then commit it on {branch}"
+        return (f"factory isn't committed on {branch}: Create factory in the project's Settings,"
+                f" then commit it on {branch}")
     return None
 
 

@@ -1,12 +1,12 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
-import { createFactory, importBundle, moveProject, projectContext, saveProjectContext } from '../../api/projects.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, moveTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { button, field, muted, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -86,61 +86,6 @@ function Card({ card, canRun, onRun, onDragStart, onDragEnd }) {
   )
 }
 
-/** Q8: the Overwrite checkbox and the button; the result shows below the header's toolbar. */
-function FactoryForm({ create }) {
-  const [busy, setBusy] = useState(false)
-  async function submit(event) {
-    event.preventDefault()
-    const overwrite = event.currentTarget.elements.overwrite.checked
-    setBusy(true)
-    try {
-      await create(overwrite)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-1">
-        <input type="checkbox" name="overwrite" /> Overwrite existing files
-      </label>
-      <button disabled={busy} className={button}>
-        Create factory
-      </button>
-    </form>
-  )
-}
-
-/** MVP §3.2: what Create factory wrote and skipped, and the commit command; or its refusal. */
-function FactoryResult({ out }) {
-  if (out instanceof Error) return <ErrorMessage error={out} />
-  const files = (paths) => (
-    <ul className="ml-6 list-disc">
-      {paths.map((path) => (
-        <li key={path}><code>{path}</code></li>
-      ))}
-    </ul>
-  )
-  return (
-    <div className="grid gap-1 rounded-md border border-line p-3">
-      {out.written.length > 0 && (
-        <>
-          <p>{`Wrote ${plural(out.written.length, 'file')}:`}</p>
-          {files(out.written)}
-        </>
-      )}
-      {out.skipped.length > 0 && (
-        <>
-          <p>{`Skipped ${plural(out.skipped.length, 'existing file')} (tick Overwrite to replace them):`}</p>
-          {files(out.skipped)}
-        </>
-      )}
-      <p>Commit them so runs can see the factory:</p>
-      <pre className="overflow-x-auto rounded bg-raised p-2 text-sm"><code>{out.commit_hint}</code></pre>
-    </div>
-  )
-}
-
 /** Q11: + New task in a <details>; a 201 resets and closes it, an error keeps it open with the input. */
 function NewTask({ projectId, onDone }) {
   const [error, setError] = useState(null)
@@ -186,160 +131,6 @@ function NewTask({ projectId, onDone }) {
   )
 }
 
-/** 032 Q10: a task bundle from Export, posted as is; Import stays disabled until a file is chosen. */
-function ImportBundle({ onImport }) {
-  const [file, setFile] = useState(null)
-  const [busy, setBusy] = useState(false)
-  async function submit(event) {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      await onImport(file)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
-      <input
-        type="file"
-        accept=".zip,application/zip"
-        aria-label="Task bundle (.zip)"
-        onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-        className="max-w-60 text-sm"
-      />
-      <button disabled={!file || busy} className={button}>
-        Import
-      </button>
-    </form>
-  )
-}
-
-/** 032 Q10: the imported task, linked; or the refusal's detail. */
-function ImportResult({ out }) {
-  if (out instanceof Error) return <ErrorMessage error={out} />
-  return (
-    <p>
-      Imported <Link to={`/tasks/${out.task_id}`}>{`#${out.task_id} ${out.title}`}</Link>
-    </p>
-  )
-}
-
-/** §8 item 2: move this project to another workspace. */
-function MoveProject({ project, workspaces, onDone }) {
-  const [error, setError] = useState(null)
-  const [busy, setBusy] = useState(false)
-  async function submit(event) {
-    event.preventDefault()
-    const workspaceId = Number(new FormData(event.currentTarget).get('workspace_id'))
-    setBusy(true)
-    try {
-      await moveProject(project.id, workspaceId)
-      setError(null)
-      onDone()
-    } catch (err) {
-      setError(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <form onSubmit={submit} className="mt-8 flex flex-wrap items-center gap-2">
-      <label className="flex items-center gap-2">
-        Workspace
-        <select name="workspace_id" defaultValue={project.workspace_id} className={field}>
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>{w.name}</option>
-          ))}
-        </select>
-      </label>
-      <button disabled={busy} className={button}>
-        Move
-      </button>
-      {error && <ErrorMessage error={error} />}
-    </form>
-  )
-}
-
-/**
- * 033 Q6: the project context editor, collapsed. It loads once, when first opened, so the board's poll never
- * touches it; the size counts the draft's UTF-8 bytes against the API's cap. No preview yet (Q7).
- */
-function ProjectContext({ projectId }) {
-  const [maxBytes, setMaxBytes] = useState(null) // null until loaded
-  const [draft, setDraft] = useState('')
-  const [bytes, setBytes] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState(null)
-
-  async function load(event) {
-    if (!event.currentTarget.open || maxBytes != null || loading) return
-    setLoading(true)
-    try {
-      const context = await projectContext(projectId)
-      setDraft(context.context_md)
-      setBytes(context.bytes)
-      setMaxBytes(context.max_bytes)
-      setError(null)
-    } catch (err) {
-      setError(err) // closing and reopening tries again
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function save(event) {
-    event.preventDefault()
-    setBusy(true)
-    try {
-      setBytes((await saveProjectContext(projectId, draft)).bytes)
-      setError(null)
-    } catch (err) {
-      setError(err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const over = maxBytes != null && bytes > maxBytes
-  return (
-    <details onToggle={load} className="mt-8">
-      <summary className="cursor-pointer font-medium">Project context</summary>
-      <div className="mt-2 grid gap-2">
-        <p className={`text-sm ${muted}`}>
-          Stack and conventions. Agents read it at the top of <code>fctl show</code>.
-        </p>
-        {loading && <p className={muted}>Loading…</p>}
-        {maxBytes != null && (
-          <form onSubmit={save} className="grid gap-2">
-            <textarea
-              aria-label="Project context"
-              value={draft}
-              onChange={(event) => {
-                setDraft(event.target.value)
-                setBytes(new TextEncoder().encode(event.target.value).length)
-              }}
-              rows={12}
-              placeholder="Markdown, e.g. # Stack"
-              className={`${field} font-mono text-sm`}
-            />
-            <div className="flex flex-wrap items-center gap-3">
-              <button disabled={busy || over} className={button}>
-                Save
-              </button>
-              <span className={`text-sm tabular-nums ${over ? 'font-semibold text-danger' : muted}`}>
-                {`${bytes} / ${maxBytes} bytes${over ? ' · over the limit' : ''}`}
-              </span>
-            </div>
-          </form>
-        )}
-        {error && <ErrorMessage error={error} />}
-      </div>
-    </details>
-  )
-}
-
 /** docs/ui.md §8 item 3, §8.1. */
 export function BoardPage() {
   const { id } = useParams()
@@ -350,8 +141,6 @@ export function BoardPage() {
   const load = useCallback(() => boardPage(id), [id, tick])
   const { data: page, error } = usePoll(load, 3000)
   const [actionError, setActionError] = useState(null)
-  const [factoryOut, setFactoryOut] = useState(null)
-  const [importOut, setImportOut] = useState(null)
   const dragged = useRef(null)
   const name = page?.project.name
   useEffect(() => {
@@ -374,24 +163,6 @@ export function BoardPage() {
     }
     setActionError(null)
     refresh()
-  }
-
-  async function makeFactory(overwrite) {
-    try {
-      setFactoryOut(await createFactory(project.id, overwrite))
-      refresh()
-    } catch (err) {
-      setFactoryOut(err)
-    }
-  }
-
-  async function importFile(file) {
-    try {
-      setImportOut(await importBundle(project.id, file))
-      refresh()
-    } catch (err) {
-      setImportOut(err) // the board stays; only this line says what went wrong
-    }
   }
 
   function dragStart(event, taskId) {
@@ -421,27 +192,14 @@ export function BoardPage() {
 
   return (
     <>
-      <header className="mb-6 grid gap-3">
-        <h1>
-          {project.name} · <Link to={`/workspaces/${project.workspace_id}`}>{project.workspace}</Link>
-        </h1>
-        <p className={`font-mono text-sm ${muted}`}>{project.path}</p>
-        <div className="flex flex-wrap items-center gap-3">
-          <Link to={`/projects/${project.id}/code`}>Code</Link>
-          <span>{`Factory: ${page.factory}${page.factory === 'ready' ? ' ✓' : ''}`}</span>
-          {page.factory !== 'ready' && <FactoryForm create={makeFactory} />}
-          <NewTask projectId={project.id} onDone={refresh} />
-          <ImportBundle onImport={importFile} />
-          <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run}>
-            Run next ▶
-          </ActionButton>
-          {page.hint && <span className={`text-sm ${muted}`}>{page.hint}</span>}
-        </div>
-        <div aria-live="polite">
-          {factoryOut && <FactoryResult out={factoryOut} />}
-          {importOut && <ImportResult out={importOut} />}
-        </div>
-      </header>
+      {/* 042: Code, Create factory, Import, Project context, and Move live on the project's other pages */}
+      <ProjectHeader project={project} factory={page.factory}>
+        <NewTask projectId={project.id} onDone={refresh} />
+        <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run}>
+          Run next ▶
+        </ActionButton>
+        {page.hint && <p className={`basis-full text-sm ${muted}`}>{page.hint}</p>}
+      </ProjectHeader>
       {error && <ErrorMessage error={error} />}
       {actionError && <ErrorMessage error={actionError} />}
       <div className="mt-2 grid items-start gap-4 md:grid-cols-4">
@@ -482,9 +240,6 @@ export function BoardPage() {
           )
         })}
       </div>
-      {/* another project's draft never carries over; prefixed, since a bare id can equal Move's workspace_id key */}
-      <ProjectContext key={`context-${project.id}`} projectId={project.id} />
-      <MoveProject key={project.workspace_id} project={project} workspaces={page.workspaces} onDone={refresh} />
     </>
   )
 }

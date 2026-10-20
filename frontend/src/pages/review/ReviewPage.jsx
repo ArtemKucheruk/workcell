@@ -9,7 +9,7 @@ import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { StatusLine } from '../../components/StatusLine.jsx'
-import { button, field, muted } from '../../components/styles.js'
+import { button, field, muted, tab } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -407,8 +407,6 @@ export function ReviewPage() {
     const query = q.toString()
     return `/tasks/${task.id}/review${query ? `?${query}` : ''}`
   }
-  const tabClass =
-    '-mb-px border-b-2 border-transparent px-2 py-1 text-inherit hover:no-underline aria-[current=page]:border-current aria-[current=page]:font-semibold'
 
   return (
     <>
@@ -486,10 +484,10 @@ export function ReviewPage() {
         </section>
       )}
       <nav aria-label="Review tabs" className="mb-6 flex gap-4 border-b border-line">
-        <Link to={tabHref()} aria-current={onFiles ? undefined : 'page'} className={tabClass}>
+        <Link to={tabHref()} aria-current={onFiles ? undefined : 'page'} className={tab}>
           Conversation
         </Link>
-        <Link to={tabHref('files')} aria-current={onFiles ? 'page' : undefined} className={tabClass}>
+        <Link to={tabHref('files')} aria-current={onFiles ? 'page' : undefined} className={tab}>
           {`Files changed ${selected?.files ?? 0}`}
         </Link>
       </nav>

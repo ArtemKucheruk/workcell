@@ -27,7 +27,7 @@ open a new terminal. `uv tool uninstall claude-factories` removes it.
 | `/factory-submit` | `~/.claude/skills/factory-submit/SKILL.md` |
 
 The factory itself, the `/factory` skill and its 7 agents, is written into each repo by
-**Create factory** on the project board, not by `fctl`.
+**Create factory** on the project's Settings page, not by `fctl`.
 
 The app runs in Docker (see [Using fctl with Docker](#using-fctl-with-docker)). Without Docker,
 `fctl serve` runs the backend on `127.0.0.1:4545`, and the frontend server runs next to it:
@@ -397,7 +397,7 @@ none
 
 The new context, as markdown, sent unchanged. Pass it in a quoted heredoc or a pipe. From a
 terminal `fctl` reads nothing, and blank stdin is refused, so a hand-typed `fctl context set`
-can't wipe the context. To clear it, empty it in the board's editor.
+can't wipe the context. To clear it, empty it on the project's Context page.
 
 **Output**
 
