@@ -8,9 +8,10 @@ import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
 import { TaskState } from '../../components/Badge.jsx'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
-import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -40,7 +41,7 @@ function RunControls({ page, onAction }) {
           {running && (
             <>
               {' · started '}
-              <Time iso={run.started_at} timeOnly />
+              <Time iso={run.started_at} relative />
             </>
           )}
           {run.status === 'failed' && run.error && `: ${run.error}`}
@@ -207,6 +208,24 @@ function RunLog({ run }) {
   )
 }
 
+/** 046 Q5: the header (breadcrumb, title with a run button, status line), then the Description heading and text. */
+function TaskSkeleton() {
+  return (
+    <Skeleton>
+      <TitleSkeleton title={<ButtonBlock className="w-16" />}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Block className="h-6 w-24" />
+          <Crumbs className="w-48" />
+          <Block className="h-6 w-14" />
+          <Block className="h-6.5 w-20" />
+        </div>
+      </TitleSkeleton>
+      <Block className="mt-8 mb-2 h-7 w-32" />
+      <Lines n={3} />
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 4: one task, its rounds, its history, and its latest run. */
 export function TaskPage() {
   const { id } = useParams()
@@ -224,7 +243,7 @@ export function TaskPage() {
 
   // Q10: a 404 is always not-found; other errors replace the page only until the first good load
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!page) return error ? <ErrorMessage error={error} /> : <TaskSkeleton />
   const { task } = page
   // Q4: no round, or a round with no Round row yet (a build that hasn't submitted), goes under Other agents
   const rounds = new Set(page.rounds.map((r) => r.n))
@@ -263,7 +282,7 @@ export function TaskPage() {
         {actionError && <ErrorMessage error={actionError} />}
         <Takeover page={page} />
       </header>
-      {error && <ErrorMessage error={error} />}
+      {error && <OfflineBanner />}
       <section aria-labelledby="task-description">
         <h2 id="task-description">Description</h2>
         {blank(task.description_md) ? <p className={muted}>No description.</p> : <Markdown html={task.description_html} />}
@@ -309,7 +328,7 @@ export function TaskPage() {
         <ol className="grid gap-1">
           {page.history.map((entry, i) => (
             <li key={i}>
-              <Time iso={entry.created_at} /> {entry.label}
+              <Time iso={entry.created_at} relative /> {entry.label}
             </li>
           ))}
         </ol>

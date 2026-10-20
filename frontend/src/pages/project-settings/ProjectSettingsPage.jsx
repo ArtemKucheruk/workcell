@@ -5,6 +5,7 @@ import { createFactory, importBundle, moveProject } from '../../api/projects.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Block, ProjectHeaderSkeleton, Rows, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -172,6 +173,19 @@ function Section({ id, title, children }) {
   )
 }
 
+/** 046 Q5: the project header, then the Repository section's heading and four rows. */
+function SettingsSkeleton() {
+  return (
+    <Skeleton>
+      <ProjectHeaderSkeleton />
+      <div className="grid max-w-3xl gap-3 border-t border-line pt-6">
+        <Block className="h-7 w-32" />
+        <Rows n={4} />
+      </div>
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Create factory, Import, and Move. */
 function ProjectSettings({ id }) {
   // board Q3: bumping `tick` hands usePoll a new load, which fetches at once
@@ -187,7 +201,7 @@ function ProjectSettings({ id }) {
   }, [name])
 
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!page) return error ? <ErrorMessage error={error} /> : <SettingsSkeleton />
   const { project, factory } = page
 
   async function makeFactory(overwrite) {

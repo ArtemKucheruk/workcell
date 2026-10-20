@@ -120,7 +120,7 @@ function Projects({ workspace, open, onToggle }) {
               onClick={() => onToggle(project.id)}
               className={`${row} cursor-pointer font-medium`}
             >
-              <span aria-hidden="true" className={`w-3 shrink-0 text-muted transition-transform ${expanded ? 'rotate-90' : ''}`}>
+              <span aria-hidden="true" className={`w-3 shrink-0 text-muted motion-safe:transition-transform ${expanded ? 'rotate-90' : ''}`}>
                 ▸
               </span>
               <span className="truncate">{project.name}</span>

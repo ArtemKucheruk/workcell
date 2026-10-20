@@ -7,6 +7,7 @@ import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Block, Crumbs, Lines, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -77,6 +78,26 @@ function Viewer({ page }) {
   return view ? <Code view={view} lang={lang} /> : null
 }
 
+/** 046 Q5: the breadcrumb, the project header with its branch line, then the file tree beside the viewer. */
+function CodeSkeleton() {
+  return (
+    <Skeleton>
+      <Crumbs className="mb-2 w-48" />
+      <ProjectHeaderSkeleton>
+        <div className="basis-full">
+          <Block className="h-6 w-48" />
+        </div>
+      </ProjectHeaderSkeleton>
+      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">
+        <Lines n={6} />
+        <div className="rounded-md border border-line p-4">
+          <Lines n={8} />
+        </div>
+      </div>
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 6: the main checkout's tracked files, the README landing, and one file at a time. */
 export function CodePage() {
   const { id } = useParams()
@@ -96,7 +117,7 @@ export function CodePage() {
   // Q8: a 404 (unknown project, or a path the backend refuses) is not-found; other errors replace the page
   // only until the first good load
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!page) return error ? <ErrorMessage error={error} /> : <CodeSkeleton />
   const { project, branch, tree, shown } = page
   // usePoll keeps the last data across a project change: only this project's board view-model counts
   const head = board?.project.id === project.id ? board : { project }

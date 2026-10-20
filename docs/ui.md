@@ -63,6 +63,30 @@ page, the agent's label on the transcript page, and `Code` on the code page, whi
 view-model, as the project and workspace are now. The other pages have no breadcrumb: the
 sidebar and the project header cover them.
 
+Loading, failures, times, and motion are the same on every page:
+- While a page's first view-model loads, it shows a skeleton: pulsing `line` blocks shaped and
+  sized like the top of the page that replaces them, in the page's own grid and spacing, so
+  nothing jumps when it arrives. It is one `role="status"` that screen readers hear as
+  `Loading…`, with no headings, links, or buttons. Reloads (after an action, on a new round,
+  file, or **Show all**) keep the last view until the new one arrives. A failed first load is
+  the red alert.
+- On the pages polled every 3 s (Board, Task detail, Reviews), a failed poll over a page that
+  has loaded leaves the page as it was and shows a muted `Offline — retrying` banner, fixed at
+  the bottom of the content column, without the error's detail. It is a polite status, shown
+  once while the failures last, and the next good poll removes it. A 404 is still the
+  not-found page, and refusals of actions stay red alerts.
+- Last activity, a running run's start, the status history, and the review timeline read as
+  relative times: `just now`, `5m ago`, `3h ago`, then by calendar day `yesterday` and `4d ago`,
+  and the date (`2026-10-13`) from a week back. The full local `YYYY-MM-DD HH:MM` is in the
+  `title`, and the ISO time in `<time dateTime>`. They are worked out as the page renders, so
+  the 3 s polls keep them current. Every other time is the absolute `YYYY-MM-DD HH:MM`.
+- **Run**, **Retry**, **Run next**, **Stop**, **Comment**, **Submit review**, and **Log in**
+  show a small spinner over their label while their request is pending, at the same size.
+- Motion: only `opacity` and `transform` transition, for 150 ms at most: the sidebar's project
+  chevron turning, the dragged card's dim, and popovers and the offline banner fading in. Under
+  `prefers-reduced-motion` nothing moves: transitions are off, and the skeleton's pulse, the
+  running dot, and the spinner hold still.
+
 1. **Dashboard** (`/`)
    - First, **Needs you**: the escalated tasks, then the ones waiting on me (`human_review`),
      each newest first. A row shows `#id title` linking to `/tasks/{id}/review`, its
@@ -84,8 +108,9 @@ sidebar and the project header cover them.
      inline-SVG bar per task beside them, oldest left, its height rounds / max, in `accent`,
      and the list.
 2. **Workspace** (`/workspaces/{id}`): one row per project with name, path, counts per
-   status, factory state (none / uncommitted / ready), and last activity. **+ Workspace**
-   creates one. For each project, its Settings page (item 12) moves it to another workspace.
+   status, factory state (none / uncommitted / ready), and last activity as a relative time
+   (`3h ago`). **+ Workspace** creates one. For each project, its Settings page (item 12) moves
+   it to another workspace.
 3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header is the project
    header plus **+ New task**, **Run next**, and the hint for why runs are off. **+ New task**
    opens its form in a native popover, which Esc or a click outside closes, and a created task
@@ -106,9 +131,10 @@ sidebar and the project header cover them.
      columns stack and the page scrolls.
 4. **Task detail** (`/tasks/{id}`)
    - Header: the breadcrumb, then the title row: the title, Run / Stop / Retry, the run
-     status (`run #N <status>`), and beside Run or Retry the hint for why runs are off. The
-     row wraps on narrow screens. Under it, the status line: the status pill and stage,
-     branch, Review, and an **Export** button.
+     status (`run #N <status>`, and for a running run its start as a relative time:
+     `run #41 running · started 5m ago`), and beside Run or Retry the hint for why runs are
+     off. The row wraps on narrow screens. Under it, the status line: the status pill and
+     stage, branch, Review, and an **Export** button.
    - **Export** opens a native popover holding an **Include transcripts** checkbox,
      labelled with the warning that they can hold paths, env, and secrets, and a
      **Download** link to the task bundle (`GET /api/tasks/{id}/export`, a plain
@@ -122,7 +148,8 @@ sidebar and the project header cover them.
      round (the orchestrator, the spec-writer, the reviewers, the approver) are listed under
      **Other agents** after Rounds, each with its `run #`.
    - The approver's decision.
-   - Status history (`events`).
+   - Status history (`events`): each entry's relative time, then its label
+     (`5m ago created · backlog`).
    - Run log tail (collapsed).
    - "Take over in terminal" command.
    - A link to Review.
@@ -200,7 +227,7 @@ api-server · personal              Factory: ready ✓   [+ New task]  [Run next
 │ #14 Export CSV      │ │ #13 Audit log              │ │ #12 Rate-limit login       │ │ #9 Health   │
 │       [Move] [Run]  │ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round     │
 ├─────────────────────┤ │ r1 sec ✓ ux ✓ ui · code ✗  │ │ r2 sec ✓ ux ✓ ui ✓ code ✓  │ │     [Move]  │
-│ #15 Dark mode       │ │ started 10:02              │ │ +126 −9                    │ ├─────────────┤
+│ #15 Dark mode       │ │ started 5m ago             │ │ +126 −9                    │ ├─────────────┤
 │       [Move] [Run]  │ │                    [Move]  │ │                    [Move]  │ │ #8 Login UX │
 ├─────────────────────┤ └────────────────────────────┘ ├────────────────────────────┤ │ 3 rounds    │
 │ #16 Rename env vars │                                │▌#11 Webhooks               │ │     [Move]  │
@@ -216,6 +243,7 @@ pills, drawn ( ): a status is outlined in its token: Backlog muted, In progress 
 escalated cards: red left bar ▌ + (escalated)
 chips: ✓ PASS in success, ✗ CHANGES in danger, · pending in muted; title "security: PASS"
 stalled card: "stalled · build  [Retry]"
+started 5m ago: a running card's start, relative; its title holds the local YYYY-MM-DD HH:MM
 [Move]: a popover menu on every card: the other columns, then Up and Down in Backlog. A
   move is announced in a hidden aria-live region; a refusal shows in the board's alert.
 while dragging: the card dims, the column under the pointer gets an accent ring, and an
@@ -237,11 +265,12 @@ personal › api-server › #12 › Review
  Round 2  agent        sec ✓  ux ✓  ui ✓  code ✓     +126 −9
  Approver · APPROVE    All 4 PASS on round 2; criteria met; tests green.
  ───────────────────────────────────────────────────────────────────────────────────────
- Timeline   10:02 created · 10:03 in_progress · 10:21 round 1 · 10:34 round 2
-            10:41 approver APPROVE · 10:41 review
+ Timeline   2h ago created · 2h ago in_progress · 1h ago round 1 · 1h ago round 2
+            1h ago approver APPROVE · 1h ago review
  ┌───────────────────────────────────────────────────────────────────────────────────┐
  │ Leave a comment…                                                                   │
  └───────────────────────────────────────────────────────────────────────────────────┘
+timeline: relative times (2h ago), each with its local YYYY-MM-DD HH:MM as its title
 [Review changes ▾]: a popover under the button
   ┌ Summary ───────────────────────────┐
   │                                    │

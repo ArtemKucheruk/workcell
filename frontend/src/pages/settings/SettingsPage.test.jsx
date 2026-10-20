@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, test } from 'vitest'
-import { mockFetch, renderAt } from '../../test/render.jsx'
+import { expectSkeleton, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PRO = { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true, email: 'artem@example.com' }
 const OFF = { auth_method: null, plan: null, runs_enabled: false, email: null }
@@ -120,10 +120,11 @@ test('AC23: a refused code shows its detail, and the form and typed code stay', 
   }
 })
 
-test('AC24: Loading… until /api/auth answers, then its error in an alert', async () => {
+test('AC24, 046 FE14: a skeleton until /api/auth answers, then its error in an alert', async () => {
   mockFetch({ 'GET /api/auth': [500, { detail: 'boom' }] })
   renderAt('/settings')
-  expect(screen.getByText('Loading…')).toBeTruthy()
+  expectSkeleton(screen.getByRole('status'))
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
+  expect(screen.queryByRole('status')).toBeNull()
   expect(screen.queryByRole('region', { name: 'Claude login' })).toBeNull()
 })

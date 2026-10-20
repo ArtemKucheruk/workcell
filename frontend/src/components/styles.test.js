@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { expect, test } from 'vitest'
 import * as actionButton from './ActionButton.jsx'
+import { OfflineBanner } from './ErrorMessage.jsx'
 import * as styles from './styles.js'
 
 const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -23,4 +24,24 @@ test('040 FE6: muted, field, button, and smallButton are declared only in styles
   expect(actionButton.button).toBeUndefined()
   render(createElement(actionButton.ActionButton, { action: () => {} }, 'Go'))
   expect(screen.getByRole('button', { name: 'Go' }).className).toBe(styles.button)
+})
+
+test('046 FE21: the chevron turns, and the dragged card, popovers, and the offline banner fade, each under motion-safe', () => {
+  const tokens = (className) => className.split(/\s+/)
+  const fadesIn = (className) => [
+    tokens(className).includes('motion-safe:transition-opacity'),
+    tokens(className).filter((t) => /^starting:(?:[\w-]+:)*opacity-0$/.test(t)).length,
+  ]
+  expect(fadesIn(styles.popover)).toEqual([true, 1])
+  render(createElement(OfflineBanner))
+  expect(fadesIn(screen.getByRole('status').className)).toEqual([true, 1])
+  const source = (rel) => fs.readFileSync(path.join(src, rel), 'utf8')
+  // the project disclosure's ▸, rotated while open
+  const chevron = source('app/Sidebar.jsx').match(/className=\{`([^`]*)`\}>\s*▸/)[1]
+  expect(tokens(chevron)).toContain('motion-safe:transition-transform')
+  expect(tokens(chevron)).not.toContain('transition-transform')
+  // the board card's li, which data-dragging dims
+  const card = source('pages/board/BoardPage.jsx').match(/const cardLook = \[([\s\S]*?)\]\.join/)[1].replace(/['\n,]/g, ' ')
+  expect(tokens(card)).toContain('motion-safe:transition-opacity')
+  expect(tokens(card)).toContain('data-dragging:opacity-50')
 })

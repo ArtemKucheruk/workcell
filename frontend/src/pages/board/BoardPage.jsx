@@ -6,9 +6,10 @@ import { createTask, moveTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { LABELS, RunningBadge, Stage } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
-import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Block, ButtonBlock, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -59,11 +60,11 @@ function Rounds({ card }) {
 }
 
 // Q9: tokens only, each class in full for Tailwind's scanner. Hover darkens the ring; keyboard focus on the card's link or a
-// button in it (its Move menu too) thickens it in accent; the dragged card dims. The drop line is the marked card's ::before
+// button in it (its Move menu too) thickens it in accent; the dragged card dims, fading (046 Q8). The drop line is the marked card's ::before
 // (the gap above it) or ::after (the gap below the last card), absolute in the 8 px gap, so it takes no room (FE6).
 const cardLook = [
   'relative grid cursor-grab gap-1 rounded-md bg-surface p-3 shadow-sm ring-1 ring-line hover:shadow-md hover:ring-muted',
-  'has-focus-visible:ring-2 has-focus-visible:ring-accent data-dragging:opacity-50',
+  'has-focus-visible:ring-2 has-focus-visible:ring-accent data-dragging:opacity-50 motion-safe:transition-opacity',
   'data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-1.25 data-[drop=before]:before:h-0.5 data-[drop=before]:before:bg-accent',
   'data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-1.25 data-[drop=after]:after:h-0.5 data-[drop=after]:after:bg-accent',
 ].join(' ')
@@ -134,7 +135,7 @@ function Card({ card, canRun, onRun, moves, nudges, dragging, drop, onDragStart,
       <Rounds card={card} />
       {running && card.started_at && (
         <p className={`text-sm ${muted}`}>
-          started <Time iso={card.started_at} timeOnly />
+          started <Time iso={card.started_at} relative />
         </p>
       )}
       <div className="flex justify-end gap-2">
@@ -226,6 +227,25 @@ function position(cards, i, taskId) {
     : 1
 }
 
+/** 046 Q5, FE16: the header with + New task and Run next, then the four columns at an empty column's height. */
+function BoardSkeleton() {
+  return (
+    <Skeleton>
+      <ProjectHeaderSkeleton>
+        <ButtonBlock className="w-28" />
+        <ButtonBlock className="w-28" />
+      </ProjectHeaderSkeleton>
+      <div className="mt-2 grid items-start gap-4 md:grid-cols-4">
+        {Object.keys(LABELS).map((status) => (
+          <div key={status} className="grid min-h-32 content-start rounded-lg bg-raised p-3">
+            <Block className="h-6 w-28" />
+          </div>
+        ))}
+      </div>
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 3, §8.1. */
 export function BoardPage() {
   const { id } = useParams()
@@ -253,9 +273,10 @@ export function BoardPage() {
     refocus.current = null
   }, [page])
 
-  // Q5: a 404 is always not-found; other errors replace the page only until the first good load
+  // Q5: a 404 is always not-found; other errors replace the page only until the first good load, then show as the
+  // offline banner (046 Q4)
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!page) return error ? <ErrorMessage error={error} /> : <BoardSkeleton />
   const { project } = page
 
   /**
@@ -346,7 +367,7 @@ export function BoardPage() {
         </ActionButton>
         {page.hint && <p className={`basis-full text-sm ${muted}`}>{page.hint}</p>}
       </ProjectHeader>
-      {error && <ErrorMessage error={error} />}
+      {error && <OfflineBanner />}
       {actionError && <ErrorMessage error={actionError} />}
       <p role="status" className="sr-only">
         {said}

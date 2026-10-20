@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { button, field } from '../../components/styles.js'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
@@ -14,13 +14,17 @@ const workspace = (id, name, projects = []) => [200, { workspace: { id, name }, 
 beforeEach(() => {
   vi.stubEnv('TZ', 'Asia/Tokyo') // UTC+9, as in the dashboard test
 })
+afterEach(() => {
+  vi.useRealTimers() // 046 FE7's clock
+})
 
 function submit(name) {
   fireEvent.change(screen.getByRole('textbox', { name: 'New workspace name' }), { target: { value: name } })
   fireEvent.submit(screen.getByRole('button', { name: '+ Workspace' }).closest('form'))
 }
 
-test('AC27: /workspaces/2 shows the name, title, and one row per project', async () => {
+test('AC27, 046 FE7: /workspaces/2 shows the name, title, and one row per project, last activity relative with its local time as title', async () => {
+  vi.setSystemTime(new Date('2026-10-20T03:00:00Z')) // 2026-10-20 12:00 local
   const fetch = mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal', PROJECTS) })
   renderAt('/workspaces/2')
   expect(await screen.findByRole('heading', { level: 1, name: 'personal' })).toBeTruthy()
@@ -28,11 +32,12 @@ test('AC27: /workspaces/2 shows the name, title, and one row per project', async
   await waitFor(() => expect(document.title).toBe('personal · Claude Factories')) // the title is set in an effect, after the heading renders
   const rows = screen.getAllByRole('row').slice(1)
   expect(rows.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))).toEqual([
-    ['api', '/Users/me/api', '2', '1', '0', '7', 'ready', '2026-10-18 18:05'],
-    ['web', '/Users/me/web', '0', '0', '1', '0', 'none', '2026-10-01 09:00'],
+    ['api', '/Users/me/api', '2', '1', '0', '7', 'ready', '2d ago'],
+    ['web', '/Users/me/web', '0', '0', '1', '0', 'none', '2026-10-01'],
   ])
   expect(rows.map((tr) => within(tr).getByRole('link').getAttribute('href'))).toEqual(['/projects/3', '/projects/4'])
   expect(rows[0].querySelector('time').getAttribute('datetime')).toBe('2026-10-18T09:05:00Z')
+  expect(rows.map((tr) => tr.querySelector('time').getAttribute('title'))).toEqual(['2026-10-18 18:05', '2026-10-01 09:00'])
 })
 
 test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {

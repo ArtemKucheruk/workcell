@@ -1,6 +1,6 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { expectOfflineBanner, expectSkeleton, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal' }
 const WORKSPACES = [{ id: 2, name: 'personal', projects: 1 }, { id: 4, name: 'work', projects: 0 }]
@@ -245,7 +245,8 @@ test('AC10: a stage without a run shows the stage and no buttons but Move; no st
   expect([...cardEl(15).children].map(shown)).toEqual(['#15 Task 15', 'Move'])
 })
 
-test('AC11, 043 FE8: a running card shows the ● running badge, then its muted stage, its local start time, and no buttons', async () => {
+test('AC11, 043 FE8, 046 FE2: a running card shows the ● running badge, its muted stage, how long ago it started, and no buttons', async () => {
+  vi.setSystemTime(new Date('2026-10-18T01:07:00Z')) // 5 minutes after the start
   const running = (id, stage) =>
     card(id, 'in_progress', { stage, run: { id: 40 + id, status: 'running' }, started_at: '2026-10-18T01:02:00Z' })
   await open(board({ in_progress: [running(13, 'build'), running(16, null)] }))
@@ -255,12 +256,13 @@ test('AC11, 043 FE8: a running card shows the ● running badge, then its muted 
   const line = badge.parentElement
   expect([...line.children].map((el) => el.textContent)).toEqual(['● running', 'build'])
   expect(line.children[1].className).toMatch(cls('text-muted'))
-  expect(within(li).getByText(fullText('started 10:02'))).toBeTruthy()
+  expect(within(li).getByText(fullText('started 5m ago'))).toBeTruthy()
   expect(li.querySelector('time').getAttribute('datetime')).toBe('2026-10-18T01:02:00Z')
+  expect(li.querySelector('time').getAttribute('title')).toBe('2026-10-18 10:02')
   expect(cardButtons(13)).toEqual(['Move'])
   const bare = within(cardEl(16)).getByText(fullText('● running'))
   expect([...bare.parentElement.children]).toEqual([bare])
-  expect(within(cardEl(16)).getByText(fullText('started 10:02'))).toBeTruthy()
+  expect(within(cardEl(16)).getByText(fullText('started 5m ago'))).toBeTruthy()
   expect(cardButtons(16)).toEqual(['Move'])
   for (const label of ['In progress', 'Backlog', 'Review', 'Done']) expect(shown(li)).not.toContain(label) // Q5: no status pill
 })
@@ -825,7 +827,7 @@ test("AC30: the API's 404 shows the not-found state with its detail and a link h
   expect(screen.getByRole('link', { name: 'Go to the dashboard' }).getAttribute('href')).toBe('/')
 })
 
-test('AC31: a failed first load shows only the alert; a failed later poll keeps the board until the next success', async () => {
+test('AC31, 046 FE9, FE12, FE13: a failed first load shows only the alert; a failed poll over the board shows the offline banner until the next success', async () => {
   mockFetch({ [`GET ${BOARD}`]: [500, { detail: 'boom' }] })
   const first = renderAt('/projects/3')
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
@@ -838,13 +840,20 @@ test('AC31: a failed first load shows only the alert; a failed later poll keeps 
   renderAt('/projects/3')
   await advance(0)
   expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(4)
-  responses[`GET ${BOARD}`] = [502, { detail: 'Backend unreachable at http://127.0.0.1:4545' }]
-  await advance(3000)
-  expect(screen.getByRole('alert').textContent).toBe('Backend unreachable at http://127.0.0.1:4545')
-  expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(4)
-  expect(cardEl(14)).toBeTruthy()
-  responses[`GET ${BOARD}`] = [200, board({ backlog: [card(14, 'backlog')] })]
-  await advance(3000)
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(cardEl(14)).toBeTruthy()
+  await expectOfflineBanner(responses, `GET ${BOARD}`, () => {
+    expect(screen.getAllByRole('heading', { level: 2 })).toHaveLength(4)
+    expect(cardEl(14)).toBeTruthy()
+  })
+})
+
+test("046 FE16: until the first load the board is a skeleton of the header and the loaded board's four columns", async () => {
+  mockFetch({}).mockImplementation(() => new Promise(() => {})) // nothing ever answers
+  renderAt('/projects/3')
+  const skeleton = await screen.findByRole('status')
+  expectSkeleton(skeleton)
+  const grid = [...skeleton.querySelectorAll('div')].filter((el) => cls('md:grid-cols-4').test(el.className))
+  expect(grid).toHaveLength(1)
+  const columns = [...grid[0].children]
+  expect(columns).toHaveLength(4)
+  for (const column of columns) expect(column.className).toMatch(cls('min-h-32'))
 })

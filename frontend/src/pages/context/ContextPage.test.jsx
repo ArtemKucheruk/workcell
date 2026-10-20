@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { expectSkeleton, fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECT = {
   id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
@@ -151,4 +151,17 @@ test("FE24: going from /projects/3/context with a draft to /projects/4/context s
   await waitFor(() => expect(box().value).toBe('four'))
   expect(screen.getByText('4 / 16384 bytes')).toBeTruthy()
   expect(within(preview()).getByText('four')).toBeTruthy()
+})
+
+test('046 FE15: with the board view-model in and the context pending, the header and an editor skeleton show, with no textarea', async () => {
+  const fetch = mockFetch({ [`GET ${BOARD}`]: [200, board()] })
+  const answer = fetch.getMockImplementation()
+  fetch.mockImplementation((url, init) => (url === CONTEXT ? new Promise(() => {}) : answer(url, init))) // never answers
+  renderAt('/projects/3/context')
+  expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe('api · personal')
+  const skeleton = screen.getByRole('status')
+  expectSkeleton(skeleton)
+  expect(skeleton.parentElement).toBe(screen.getByRole('main'))
+  expect(screen.queryByRole('textbox')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Save' })).toBeNull()
 })

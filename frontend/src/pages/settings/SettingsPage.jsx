@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getAuth, planName, sendLoginCode, startLogin } from '../../api/auth.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { Block, ButtonBlock, Rows, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -82,7 +83,18 @@ export function SettingsPage() {
     <>
       <h1 className="mb-6">Settings</h1>
       {!shown ? (
-        error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+        error ? (
+          <ErrorMessage error={error} />
+        ) : (
+          // 046 Q5: under the static h1, the Claude login heading, its three rows, and the login button
+          <Skeleton>
+            <div className="grid max-w-xl gap-4">
+              <Block className="h-7 w-36" />
+              <Rows n={3} />
+              <ButtonBlock className="w-44" />
+            </div>
+          </Skeleton>
+        )
       ) : (
         <section aria-labelledby="claude-login" className="grid max-w-xl gap-4">
           <h2 id="claude-login" className="mt-0 mb-0">

@@ -6,6 +6,7 @@ import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Block, ButtonBlock, Lines, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -85,6 +86,30 @@ function Editor({ projectId, loaded }) {
   )
 }
 
+/** 046 Q5: the Editor's shape: heading, hint, a 20-row textarea, Save and its count, beside the Preview box. */
+function EditorSkeleton() {
+  return (
+    <div className="grid items-start gap-8 lg:grid-cols-2">
+      <div className="grid gap-2">
+        <Block className="h-7 w-40" />
+        <Block className="h-5 w-80 max-w-full" />
+        {/* the textarea: 20 rows of a 20 px line, py-1, and its border */}
+        <Block className="h-102.5" />
+        <div className="flex flex-wrap items-center gap-3">
+          <ButtonBlock className="w-16" />
+          <Block className="h-5 w-36" />
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Block className="h-7 w-24" />
+        <div className="rounded-md border border-line p-4">
+          <Lines n={4} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** docs/ui.md §8 item 11. Q6: the context and the header's board view-model load once each, never polled. */
 function ProjectContext({ id }) {
   const { data: page, error: pageError } = usePoll(useCallback(() => boardPage(id), [id]))
@@ -96,7 +121,15 @@ function ProjectContext({ id }) {
 
   const missing = [pageError, error].find((e) => e?.status === 404)
   if (missing) return <NotFound detail={missing.message} />
-  if (!page) return pageError ? <ErrorMessage error={pageError} /> : <p className={muted}>Loading…</p>
+  if (!page) {
+    if (pageError) return <ErrorMessage error={pageError} />
+    return (
+      <Skeleton>
+        <ProjectHeaderSkeleton />
+        <EditorSkeleton />
+      </Skeleton>
+    )
+  }
   return (
     <>
       <ProjectHeader project={page.project} factory={page.factory} />
@@ -105,7 +138,10 @@ function ProjectContext({ id }) {
       ) : context ? (
         <Editor projectId={page.project.id} loaded={context} />
       ) : (
-        <p className={muted}>Loading…</p>
+        // FE15: the header is in, the context isn't yet
+        <Skeleton>
+          <EditorSkeleton />
+        </Skeleton>
       )}
     </>
   )

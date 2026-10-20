@@ -10,6 +10,7 @@ import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TabsSkeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, popover, smallButton, tab } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -138,7 +139,7 @@ function Conversation({ page, onSent }) {
         <ol className="grid gap-2">
           {timeline.map((entry) => (
             <li key={`${entry.kind}-${entry.id}`}>
-              <Time iso={entry.created_at} /> {entry.label}
+              <Time iso={entry.created_at} relative /> {entry.label}
               {!blank(entry.body_md) && <Markdown html={entry.body_html} className="mt-1 ml-4" />}
             </li>
           ))}
@@ -480,6 +481,24 @@ function CommitHint({ hint }) {
 
 // --- The page ----------------------------------------------------------------------------
 
+/** 046 Q5: the header (breadcrumb, title with Review changes, status line), the tabs, and the description's text. */
+function ReviewSkeleton() {
+  return (
+    <Skeleton>
+      <TitleSkeleton title={<ButtonBlock className="w-36" />}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Block className="h-6 w-24" />
+          <Crumbs className="w-48" />
+          <Crumbs className="w-40" />
+        </div>
+      </TitleSkeleton>
+      <TabsSkeleton className="mb-6" />
+      <Block className="mb-2 h-7 w-32" />
+      <Lines n={3} />
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 5: one round's review, with Conversation and Files changed tabs and my decision. */
 export function ReviewPage() {
   const { id } = useParams()
@@ -513,7 +532,7 @@ export function ReviewPage() {
 
   // Q12: a 404 is always not-found; other errors replace the page only until the first good load
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!page) return error ? <ErrorMessage error={error} /> : <ReviewSkeleton />
   const { task, rounds, selected } = page
   const off = !(task.status === 'review' && rounds.length > 0) // 009 Q2, Q3: only in review, with a round
 

@@ -224,3 +224,48 @@ test('044 FE21: docs/ui.md item 3 has the Move menu, its popover, Up, Down, and 
   expect(board).toContain('[Move')
   expect(board).not.toContain('[Code]')
 })
+
+test('046 FE17: the text Loading… is in one source file, components/Skeleton.jsx', () => {
+  expect(sources.filter(([, text]) => text.includes('Loading…')).map(([f]) => f)).toEqual(['components/Skeleton.jsx'])
+})
+
+/** Each class-like token in a source as [token, its utility]: the part after the last variant colon outside [ ]. */
+const tokens = (text) => (text.match(/[^\s'"`{}()<>;,]+/g) ?? []).map((t) => [t, t.split(/:(?![^[]*\])/).at(-1)])
+
+test('046 FE20: transitions are motion-safe opacity or transform, durations at most 150 ms, animations motion-safe; index.css adds none', () => {
+  const found = { transition: [], duration: [], animate: [] }
+  const bad = []
+  for (const [f, text] of sources) {
+    for (const [token, util] of tokens(text)) {
+      // `transition` alone is a utility; `duration` and `animate` alone are just words
+      const kind = util.match(/^(?:(transition)(?:-|$)|(duration|animate)-)/)?.slice(1).find(Boolean)
+      if (!kind) continue
+      found[kind].push(token)
+      const safe = token.startsWith('motion-safe:')
+      const ok = kind === 'transition' ? safe && ['transition-opacity', 'transition-transform'].includes(util)
+        : kind === 'duration' ? Number(util.match(/^duration-(\d+)$/)?.[1]) <= 150
+        : safe
+      if (!ok) bad.push(`${f}: ${token}`)
+    }
+  }
+  expect(bad).toEqual([])
+  // the chevron, the card, the popover, and the banner; the running dot, the skeleton blocks, and the spinner
+  expect(found.transition.length).toBeGreaterThanOrEqual(4)
+  expect(found.animate.length).toBeGreaterThanOrEqual(3)
+  expect(css).not.toMatch(/(?:^|[\s;{])(?:transition|animation)(?:-[\w-]+)?\s*:/m)
+  for (const [, ms] of css.matchAll(/--default-transition-duration\s*:\s*(\d+)ms/g)) expect(Number(ms)).toBeLessThanOrEqual(150)
+})
+
+test('046 FE22: docs/ui.md §8 has skeletons, the offline banner, relative times, the spinner, and the motion rule; §8.1 and §8.2 are relative', () => {
+  const ui = read('../../docs/ui.md')
+  const intro = ui.slice(ui.indexOf('## 8. UI'), ui.indexOf('\n1. **Dashboard**'))
+  for (const text of ['skeleton', 'Offline — retrying', '5m ago', 'yesterday', 'title', 'spinner', 'opacity', 'transform', '150 ms']) {
+    expect(intro).toContain(text)
+  }
+  const board = ui.slice(ui.indexOf('### 8.1'), ui.indexOf('### 8.2'))
+  expect(board).toContain('started 5m ago')
+  expect(board).not.toContain('started 10:02')
+  const review = ui.slice(ui.indexOf('### 8.2'), ui.indexOf('### 8.3'))
+  expect(review).toContain('ago')
+  expect(review).not.toContain('10:02 created')
+})
