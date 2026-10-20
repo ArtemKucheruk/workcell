@@ -3,8 +3,8 @@ import { expect, test } from 'vitest'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const API = '/api/pages/projects/3/code'
-/** 020's CodeProject. */
-const PROJECT = { id: 3, name: 'api', path: '/Users/me/api' }
+/** 020's CodeProject, with 047's workspace. */
+const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', workspace_id: 2, workspace: 'personal' }
 const TREE = {
   'README.md': { path: 'README.md' },
   'src/': { 'a.py': { path: 'src/a.py' }, 'lib/': { 'b.py': { path: 'src/lib/b.py' } } },
@@ -71,7 +71,7 @@ test('AC1, FE33: the landing fetches once with no query; the header is the proje
   expect(fetched(fetch).filter((url) => url === BOARD)).toHaveLength(1)
 })
 
-test('FE33: a ?path= change refetches the code view-model, not the board one; a failed board one leaves the h1 api', async () => {
+test('FE33, 047 Q1: a ?path= change refetches the code view-model, not the board one; a failed board one leaves the h1 api · personal', async () => {
   const { fetch, router, unmount } = await open({
     [`GET ${API}`]: [200, landing()],
     [`GET ${API}?path=src%2Fa.py`]: [200, file('src/a.py', text('x = 1\n'), 'py')],
@@ -90,11 +90,31 @@ test('FE33: a ?path= change refetches the code view-model, not the board one; a 
     const failed = await open({ [`GET ${API}`]: [200, landing()], [`GET ${BOARD}`]: failure })
     await waitFor(() => expect(fetched(failed.fetch)).toContain(BOARD))
     await act(() => new Promise((r) => setTimeout(r, 20)))
-    expect(h1().textContent).toBe('api')
+    expect(h1().textContent).toBe('api · personal') // 047 Q1: from the code view-model
     expect(screen.queryByRole('alert')).toBeNull()
     expect(document.querySelector('main').textContent).not.toContain('Factory:')
     expect(files()).not.toBeNull()
     failed.unmount()
+  }
+})
+
+test('047 FE4: the breadcrumb personal › api › Code sits above the project header, from the code view-model alone', async () => {
+  for (const board of [[200, BOARD_PAGE], [500, { detail: 'boom' }], [404, { detail: 'Not Found' }]]) {
+    const { fetch, unmount } = await open({ [`GET ${API}?path=src%2Fa.py`]: [200, file('src/a.py', text('x = 1\n'), 'py')], [`GET ${BOARD}`]: board }, '/projects/3/code?path=src/a.py')
+    await waitFor(() => expect(fetched(fetch)).toContain(BOARD))
+    await act(() => new Promise((r) => setTimeout(r, 20)))
+    const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(crumbs.textContent).toBe('personal › api › Code') // no file-path parts
+    expect(within(crumbs).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['personal', '/workspaces/2'], ['api', '/projects/3'],
+    ])
+    const current = within(crumbs).getByText('Code')
+    expect([current.getAttribute('aria-current'), current.closest('a')]).toEqual(['page', null])
+    const header = h1().closest('header')
+    expect(header.contains(crumbs)).toBe(false)
+    expect(crumbs.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(header).getByRole('link', { name: 'personal' }).getAttribute('href')).toBe('/workspaces/2')
+    unmount()
   }
 })
 
@@ -140,14 +160,14 @@ test('AC5: nothing open on the landing; the URL\'s file opens its directories an
   const { unmount } = await open({ [`GET ${API}`]: [200, landing()] })
   expect(document.querySelectorAll('main details').length).toBe(3)
   expect(document.querySelectorAll('details[open]').length).toBe(0)
-  expect(document.querySelectorAll('[aria-current]').length).toBe(0)
+  expect(files().querySelectorAll('[aria-current]').length).toBe(0) // 047: the breadcrumb's Code is current too
   unmount()
   await openFile('src/lib/b.py', file('src/lib/b.py', text('y = 2\n'), 'py'))
   expect(dir('src/').open).toBe(true)
   expect(dir('lib/').open).toBe(true)
   expect(dir('docs/').open).toBe(false)
   expect(link('b.py').getAttribute('aria-current')).toBe('page')
-  expect([...document.querySelectorAll('[aria-current]')]).toEqual([link('b.py')])
+  expect([...files().querySelectorAll('[aria-current]')]).toEqual([link('b.py')])
 })
 
 test('AC6: clicking a.py moves the URL, fetches its view-model, and shows the file', async () => {
@@ -285,7 +305,7 @@ test('AC18: a git failure shows the alert under the header, with no Files nav', 
   })
   await open({ [`GET ${API}`]: [200, page] })
   expect(screen.getByRole('alert').textContent).toBe("Can't list files in /Users/me/gone: fatal: not a git repository")
-  expect(h1().textContent).toBe('api') // FE4: no board view-model mocked
+  expect(h1().textContent).toBe('api · personal') // FE4: no board view-model mocked; 047 Q1: the code one names it
   expect(files()).toBeNull()
 })
 
@@ -305,6 +325,6 @@ test('AC20: a failed first load is an alert alone; a failed click keeps the page
   await open({ [`GET ${API}`]: [200, landing()], [`GET ${API}?path=src%2Fa.py`]: [500, { detail: 'boom' }] })
   fireEvent.click(link('a.py'))
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
-  expect(h1().textContent).toBe('api') // FE4: no board view-model mocked
+  expect(h1().textContent).toBe('api · personal') // FE4: no board view-model mocked; 047 Q1: the code one names it
   expect(files()).not.toBeNull()
 })

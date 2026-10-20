@@ -1,15 +1,16 @@
 import hljs from 'highlight.js/lib/common'
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router'
 import { reviewPage } from '../../api/pages.js'
 import { addComment, approveTask, requestChanges } from '../../api/reviews.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { TaskState } from '../../components/Badge.jsx'
+import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
-import { button, field, muted, tab } from '../../components/styles.js'
+import { button, field, muted, popover, smallButton, tab } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -347,6 +348,136 @@ function Files({ page, onSent }) {
   )
 }
 
+// --- Review changes and Commit it yourself (docs/ui.md §8 item 5) -----------------------
+
+const DECISIONS = [
+  ['approve', 'Approve', 'Mark it done. The app never runs git, so you commit it yourself.'],
+  ['changes', 'Request changes', 'Send it back for another round, with the summary as its brief.'],
+]
+
+/**
+ * 047: GitHub's Review changes, a popover with the Summary, an Approve / Request changes radio, and Submit review. Q4: the
+ * summary goes with either choice; Request changes needs one. Q5: no radio starts chosen, so Submit waits for one. Q6: a
+ * success hides and resets the popover, a refusal shows inside it and keeps its input, and the page refetches either way.
+ */
+function ReviewChanges({ task, off, onDone }) {
+  const [summary, setSummary] = useState('')
+  const [choice, setChoice] = useState(null)
+  const [error, setError] = useState(null)
+  const box = useRef(null)
+  async function submit() {
+    try {
+      await (choice === 'approve' ? approveTask(task.id, summary) : requestChanges(task.id, summary))
+      setSummary('')
+      setChoice(null)
+      setError(null)
+      box.current.hidePopover?.() // jsdom has no Popover API
+    } catch (err) {
+      setError(err)
+    }
+    onDone()
+  }
+  return (
+    <>
+      <button
+        type="button"
+        popoverTarget="review-changes"
+        disabled={off}
+        className={`${button} [anchor-name:--review-changes]`}
+      >
+        Review changes <span aria-hidden="true">▾</span>
+      </button>
+      <div
+        ref={box}
+        id="review-changes"
+        popover="auto"
+        className={`${popover} w-[28rem] max-w-[90vw] gap-3 p-3 open:grid [position-anchor:--review-changes] [position-area:bottom_span-left]`}
+      >
+        <label htmlFor="summary" className="font-semibold">
+          Summary
+        </label>
+        <textarea
+          id="summary"
+          // as on + New task: the autofocus attribute, which the popover focuses as it opens
+          ref={(el) => el?.setAttribute('autofocus', '')}
+          rows={4}
+          placeholder="Leave a summary. Required for Request changes."
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          className={field}
+        />
+        <fieldset className="grid gap-2">
+          <legend className="sr-only">Decision</legend>
+          {DECISIONS.map(([value, label, note]) => (
+            <div key={value} className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2">
+              <input
+                id={`decision-${value}`}
+                type="radio"
+                name="decision"
+                value={value}
+                checked={choice === value}
+                onChange={() => setChoice(value)}
+                aria-describedby={`decision-${value}-note`}
+              />
+              <label htmlFor={`decision-${value}`} className="font-medium">
+                {label}
+              </label>
+              <p id={`decision-${value}-note`} className={`col-start-2 text-sm ${muted}`}>
+                {note}
+              </p>
+            </div>
+          ))}
+        </fieldset>
+        <ActionButton
+          action={submit}
+          disabled={off || !choice || (choice === 'changes' && blank(summary))}
+          className={`${button} justify-self-start`}
+        >
+          Submit review
+        </ActionButton>
+        {error && <ErrorMessage error={error} />}
+      </div>
+    </>
+  )
+}
+
+/** 047 Q7: Copy writes the commands; without a clipboard, or when it refuses, it selects them and says how to copy. */
+function CommitHint({ hint }) {
+  const pre = useRef(null)
+  const [copied, setCopied] = useState(null) // null, 'copied', or 'selected'
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(hint) // no clipboard throws here too
+      setCopied('copied')
+    } catch {
+      const range = document.createRange()
+      range.selectNodeContents(pre.current)
+      window.getSelection().removeAllRanges()
+      window.getSelection().addRange(range)
+      setCopied('selected')
+    }
+  }
+  return (
+    <section aria-labelledby="review-commit" className="mb-6">
+      <h2 id="review-commit" className="mt-0">
+        Commit it yourself
+      </h2>
+      <p className={muted}>Done. The app never runs git; run these in a terminal.</p>
+      <div className="mt-2 flex items-start gap-2">
+        <pre ref={pre} className="min-w-0 grow overflow-x-auto rounded-md border border-line p-3 text-sm">
+          {hint}
+        </pre>
+        <button type="button" onClick={copy} className={smallButton}>
+          {copied === 'copied' ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p role="status" className={`mt-1 text-sm ${muted}`}>
+        {copied === 'selected' && 'Selected. Press Ctrl+C (⌘C on a Mac) to copy.'}
+      </p>
+    </section>
+  )
+}
+
 // --- The page ----------------------------------------------------------------------------
 
 /** docs/ui.md §8 item 5: one round's review, with Conversation and Files changed tabs and my decision. */
@@ -362,8 +493,6 @@ export function ReviewPage() {
   const refresh = useCallback(() => setTick((n) => n + 1), [])
   const load = useCallback(() => reviewPage(id, round), [id, round, tick])
   const { data: page, error } = usePoll(load)
-  const [summary, setSummary] = useState('')
-  const [actionError, setActionError] = useState(null)
   const heading = page && `#${page.task.id} ${page.task.title}`
   useEffect(() => {
     if (heading) document.title = `${heading} · Review · Claude Factories`
@@ -388,18 +517,6 @@ export function ReviewPage() {
   const { task, rounds, selected } = page
   const off = !(task.status === 'review' && rounds.length > 0) // 009 Q2, Q3: only in review, with a round
 
-  /** Q8: success or refusal, refetch; a success clears the summary and the alert, a refusal shows in it. */
-  async function decide(call) {
-    try {
-      await call()
-      setActionError(null)
-      setSummary('')
-    } catch (err) {
-      setActionError(err)
-    }
-    refresh()
-  }
-
   /** Q2: tab links keep the URL's `round`; Conversation drops `tab`. */
   const tabHref = (tab) => {
     const q = new URLSearchParams(round ? { round } : {})
@@ -410,15 +527,14 @@ export function ReviewPage() {
 
   return (
     <>
-      {/* Q11: review.html's grid; the buttons sit on the title row, after Summary in tab order */}
-      <header className="mb-6 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
-        <nav aria-label="Breadcrumb" className="col-span-full text-sm">
-          <Link to={`/projects/${task.project_id}`}>{task.project}</Link>
-          {' › '}
-          <Link to={`/tasks/${task.id}`}>{`#${task.id}`}</Link>
-        </nav>
-        <h1 className="col-start-1 row-start-2 wrap-anywhere">{heading}</h1>
-        <p className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-1">
+      <header className="mb-6 grid gap-2">
+        <Breadcrumbs items={[...projectTrail(task), { label: `#${task.id}`, to: `/tasks/${task.id}` }, { label: 'Review' }]} />
+        {/* 047: the title row, Review changes at its end as on GitHub; it wraps under a long title */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <h1 className="mr-auto wrap-anywhere">{heading}</h1>
+          <ReviewChanges task={task} off={off} onDone={refresh} />
+        </div>
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <TaskState task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           {rounds.length > 0 && (
@@ -443,46 +559,9 @@ export function ReviewPage() {
             </span>
           )}
         </p>
-        <div className="col-span-full mt-2 grid max-w-3xl gap-1">
-          <label htmlFor="summary">Summary</label>
-          <textarea
-            id="summary"
-            rows={2}
-            placeholder="What should change? Required for Request changes."
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-            disabled={off}
-            className={field}
-          />
-        </div>
-        <ActionButton
-          className={`${button} col-start-2 row-start-2`}
-          action={() => decide(() => requestChanges(task.id, summary))}
-          disabled={off || blank(summary)}
-        >
-          Request changes
-        </ActionButton>
-        <ActionButton className={`${button} col-start-3 row-start-2`} action={() => decide(() => approveTask(task.id))} disabled={off}>
-          Approve
-        </ActionButton>
-        {actionError && (
-          <div className="col-span-full">
-            <ErrorMessage error={actionError} />
-          </div>
-        )}
       </header>
       {error && <ErrorMessage error={error} />}
-      {task.commit_hint && (
-        <section aria-labelledby="review-commit" className="mb-6">
-          <h2 id="review-commit" className="mt-0">
-            Commit it yourself
-          </h2>
-          <p className={muted}>Done. The app never runs git; run these in a terminal.</p>
-          <pre className="mt-2 overflow-x-auto rounded-md border border-line p-3 text-sm">
-            {task.commit_hint}
-          </pre>
-        </section>
-      )}
+      {task.commit_hint && <CommitHint hint={task.commit_hint} />}
       <nav aria-label="Review tabs" className="mb-6 flex gap-4 border-b border-line">
         <Link to={tabHref()} aria-current={onFiles ? undefined : 'page'} className={tab}>
           Conversation

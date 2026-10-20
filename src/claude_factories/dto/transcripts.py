@@ -54,4 +54,8 @@ class Message(BaseModel):
 
 class TranscriptDetail(TranscriptOut):
     task_id: int
+    project_id: int  # 047 Q3: its task's project and workspace now, for the breadcrumb
+    project: str
+    workspace_id: int
+    workspace: str
     messages: list[Message]

@@ -198,6 +198,8 @@ class PageTask(BaseModel):
     id: int
     project_id: int
     project: str
+    workspace_id: int  # 047: the project's workspace now, for the breadcrumb
+    workspace: str
     title: str
     status: str
     stage: str | None
@@ -320,6 +322,8 @@ class CodeProject(BaseModel):
     id: int
     name: str
     path: str
+    workspace_id: int  # 047: for the breadcrumb
+    workspace: str
 
 
 class TextView(BaseModel):

@@ -170,10 +170,12 @@ class TasksRepo:
         return found[0] if found else None
 
     def for_page(self, task_id: int) -> sqlite3.Row | None:
-        """The task row both task pages show; `path` is for Review's commit hint."""
+        """The task row both task pages show; `path` is for Review's commit hint. 047: the workspace is the
+        project's now, joined at read time, for the breadcrumb."""
         return self.conn.execute(
-            "SELECT t.id, t.project_id, p.name AS project, t.title, t.description_md, t.spec_md, t.status, t.stage,"
-            " t.branch, t.worktree_path, p.path, p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id"
+            "SELECT t.id, t.project_id, p.name AS project, p.workspace_id, w.name AS workspace, t.title,"
+            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, p.path, p.default_branch"
+            " FROM tasks t JOIN projects p ON p.id = t.project_id JOIN workspaces w ON w.id = p.workspace_id"
             " WHERE t.id = ?",
             (task_id,),
         ).fetchone()

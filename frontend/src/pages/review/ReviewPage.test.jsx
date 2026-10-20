@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
@@ -12,9 +12,9 @@ const PASS = { security: 'PASS', ux: 'PASS', ui: 'PASS', code: 'PASS' }
 const PENDING = { security: 'pending', ux: 'pending', ui: 'pending', code: 'pending' }
 const M = '−' // the minus sign in every +A −D
 
-/** 020's ReviewTask: the spec's fixture task. */
+/** 020's ReviewTask, with 047's workspace: the spec's fixture task. */
 const TASK = {
-  id: 12, project_id: 3, project: 'api', title: 'Rate-limit login', status: 'review', stage: 'human_review',
+  id: 12, project_id: 3, project: 'api', workspace_id: 2, workspace: 'personal', title: 'Rate-limit login', status: 'review', stage: 'human_review',
   branch: 'factory/12-rate-limit-login', worktree_path: WORKTREE,
   description_md: '', description_html: '', spec_md: null, spec_html: '', commit_hint: null,
 }
@@ -96,13 +96,18 @@ function postedBeforeReload(fetch, url) {
 
 // --- Header and URL ----------------------------------------------------------------------
 
-test('AC1: /tasks/12/review fetches the view-model with no query and shows the title, breadcrumb, and page title', async () => {
+test('AC1, 047 FE3: /tasks/12/review fetches the view-model with no query and shows the title, breadcrumb, and page title', async () => {
   const { fetch } = await open(reviewPage())
   expect(fetched(fetch).filter((url) => url.startsWith('/api/pages/tasks'))).toEqual([PAGE])
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
   const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
-  expect(within(crumbs).getByRole('link', { name: 'api' }).getAttribute('href')).toBe('/projects/3')
-  expect(within(crumbs).getByRole('link', { name: '#12' }).getAttribute('href')).toBe('/tasks/12')
+  expect(crumbs.closest('header')).toBe(header())
+  expect(crumbs.textContent).toBe('personal › api › #12 › Review')
+  expect(within(crumbs).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+    ['personal', '/workspaces/2'], ['api', '/projects/3'], ['#12', '/tasks/12'],
+  ])
+  const current = within(crumbs).getByText('Review')
+  expect([current.getAttribute('aria-current'), current.closest('a')]).toEqual(['page', null])
   await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Review · Claude Factories'))
 })
 
@@ -118,7 +123,7 @@ test('AC2, 043 FE12: the status pill and stage, the branch in a <code>, and the 
   ]
   for (const [status, stage, label, tone, after] of cases) {
     const { unmount } = await open(reviewPage({ status, stage }))
-    const pill = within(header()).getByText(label, { selector: 'span' })
+    const pill = within(header().querySelector(':scope > p')).getByText(label, { selector: 'span' }) // 047: not the breadcrumb's Review
     expect(pill.className).toMatch(cls(tone))
     const state = [...pill.parentElement.children]
     expect(state.map((el) => el.textContent)).toEqual(after ? [label, after[0]] : [label])
@@ -209,7 +214,7 @@ test('AC7: the description renders its HTML or says No description.; a non-blank
   }
 })
 
-test('AC8, 043 FE12: rounds show in order with plain colored chips titled by verdict, and nothing on the page is a popover', async () => {
+test('AC8, 043 FE12, 047 FE17: rounds show in order with plain colored chips titled by verdict, and no chip popovers', async () => {
   await open(reviewPage())
   expect(rows().map((li) => li.querySelector('p').textContent)).toEqual([
     `Round 1 initial sec ✗ ux ✓ ui ✓ code ✓ +118 ${M}9`,
@@ -222,7 +227,10 @@ test('AC8, 043 FE12: rounds show in order with plain colored chips titled by ver
   expect(chips.map((el) => ['text-success', 'text-danger'].find((c) => cls(c).test(el.className)))).toEqual([
     'text-danger', 'text-success', 'text-success', 'text-success',
   ])
-  expect(document.querySelector('[popover], [popovertarget]')).toBeNull()
+  expect(section('Rounds').querySelector('[popover], [popovertarget]')).toBeNull()
+  // 047: Review changes' is the page's one popover
+  expect([...document.querySelectorAll('[popover]')].map((el) => el.id)).toEqual(['review-changes'])
+  expect([...document.querySelectorAll('[popovertarget]')].map((el) => el.textContent)).toEqual(['Review changes ▾'])
 })
 
 test('AC9: posted verdicts with a body are closed <details> in reviewer order; a blank body gets none', async () => {
@@ -518,35 +526,123 @@ test('AC28: Files changed with no rounds says No rounds yet. and has no tree or 
   expect(document.querySelector('main table')).toBeNull()
 })
 
-// --- Approve and Request changes ---------------------------------------------------------
+// --- 047: Review changes and Commit it yourself -------------------------------------------
 
-test('AC29: the decision is enabled only in review with rounds; Request changes waits for a summary', async () => {
+const titleRow = () => screen.getByRole('heading', { level: 1 }).parentElement
+/** Review changes' popover, shown as a click would, with hidePopover stubbed: jsdom has no Popover API. */
+function reviewChanges() {
+  const popover = document.getElementById(headerButton('Review changes').getAttribute('popovertarget'))
+  popover.style.display = 'grid' // jsdom's UA sheet hides it while closed
+  popover.hidePopover = vi.fn()
+  return popover
+}
+const radio = (popover, name) => within(popover).getByRole('radio', { name })
+const submitReview = (popover) => within(popover).getByRole('button', { name: 'Submit review' })
+const summaryBox = (popover) => within(popover).getByLabelText('Summary')
+const chosen = (popover) => within(popover).getAllByRole('radio').filter((r) => r.checked).map((r) => r.value)
+
+test('047 FE9: no Approve, Request changes, or Summary outside a popover; Review changes on the title row opens one holding them', async () => {
+  await open(reviewPage())
+  expect(screen.queryAllByRole('button', { name: /^(Approve|Request changes)$/, hidden: true })).toEqual([])
+  const button = within(titleRow()).getByRole('button', { name: 'Review changes' })
+  const popover = document.getElementById(button.getAttribute('popovertarget'))
+  expect(popover.getAttribute('popover')).toBe('auto')
+  const summaries = screen.getAllByLabelText('Summary')
+  expect(summaries).toHaveLength(1)
+  expect(summaries[0].tagName).toBe('TEXTAREA')
+  expect(summaries[0].closest('[popover]')).toBe(popover)
+  expect(summaries[0].hasAttribute('autofocus')).toBe(true)
+  const radios = within(popover).getAllByRole('radio', { hidden: true })
+  expect(radios.map((r) => r.labels[0].textContent)).toEqual(['Approve', 'Request changes'])
+  expect(radios.map((r) => [within(popover).getByRole('radio', { name: r.labels[0].textContent, hidden: true }), r.name])).toEqual([
+    [radios[0], 'decision'], [radios[1], 'decision'],
+  ])
+  expect(within(popover).getByRole('button', { name: 'Submit review', hidden: true })).toBeTruthy()
+})
+
+test('047 FE10: Review changes is enabled only in review with a round', async () => {
   const review = await open(reviewPage())
-  const box = within(header()).getByLabelText('Summary')
-  expect([headerButton('Approve').disabled, box.disabled, headerButton('Request changes').disabled]).toEqual([false, false, true])
-  fireEvent.change(box, { target: { value: '  \n' } })
-  expect(headerButton('Request changes').disabled).toBe(true)
-  fireEvent.change(box, { target: { value: 'Make it configurable' } })
-  expect(headerButton('Request changes').disabled).toBe(false)
+  expect(headerButton('Review changes').disabled).toBe(false)
   review.unmount()
-
   for (const page of [reviewPage({ status: 'in_progress', stage: 'build' }), reviewPage({ status: 'done', stage: null }), noRounds()]) {
     const { unmount } = await open(page)
-    const off = [headerButton('Approve'), headerButton('Request changes'), within(header()).getByLabelText('Summary')]
-    expect(off.map((el) => el.disabled)).toEqual([true, true, true])
+    expect(headerButton('Review changes').disabled).toBe(true)
     unmount()
   }
 })
 
-test('AC30: Approve posts an empty body, even with a summary, then reloads', async () => {
+test('047 FE11: Submit review waits for a radio; with Request changes it also waits for a summary', async () => {
+  await open(reviewPage())
+  const popover = reviewChanges()
+  expect(chosen(popover)).toEqual([]) // Q5: neither starts chosen
+  expect(submitReview(popover).disabled).toBe(true)
+  fireEvent.click(radio(popover, 'Approve'))
+  expect(submitReview(popover).disabled).toBe(false)
+  fireEvent.click(radio(popover, 'Request changes'))
+  expect(chosen(popover)).toEqual(['changes'])
+  expect(submitReview(popover).disabled).toBe(true)
+  fireEvent.change(summaryBox(popover), { target: { value: '  \n' } })
+  expect(submitReview(popover).disabled).toBe(true)
+  fireEvent.change(summaryBox(popover), { target: { value: 'Make it configurable' } })
+  expect(submitReview(popover).disabled).toBe(false)
+})
+
+test('047 FE12, AC30: Approve sends the summary (blank as ""), reloads, hides the popover, and resets it', async () => {
+  for (const [typed, body_md] of [['Ship it', 'Ship it'], ['', '']]) {
+    const { fetch, unmount } = await open(reviewPage(), '/tasks/12/review', {
+      [`POST ${APPROVE}`]: [200, { status: 'done', commit_hint: HINT }],
+    })
+    const popover = reviewChanges()
+    if (typed) fireEvent.change(summaryBox(popover), { target: { value: typed } })
+    fireEvent.click(radio(popover, 'Approve'))
+    fireEvent.click(submitReview(popover))
+    await waitFor(() => expect(loads(fetch)).toBe(2))
+    expect(sent(fetch, APPROVE)).toEqual({ body_md })
+    postedBeforeReload(fetch, APPROVE)
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1)
+    expect(popover.hidePopover).toHaveBeenCalledTimes(1)
+    expect([summaryBox(popover).value, chosen(popover)]).toEqual(['', []])
+    unmount()
+  }
+})
+
+test('047 FE13, AC32: Request changes sends the summary, reloads, hides the popover, and empties it', async () => {
   const { fetch } = await open(reviewPage(), '/tasks/12/review', {
-    [`POST ${APPROVE}`]: [200, { status: 'done', commit_hint: HINT }],
+    [`POST ${CHANGES}`]: [202, { status: 'in_progress', stage: 'build', run_id: 41 }],
   })
-  fireEvent.change(within(header()).getByLabelText('Summary'), { target: { value: 'Ship it' } })
-  fireEvent.click(headerButton('Approve'))
+  const popover = reviewChanges()
+  fireEvent.change(summaryBox(popover), { target: { value: 'Make it configurable' } })
+  fireEvent.click(radio(popover, 'Request changes'))
+  fireEvent.click(submitReview(popover))
   await waitFor(() => expect(loads(fetch)).toBe(2))
-  expect(sent(fetch, APPROVE)).toEqual({ body_md: '' })
-  postedBeforeReload(fetch, APPROVE)
+  expect(sent(fetch, CHANGES)).toEqual({ body_md: 'Make it configurable' })
+  postedBeforeReload(fetch, CHANGES)
+  expect(popover.hidePopover).toHaveBeenCalledTimes(1)
+  expect([summaryBox(popover).value, chosen(popover)]).toEqual(['', []])
+})
+
+test('047 FE14, AC33: a refused submit shows its detail in the popover, keeps it open with its input, and still reloads', async () => {
+  const { fetch, responses } = await open(reviewPage(), '/tasks/12/review', {
+    [`POST ${APPROVE}`]: [409, { detail: '#12 is not in review' }],
+  })
+  const popover = reviewChanges()
+  fireEvent.change(summaryBox(popover), { target: { value: 'Ship it' } })
+  fireEvent.click(radio(popover, 'Approve'))
+  fireEvent.click(submitReview(popover))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(within(popover).getByRole('alert').textContent).toBe('#12 is not in review')
+  expect(screen.getAllByRole('alert')).toHaveLength(1)
+  expect(popover.hidePopover).not.toHaveBeenCalled()
+  expect([summaryBox(popover).value, chosen(popover)]).toEqual(['Ship it', ['approve']])
+  sent(fetch, APPROVE)
+
+  // the next success clears it
+  responses[`POST ${APPROVE}`] = [200, { status: 'done', commit_hint: HINT }]
+  await waitFor(() => expect(submitReview(popover).disabled).toBe(false))
+  fireEvent.click(submitReview(popover))
+  await waitFor(() => expect(loads(fetch)).toBe(3))
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(popover.hidePopover).toHaveBeenCalledTimes(1)
 })
 
 test('AC31: a done task shows its commit commands under Commit it yourself; Approve leads there', async () => {
@@ -561,50 +657,54 @@ test('AC31: a done task shows its commit commands under Commit it yourself; Appr
   expect(screen.queryByRole('heading', { name: 'Commit it yourself' })).toBeNull()
   expect(document.querySelector('main pre')).toBeNull()
   responses[`GET ${PAGE}`] = [200, reviewPage({ status: 'done', stage: null, commit_hint: HINT })]
-  fireEvent.click(headerButton('Approve'))
+  const popover = reviewChanges()
+  fireEvent.click(radio(popover, 'Approve'))
+  fireEvent.click(submitReview(popover))
   expect(await screen.findByRole('heading', { name: 'Commit it yourself' })).toBeTruthy()
   sent(fetch, APPROVE)
   expect(document.querySelector('main pre').textContent).toBe(HINT)
-  expect([headerButton('Approve').disabled, headerButton('Request changes').disabled]).toEqual([true, true])
+  expect(headerButton('Review changes').disabled).toBe(true)
 })
 
-test('AC32: Request changes posts the summary, reloads, and empties it', async () => {
-  const { fetch } = await open(reviewPage(), '/tasks/12/review', {
-    [`POST ${CHANGES}`]: [202, { status: 'in_progress', stage: 'build', run_id: 41 }],
-  })
-  const box = within(header()).getByLabelText('Summary')
-  fireEvent.change(box, { target: { value: 'Make it configurable' } })
-  fireEvent.click(headerButton('Request changes'))
-  await waitFor(() => expect(loads(fetch)).toBe(2))
-  expect(sent(fetch, CHANGES)).toEqual({ body_md: 'Make it configurable' })
-  postedBeforeReload(fetch, CHANGES)
-  expect(box.value).toBe('')
+const commit = () => section('Commit it yourself')
+const NOTE = 'Selected. Press Ctrl+C (⌘C on a Mac) to copy.'
+
+/** Opens a done task with `clipboard` as navigator.clipboard (undefined: none), and returns its Copy button. */
+async function openDone(clipboard) {
+  Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true })
+  await open(reviewPage({ status: 'done', stage: null, commit_hint: HINT }))
+  return within(commit()).getByRole('button', { name: 'Copy' })
+}
+
+test('047 FE15: Copy under Commit it yourself writes commit_hint to the clipboard once, then reads Copied', async () => {
+  const writeText = vi.fn(async () => {})
+  try {
+    const copy = await openDone({ writeText })
+    expect(within(commit()).getByRole('heading', { level: 2 }).compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(copy)
+    await waitFor(() => expect(copy.textContent).toBe('Copied'))
+    expect(writeText.mock.calls).toEqual([[HINT]])
+    expect(commit().textContent).not.toContain(NOTE)
+  } finally {
+    delete navigator.clipboard
+  }
 })
 
-test('AC33: a refused decision shows in the header alert and still reloads; the next success clears it', async () => {
-  const { fetch, responses } = await open(reviewPage(), '/tasks/12/review', {
-    [`POST ${APPROVE}`]: [409, { detail: '#12 is not in review' }],
-    [`POST ${CHANGES}`]: [409, { detail: 'not on subscription auth' }],
-  })
-  fireEvent.click(headerButton('Approve'))
-  await waitFor(() => expect(loads(fetch)).toBe(2))
-  expect(within(header()).getByRole('alert').textContent).toBe('#12 is not in review')
-  sent(fetch, APPROVE)
-
-  const box = within(header()).getByLabelText('Summary')
-  fireEvent.change(box, { target: { value: 'Make it configurable' } })
-  await waitFor(() => expect(headerButton('Request changes').disabled).toBe(false))
-  fireEvent.click(headerButton('Request changes'))
-  await waitFor(() => expect(loads(fetch)).toBe(3))
-  expect(within(header()).getAllByRole('alert').map((el) => el.textContent)).toEqual(['not on subscription auth'])
-  expect(box.value).toBe('Make it configurable')
-  expect(sent(fetch, CHANGES)).toEqual({ body_md: 'Make it configurable' })
-
-  responses[`POST ${APPROVE}`] = [200, { status: 'done', commit_hint: HINT }]
-  await waitFor(() => expect(headerButton('Approve').disabled).toBe(false))
-  fireEvent.click(headerButton('Approve'))
-  await waitFor(() => expect(loads(fetch)).toBe(4))
-  expect(screen.queryByRole('alert')).toBeNull()
+test('047 FE16: without a clipboard, or when writeText rejects, Copy selects the commands and says how to copy them', async () => {
+  for (const clipboard of [undefined, { writeText: vi.fn(async () => Promise.reject(new Error('denied'))) }]) {
+    window.getSelection().removeAllRanges()
+    try {
+      const copy = await openDone(clipboard)
+      fireEvent.click(copy)
+      await waitFor(() => expect(within(commit()).getByRole('status').textContent).toBe(NOTE))
+      expect(window.getSelection().toString()).toBe(HINT)
+      expect(copy.textContent).toBe('Copy')
+      if (clipboard) expect(clipboard.writeText.mock.calls).toEqual([[HINT]])
+    } finally {
+      delete navigator.clipboard
+      cleanup()
+    }
+  }
 })
 
 // --- States ------------------------------------------------------------------------------
@@ -633,7 +733,9 @@ test('AC35: a failed first load shows only its alert; a failed reload after an a
     [`POST ${APPROVE}`]: [200, { status: 'done', commit_hint: HINT }],
   })
   responses[`GET ${PAGE}`] = [500, { detail: 'database is locked' }]
-  fireEvent.click(headerButton('Approve'))
+  const popover = reviewChanges()
+  fireEvent.click(radio(popover, 'Approve'))
+  fireEvent.click(submitReview(popover))
   expect((await screen.findByRole('alert')).textContent).toBe('database is locked')
   expect(loads(fetch)).toBe(2)
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')

@@ -9,7 +9,7 @@ import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
-import { button, field, muted, smallButton } from '../../components/styles.js'
+import { button, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -66,13 +66,6 @@ const cardLook = [
   'has-focus-visible:ring-2 has-focus-visible:ring-accent data-dragging:opacity-50',
   'data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-1.25 data-[drop=before]:before:h-0.5 data-[drop=before]:before:bg-accent',
   'data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-1.25 data-[drop=after]:after:h-0.5 data-[drop=after]:after:bg-accent',
-].join(' ')
-
-// Q10: below its button where the browser has anchor positioning, flipped when it would leave the viewport; else the UA's
-// centered placement, which needs m-auto back after preflight's margin reset
-const popover = [
-  'm-auto rounded-md border border-line bg-surface text-fg shadow-lg',
-  'supports-[position-area:bottom]:m-0 supports-[position-area:bottom]:mt-1 [position-try-fallbacks:flip-block,flip-inline]',
 ].join(' ')
 
 /** Q4: a native popover of plain buttons; each hides it natively as it's chosen (FE10). `nudges` are Up and Down. */

@@ -42,6 +42,10 @@ class TranscriptsRepo:
         ).fetchall()
 
     def get(self, transcript_id: int) -> sqlite3.Row | None:
+        """047 Q3: with its task's project and workspace as they are now, for the breadcrumb."""
         return self.conn.execute(
-            f"SELECT {LISTED}, task_id, path FROM transcripts WHERE id = ?", (transcript_id,)
+            f"SELECT x.*, p.id AS project_id, p.name AS project, w.id AS workspace_id, w.name AS workspace"
+            f" FROM (SELECT {LISTED}, task_id, path FROM transcripts WHERE id = ?) x JOIN tasks t ON t.id = x.task_id"
+            " JOIN projects p ON p.id = t.project_id JOIN workspaces w ON w.id = p.workspace_id",
+            (transcript_id,),
         ).fetchone()

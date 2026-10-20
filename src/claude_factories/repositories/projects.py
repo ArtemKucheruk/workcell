@@ -85,7 +85,12 @@ class ProjectsRepo:
         ).fetchone()
 
     def for_code(self, project_id: int) -> sqlite3.Row | None:
-        return self.conn.execute("SELECT id, name, path FROM projects WHERE id = ?", (project_id,)).fetchone()
+        """047: with the workspace for the code page's breadcrumb."""
+        return self.conn.execute(
+            "SELECT p.id, p.name, p.path, p.workspace_id, w.name AS workspace FROM projects p"
+            " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
+            (project_id,),
+        ).fetchone()
 
     def context(self, project_id: int) -> str | None:
         """None if there is no such project."""

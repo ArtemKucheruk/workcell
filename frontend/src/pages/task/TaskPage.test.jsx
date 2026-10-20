@@ -9,9 +9,9 @@ const ACTIVE = [409, { detail: 'run #41 active' }]
 const WORKTREE = '/Users/me/api/.claude/worktrees/12-rate-limit-login'
 const PENDING = { security: 'pending', ux: 'pending', ui: 'pending', code: 'pending' }
 
-/** 020's PageTask: the spec's fixture task. */
+/** 020's PageTask, with 047's workspace: the spec's fixture task. */
 const TASK = {
-  id: 12, project_id: 3, project: 'api', title: 'Rate-limit login', status: 'in_progress', stage: 'build',
+  id: 12, project_id: 3, project: 'api', workspace_id: 2, workspace: 'personal', title: 'Rate-limit login', status: 'in_progress', stage: 'build',
   branch: 'factory/12-rate-limit-login', worktree_path: WORKTREE,
   description_md: '', description_html: '', spec_md: null, spec_html: '',
 }
@@ -61,9 +61,11 @@ const advance = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
 const loads = (fetch) => fetched(fetch).filter((url) => url === PAGE).length
 const logs = (fetch) => fetched(fetch).filter((url) => url.startsWith('/api/runs/'))
 const header = () => document.querySelector('main header')
+const titleRow = () => screen.getByRole('heading', { level: 1 }).parentElement
+const statusLine = () => within(header()).getByText('Review', { selector: 'a' }).parentElement
 const section = (name) => screen.getByRole('region', { name })
 const rows = () => [...section('Rounds').querySelectorAll('ol > li')]
-const runButtons = () => within(header()).queryAllByRole('button').map((b) => b.textContent)
+const runButtons = () => within(titleRow()).queryAllByRole('button').map((b) => b.textContent) // 047 FE6: the title row's
 const runStatus = () => within(header()).queryByText(/^run #/)
 const panel = () => screen.queryByText(/^Run log · run #/)?.closest('details') ?? null
 const logLines = () => [...panel().querySelector('summary + div').children].map((el) => el.textContent)
@@ -87,12 +89,18 @@ async function clickAndReload(fetch, label, method, url) {
 
 // --- Page and header -------------------------------------------------------------------
 
-test('AC1: /tasks/12 shows the title, the breadcrumb to the board, the Review link, and the page title', async () => {
+test('AC1, 047 FE2: /tasks/12 shows the title, the breadcrumb personal › api › #12, the Review link, and the page title', async () => {
   const { fetch } = await open(taskPage())
   expect(fetched(fetch)).toContain(PAGE)
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
   const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
-  expect(within(crumbs).getByRole('link', { name: 'api' }).getAttribute('href')).toBe('/projects/3')
+  expect(crumbs.closest('header')).toBe(header())
+  expect(crumbs.textContent).toBe('personal › api › #12')
+  expect(within(crumbs).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+    ['personal', '/workspaces/2'], ['api', '/projects/3'],
+  ])
+  const current = within(crumbs).getByText('#12')
+  expect([current.getAttribute('aria-current'), current.closest('a')]).toEqual(['page', null])
   expect(within(header()).getByRole('link', { name: 'Review' }).getAttribute('href')).toBe('/tasks/12/review')
   await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Claude Factories'))
 })
@@ -210,7 +218,7 @@ test('AC9, 043 FE11: a pending chip, or a posted one with a blank body, is a col
     expect(document.getElementById(id)).toBeNull()
   }
   expect(within(row).queryAllByRole('button')).toEqual([])
-  expect(document.querySelector('[popover]')).toBeNull()
+  expect([...document.querySelectorAll('[popover]')].map((el) => el.id)).toEqual(['export']) // 047: Export's alone
 })
 
 test('AC10: a standalone round with nothing posted says no agent review; a factory one shows four pending chips', async () => {
@@ -621,17 +629,55 @@ test('030 Q4: a transcript whose round has no Round row yet shows under Other ag
   ])
 })
 
-test('032 AC46: Export downloads the bundle; Include transcripts adds ?transcripts=1 and warns about them', async () => {
+// --- 047: the title row and Export ----------------------------------------------------
+
+test('047 FE6: the title row holds Run, Retry, or Stop, the run status, and the hint; the status line holds none of them', async () => {
+  const cases = [
+    [{ status: 'backlog', stage: null }, null, 'Run', null],
+    [{}, run(41, 'failed', { error: 'exit code 3' }), 'Retry', 'run #41 failed: exit code 3'],
+    [{}, run(41, 'running'), 'Stop', 'run #41 running · started 10:02'],
+  ]
+  for (const [task, latest, label, status] of cases) {
+    const { unmount } = await open(taskPage(task, { run: latest, can_run: false, hint: HINT }), { [`GET ${LOG(41, 0)}`]: log(0) })
+    const row = titleRow()
+    expect(row.firstElementChild).toBe(screen.getByRole('heading', { level: 1 }))
+    expect(within(row).getByRole('button', { name: label })).toBeTruthy()
+    if (status) expect(within(row).getByText(fullText(status))).toBeTruthy()
+    if (label !== 'Stop') expect(within(row).getByText(HINT)).toBeTruthy()
+    const line = statusLine()
+    expect(line.contains(row) || row.contains(line)).toBe(false)
+    expect(within(line).queryAllByRole('button').map((b) => b.textContent)).toEqual(['Export ▾'])
+    expect(within(line).queryByText(/^run #/)).toBeNull()
+    expect(within(line).queryByText(HINT)).toBeNull()
+    unmount()
+  }
+})
+
+test('047 FE7: the status line has the pill, stage, branch, Review, and an Export button opening a popover; no box or download', async () => {
   await open(taskPage())
-  const exportLink = () => screen.getByRole('link', { name: 'Export' })
-  expect(exportLink().hasAttribute('download')).toBe(true)
-  expect(exportLink().getAttribute('href')).toBe('/api/tasks/12/export')
-  expect(exportLink().closest('header')).toBe(screen.getByRole('link', { name: 'Review' }).closest('header'))
-  const box = screen.getByRole('checkbox', { name: /^Include transcripts/ })
+  const line = statusLine()
+  expect(within(line).getByText('In progress', { selector: 'span' })).toBeTruthy()
+  expect(within(line).getByText('build')).toBeTruthy()
+  expect(within(line).getByText('factory/12-rate-limit-login').tagName).toBe('CODE')
+  const button = within(line).getByRole('button', { name: 'Export' })
+  const target = document.getElementById(button.getAttribute('popovertarget'))
+  expect(target.getAttribute('popover')).toBe('auto')
+  expect(line.contains(target)).toBe(false)
+  expect(line.querySelectorAll('input[type="checkbox"], a[download]')).toHaveLength(0)
+})
+
+test('047 FE8, 032 AC46: the Export popover holds Include transcripts and Download; ticking adds ?transcripts=1, unticking drops it', async () => {
+  await open(taskPage())
+  const popover = document.getElementById(within(header()).getByRole('button', { name: 'Export' }).getAttribute('popovertarget'))
+  popover.style.display = 'grid' // jsdom's UA sheet hides it while closed
+  const download = () => within(popover).getByRole('link', { name: 'Download' })
+  expect(download().hasAttribute('download')).toBe(true)
+  expect(download().getAttribute('href')).toBe('/api/tasks/12/export')
+  const box = within(popover).getByRole('checkbox', { name: /^Include transcripts/ })
   expect(box.checked).toBe(false)
   expect(box.closest('label').textContent).toBe('Include transcripts (can hold paths, env, and secrets)')
   fireEvent.click(box)
-  expect(exportLink().getAttribute('href')).toBe('/api/tasks/12/export?transcripts=1')
+  expect(download().getAttribute('href')).toBe('/api/tasks/12/export?transcripts=1')
   fireEvent.click(box)
-  expect(exportLink().getAttribute('href')).toBe('/api/tasks/12/export')
+  expect(download().getAttribute('href')).toBe('/api/tasks/12/export')
 })

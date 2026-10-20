@@ -233,11 +233,13 @@ GET  /api/tasks/12/transcripts                                    (task page Age
   # ordered by run_id, started_at, id
 
 GET  /api/transcripts/5[?full=1]                                  (transcript page)
-← 200 {…the same fields, "task_id":12,
+← 200 {…the same fields, "task_id":12, "project_id":3, "project":"api-server", "workspace_id":2,
+       "workspace":"personal",
        "messages":[{"role":"assistant","at":"…","blocks":[{"type":"text","text_html":"<p>…</p>"},
                      {"type":"thinking","text":"…"},{"type":"tool_use","name":"Bash","input":"{\n  \"command\": \"pytest -q\"\n}"}]},
                    {"role":"user","at":"…","blocks":[{"type":"tool_result","text":"3 passed","is_error":false,"truncated":false}]}]}
   # without full=1, each tool result is cut at 4096 characters with "truncated":true
+  # project and workspace: its task's, as they are now (the breadcrumb); never the copy's path
 
 GET  /api/transcripts/5/raw                                       (Download) → the copied .jsonl as an attachment
 ← 404 {"detail":"Transcript #99 not found"}
@@ -316,11 +318,14 @@ GET  /api/pages/workspaces/{id}                 projects with path, counts per s
 GET  /api/pages/projects/{id}                   the project (path, remote_url, default branch, test_cmd, workspace),
                                                 factory state and hint, board cards with stage, branch, chips per
                                                 round, +/−, waiting, escalated, stalled
-GET  /api/pages/tasks/{id}                      spec_html, rounds, decision, history, the active run and takeover command,
-                                                transcripts (as GET /api/tasks/{id}/transcripts)
-GET  /api/pages/tasks/{id}/review?round=        timeline; files with diff rows carrying side, old/new line, kind,
-                                                text, and the path:side:line anchor; inline comments
-GET  /api/pages/projects/{id}/code?path=        tree, README or file, branch
+GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
+                                                project's now), spec_html, rounds, decision, history, the active run
+                                                and takeover command, transcripts (as GET /api/tasks/{id}/transcripts)
+GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; timeline; files with diff rows carrying
+                                                side, old/new line, kind, text, and the path:side:line anchor; inline
+                                                comments
+GET  /api/pages/projects/{id}/code?path=        the project {id, name, path, workspace_id, workspace}, also on a git
+                                                failure; tree, README or file, branch
 ← 404 {"detail":"Task #99 not found"}
 
 GET  /api/pages/sidebar                                           (every route but the two below)

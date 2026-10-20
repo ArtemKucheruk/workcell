@@ -2,6 +2,7 @@ import hljs from 'highlight.js/lib/common'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { boardPage, codePage } from '../../api/pages.js'
+import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
@@ -84,8 +85,8 @@ export function CodePage() {
   // Q1: no polling; fetches on first load and on each path change
   const load = useCallback(() => codePage(id, path), [id, path])
   const { data: page, error } = usePoll(load)
-  // 042 Q2: the header's workspace and factory state come from the board view-model, once per project; until
-  // it arrives, or if it fails, the header is the code view-model's name alone
+  // 042 Q2, 047 Q1: the header's factory state comes from the board view-model, once per project; until it arrives,
+  // or if it fails, the header is the code view-model's `name · workspace` alone
   const { data: board } = usePoll(useCallback(() => boardPage(id), [id]))
   const name = page?.project.name
   useEffect(() => {
@@ -102,6 +103,10 @@ export function CodePage() {
 
   return (
     <>
+      {/* 047 Q1: from the code view-model alone, so it shows whatever the board view-model does; `Code` is always current */}
+      <div className="mb-2">
+        <Breadcrumbs items={[...projectTrail({ ...project, project_id: project.id, project: project.name }), { label: 'Code' }]} />
+      </div>
       <ProjectHeader project={head.project} factory={head.factory}>
         {branch && (
           <p className="basis-full">
