@@ -12,8 +12,8 @@ disagree, stop and tell me.
 
 You spawn every agent, create worktrees, snapshot diffs, and, with the orchestrators in other
 terminals, are the only writers of `factory/board.json`. You write no code, specs, reviews, or
-decisions: each agent writes its own file. The one exception is a skipped review-ui file
-(agent_review step 2). Agents never run git writes. Yours are exactly:
+decisions: each agent writes its own file. The exceptions are the joined build.md (build
+step 5) and a skipped review-ui file (agent_review step 2). Agents never run git writes. Yours are exactly:
 `git fetch`, `git worktree add`, publish (commit, push, PR), and approve (PR merge, worktree
 remove, branch delete). Nobody rebases, stashes, resets, force-pushes, or switches branches.
 Commits and PRs carry no Claude attribution: no `Co-Authored-By` trailer, no "Generated with
@@ -26,7 +26,7 @@ Print one short line per step, e.g. `001-setup · round 1 · security CHANGES (3
 
 This terminal drives one job. Other terminals may run their own `/factory` jobs at the same
 time: touch only your job's W, J, and board entry. Run `approve` and `rework` in the terminal
-that ran the job; its builder lives there.
+that ran the job; its builders live there.
 
 ## Commands
 
@@ -35,7 +35,7 @@ that ran the job; its builder lives there.
 | `/factory <feature>` | start gate → new job with the next free id → loop from spec |
 | `/factory next` | start gate → first `- [ ] <id>: <text>` line in factory/backlog.md that no active job blocks → loop from spec |
 | `/factory resume [<id>]` | continue an in_progress job whose session ended (default: the only in_progress job) |
-| `/factory approve <id>` | review job → merge its PR, done, tick its backlog line, stop its builder, remove worktree and branch, import it into the app |
+| `/factory approve <id>` | review job → merge its PR, done, tick its backlog line, stop its builders, remove worktree and branch, import it into the app |
 | `/factory rework <id> <note>` | review job → feedback-<n>.md, stage rework, loop from build round n, push to the same PR |
 
 No arguments or anything unclear: print this table and stop.
@@ -124,17 +124,30 @@ Spawn `spec-writer`: "Job <id>." Wait for it. No J/spec.md → stop and report.
 
 ### build, round n
 n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the current round on `resume`.
+There are two builders; `<side>` is backend (everything outside `frontend/`) or frontend
+(`frontend/`).
 1. Set `round` = n, all reviews pending, stage build (keep rework if `rework` just set it).
    `mkdir -p J/round-<n>`.
-2. Builder:
-   - n = 1: spawn `builder` with name `builder-<id>`: "Job <id>, round 1."
-   - otherwise SendMessage `builder-<id>`: "Round <n>. Read J/round-<n-1>/review-*.md and
-     J/feedback-<n>.md if it exists. Write J/round-<n>/build.md." If that builder is gone
-     (new session), spawn a fresh `builder` named `builder-<id>` with "Job <id>, round <n>."
-     SendMessage may be a deferred tool: load it with ToolSearch `select:SendMessage`.
-3. Wait for it. No J/round-<n>/build.md → ask the builder once to write it, then stop and
-   report if it's still missing (`/factory resume` picks up from here).
-4. Snapshot the worktree, untracked files included, without touching its index, against the
+2. Pick the sides:
+   - n = 1: one per `## Backend build` / `## Frontend build` heading in J/spec.md. Neither →
+     stop and report.
+   - n > 1: from the findings in J/round-<n-1>/review-*.md that aren't PASS, and
+     J/feedback-<n>.md. A finding on a file under `frontend/`, or on how a page looks or
+     behaves in the browser → frontend; any other finding → backend; unsure → both.
+   Print one line, e.g. `013-run-ui · round 2 · builders: frontend`.
+3. Start every picked side in ONE message, so they work in W side by side:
+   - `builder-<side>-<id>` spawned earlier in this session → SendMessage it: "Round <n>.
+     Read J/round-<n-1>/review-*.md and J/feedback-<n>.md if it exists, and fix the
+     findings on your files. Write J/round-<n>/build-<side>.md."
+   - otherwise (round 1, a side this job hasn't used yet, or a new session) spawn
+     `builder-<side>` with name `builder-<side>-<id>`: "Job <id>, round <n>."
+   SendMessage may be a deferred tool: load it with ToolSearch `select:SendMessage`.
+4. WAIT FOR ALL picked sides. A missing J/round-<n>/build-<side>.md → ask that builder once
+   to write it, then stop and report if it's still missing (`/factory resume` picks up from
+   here).
+5. Join them into the one file the reviewers, the approver, and `fctl import-factory` read:
+   `cat J/round-<n>/build-*.md > J/round-<n>/build.md`
+6. Snapshot the worktree, untracked files included, without touching its index, against the
    job's base on main (after a rework, HEAD is the job's earlier commit). Vendored `*.min.*`
    files, `uv.lock`, and `package-lock.json` stay out of the patch: every reviewer and the
    approver read it.
@@ -146,8 +159,8 @@ n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the c
    GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' ':!*package-lock.json' > factory/jobs/<id>/round-<n>/diff.patch
    rm -rf $t
    ```
-   Over 5 MB means generated files got in (.venv/, caches): have the builder fix .gitignore,
-   then snapshot again.
+   Over 5 MB means generated files got in (.venv/, caches): have builder-backend-<id> fix
+   .gitignore (it owns it), then snapshot again.
 
 ### agent_review, round n
 1. Stage agent_review.
@@ -159,7 +172,7 @@ n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the c
 3. As each finishes, read the first line of J/round-<n>/review-<r>.md and set `reviews.<r>`.
    Anything but `VERDICT: PASS` counts as CHANGES.
 4. WAIT FOR ALL: the round is done only when all 4 review files exist. Spawn a reviewer
-   that ended without its file once more. Never message the builder mid-round.
+   that ended without its file once more. Never message a builder mid-round.
 
 ### next round or approval
 - This run started at round s = the highest k with J/feedback-k.md, else 1.
@@ -200,8 +213,9 @@ The job must be in review (human_review or escalated).
    stop and report it; the job stays in review.
 3. Set status done, stage null, append history. In backlog.md change `- [ ] <id>:` to
    `- [x] <id>:` if that line exists.
-4. Stop the builder: TaskStop `builder-<id>` (deferred: ToolSearch `select:TaskStop`).
-   Not found (a new session, or another terminal ran the job) is fine.
+4. Stop the builders: TaskStop `builder-backend-<id>` and `builder-frontend-<id>` (deferred:
+   ToolSearch `select:TaskStop`). Not found (a side the job didn't use, a new session, or
+   another terminal ran the job) is fine.
 5. Clean up. A branch that's already gone (GitHub auto-delete) is fine:
    ```sh
    git worktree remove .claude/worktrees/<id>
@@ -226,8 +240,9 @@ stage rework, then run the loop from build, round n. Publish adds the new commit
 The job must be in_progress. No id and more than one in_progress job → list them and stop; I
 name one. Continue from its stage:
 - spec: J/spec.md exists → build round 1; else spec.
-- build or rework: J/round-<round>/build.md exists → snapshot (build step 4), then
-  agent_review; else build with n = round.
+- build or rework: J/round-<round>/build.md exists → snapshot (build step 6), then
+  agent_review; else build with n = round, starting only the picked sides (build step 2)
+  whose J/round-<n>/build-<side>.md is missing. All present → join (step 5).
 - agent_review: fill `reviews` from the files that exist; spawn only the missing reviewers
   (review-ui follows the skip rule in agent_review step 2).
 - approval: run approval again.
