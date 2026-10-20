@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 // handlers/pages.py TILES, as /api/pages/dashboard returns them
@@ -10,7 +10,7 @@ const TILES = {
 }
 const COUNTS = Object.fromEntries(Object.keys(TILES).map((key, i) => [key, i + 10]))
 const page = (over = {}) => ({
-  tiles: TILES, counts: COUNTS, show: '', listed: null, open_tasks: [], done: [], workspaces: [], ...over,
+  tiles: TILES, counts: COUNTS, show: '', listed: null, waiting: [], escalated: [], open_tasks: [], done: [], ...over,
 })
 const WAITING = [
   { id: 12, title: 'Rate-limit login', status: 'review', stage: 'human_review', project_id: 3, project: 'api' },
@@ -30,17 +30,36 @@ const href = (el) => el.getAttribute('href')
 beforeEach(() => {
   vi.stubEnv('TZ', 'Asia/Tokyo') // AC26: UTC+9, no DST, so local times are known
 })
+afterEach(() => {
+  vi.useRealTimers()
+})
 
-test('AC20: / shows the 9 tiles in order with counts, each linking to its list', async () => {
+// Q7: the frontend's split of the backend's TILES
+const ATTENTION = ['waiting', 'escalated', 'running']
+const THROUGHPUT = ['done_week', 'runs_week', 'backlog', 'in_progress', 'review', 'done']
+const group = (name) => within(screen.getByRole('list', { name })).getAllByRole('link')
+
+test('AC20, FE7: / shows the tiles in the Attention and Throughput groups with counts, each linking to its list', async () => {
   const fetch = mockFetch({ 'GET /api/pages/dashboard': [200, page()] })
-  renderAt('/')
-  const tiles = within((await within(screen.getByRole('main')).findAllByRole('list'))[0]).getAllByRole('link')
-  expect(tiles.map((a) => [a.textContent, href(a)])).toEqual(
-    Object.entries(TILES).map(([key, label]) => [`${label} ${COUNTS[key]}`, `/?show=${key}`]),
-  )
-  expect(tiles.some((a) => a.hasAttribute('aria-current'))).toBe(false)
+  const { unmount } = renderAt('/')
+  await screen.findByRole('list', { name: 'Attention' })
+  for (const [name, keys] of [['Attention', ATTENTION], ['Throughput', THROUGHPUT]]) {
+    expect(group(name).map((a) => [a.textContent, href(a)])).toEqual(
+      keys.map((key) => [`${TILES[key]} ${COUNTS[key]}`, `/?show=${key}`]),
+    )
+  }
+  expect(screen.getByText('Attention').tagName).not.toMatch(/^H/) // Q7: a small label, not a heading
+  expect([...group('Attention'), ...group('Throughput')].some((a) => a.hasAttribute('aria-current'))).toBe(false)
   expect(fetched(fetch)).toContain('/api/pages/dashboard')
   await waitFor(() => expect(document.title).toBe('Claude Factories')) // the title is set in an effect, after the heading renders
+  unmount()
+
+  mockFetch({ 'GET /api/pages/dashboard?show=done_week': [200, page({ show: 'done_week', listed: [] })] })
+  renderAt('/?show=done_week')
+  await screen.findByRole('heading', { name: 'Done this week' })
+  expect(group('Throughput').filter((a) => a.getAttribute('aria-current') === 'page').map((a) => a.textContent)).toEqual([
+    `Done this week ${COUNTS.done_week}`,
+  ])
 })
 
 const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)
@@ -141,23 +160,14 @@ test('AC24: rounds per task shows average, max, and each done task', async () =>
   expect(await screen.findByText('No tasks done in the last 30 days.')).toBeTruthy()
 })
 
-test('AC25: workspaces link to their page with a project count', async () => {
-  const workspaces = [{ id: 1, name: 'personal', projects: 1 }, { id: 2, name: 'work', projects: 3 }]
-  mockFetch({ 'GET /api/pages/dashboard': [200, page({ workspaces })] })
-  const { unmount } = renderAt('/')
-  const section = (await screen.findByRole('heading', { name: 'Workspaces' })).closest('section')
-  const items = within(section).getAllByRole('listitem')
-  expect(items.map((li) => [li.textContent, href(within(li).getByRole('link'))])).toEqual([
-    ['personal 1 project', '/workspaces/1'],
-    ['work 3 projects', '/workspaces/2'],
-  ])
-  unmount()
-
-  mockFetch({ 'GET /api/pages/dashboard': [200, page()] })
+test('FE13: no Workspaces list and no connect hint; a view-model without `workspaces` renders', async () => {
+  const vm = page()
+  expect('workspaces' in vm).toBe(false)
+  mockFetch({ 'GET /api/pages/dashboard': [200, vm] })
   renderAt('/')
-  expect(
-    await screen.findByText(fullText('No projects yet. Run fctl connect --workspace <name> inside a repo.')),
-  ).toBeTruthy()
+  await screen.findByRole('heading', { level: 1, name: 'Dashboard' })
+  expect(screen.queryByRole('heading', { name: 'Workspaces' })).toBeNull()
+  expect(screen.queryByText(/No projects yet\./)).toBeNull()
 })
 
 test('AC26: every time is a <time datetime> in local YYYY-MM-DD HH:MM', async () => {
@@ -179,4 +189,148 @@ test('AC32: a failed dashboard view-model shows its detail in an alert', async (
     expect((await screen.findByRole('alert')).textContent).toBe(detail)
     unmount()
   }
+})
+
+// 045: the Needs you list. NOW is the faked clock; `ago` gives a `since` that many seconds before it.
+const NOW = Date.parse('2026-10-20T12:00:00Z')
+const ago = (s) => new Date(NOW - s * 1000).toISOString().replace('.000Z', 'Z')
+const ESC = { id: 21, title: 'Migrate sessions', project_id: 4, project: 'web', round: 1, since: ago(3 * 86400) }
+const WAIT = { id: 22, title: 'Rate-limit login', project_id: 3, project: 'api', round: 2, since: ago(90) }
+const NO_ROUND = { id: 23, title: 'Docs pass', project_id: 3, project: 'api', round: null, since: ago(5 * 3600) }
+
+async function needsYou(over) {
+  mockFetch({ 'GET /api/pages/dashboard': [200, page(over)] })
+  renderAt('/')
+  return (await screen.findByRole('heading', { name: 'Needs you' })).closest('section')
+}
+const rows = (section) => within(section).getAllByRole('listitem')
+
+test('FE1: Needs you is the first section after the h1, before any tile, escalated row first', async () => {
+  const section = await needsYou({ waiting: [WAIT], escalated: [ESC] })
+  const h1 = screen.getByRole('heading', { level: 1, name: 'Dashboard' })
+  expect(h1.nextElementSibling).toBe(section)
+  for (const name of ['Attention', 'Throughput']) {
+    expect(section.compareDocumentPosition(screen.getByRole('list', { name })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  }
+  expect(rows(section).map((li) => within(li).getAllByRole('link')[0].textContent)).toEqual([
+    '#21 Migrate sessions',
+    '#22 Rate-limit login',
+  ])
+})
+
+test('FE2: a row has its review link, pill, project link, round, and age', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
+  const section = await needsYou({ waiting: [WAIT], escalated: [ESC] })
+  const [esc, wait] = rows(section)
+  for (const [li, t, pill, fill, age] of [[esc, ESC, 'escalated', 'bg-danger', '3d'], [wait, WAIT, 'waiting on you', 'bg-warning', '1m']]) {
+    const row = within(li)
+    expect(href(row.getByRole('link', { name: `#${t.id} ${t.title}` }))).toBe(`/tasks/${t.id}/review`)
+    expect(row.getByText(pill).className).toMatch(cls(fill)) // components/Badge.jsx's filled pill
+    expect(href(row.getByRole('link', { name: t.project }))).toBe(`/projects/${t.project_id}`)
+    expect(row.getByText(`round ${t.round}`)).toBeTruthy()
+    expect(li.querySelector('time').textContent).toBe(age)
+  }
+})
+
+test('FE3: an escalated row has the red left bar, a waiting row does not', async () => {
+  const [esc, wait] = rows(await needsYou({ waiting: [WAIT], escalated: [ESC] }))
+  expect(esc.className).toMatch(cls('border-danger'))
+  expect(wait.className).not.toMatch(cls('border-danger'))
+})
+
+test('FE4: an item with round null has no round text', async () => {
+  const [withRound, without] = rows(await needsYou({ waiting: [WAIT, NO_ROUND] }))
+  expect(withRound.textContent).toContain('round 2')
+  expect(without.textContent).not.toMatch(/round/)
+})
+
+test('FE5: ages are floored m, h, d from a faked clock, each a <time dateTime={since}>; the future reads 0m', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(NOW)
+  const future = { ...WAIT, id: 24, since: ago(-120) } // Q4: clock skew
+  const section = await needsYou({ waiting: [WAIT, NO_ROUND, future], escalated: [ESC] })
+  expect([...section.querySelectorAll('time')].map((t) => [t.getAttribute('datetime'), t.textContent])).toEqual([
+    [ESC.since, '3d'],
+    [WAIT.since, '1m'],
+    [NO_ROUND.since, '5h'],
+    [future.since, '0m'],
+  ])
+})
+
+test('FE6: empty waiting and escalated → Nothing needs you. and no list', async () => {
+  const section = await needsYou()
+  expect(within(section).getByText('Nothing needs you.')).toBeTruthy()
+  expect(within(section).queryByRole('list')).toBeNull()
+})
+
+test('FE8: each tile count is text-3xl and its label text-muted', async () => {
+  mockFetch({ 'GET /api/pages/dashboard': [200, page()] })
+  renderAt('/')
+  await screen.findByRole('list', { name: 'Attention' })
+  const tiles = [...group('Attention'), ...group('Throughput')]
+  expect(tiles).toHaveLength(9)
+  for (const a of tiles) {
+    expect(a.querySelector('strong').className).toMatch(cls('text-3xl'))
+    expect(a.querySelector('span').className).toMatch(cls('text-muted'))
+  }
+})
+
+test('FE9: Attention counts above 0 take danger (Escalated) or accent; at 0, and on Throughput, neither', async () => {
+  const count = (a) => a.querySelector('strong').className
+  const tone = (a) => ['text-danger', 'text-accent'].filter((c) => count(a).match(cls(c)))
+  const throughputPlain = () => group('Throughput').forEach((a) => expect(tone(a)).toEqual([]))
+
+  mockFetch({ 'GET /api/pages/dashboard': [200, page()] }) // every count is above 0
+  const { unmount } = renderAt('/')
+  await screen.findByRole('list', { name: 'Attention' })
+  expect(group('Attention').map(tone)).toEqual([['text-accent'], ['text-danger'], ['text-accent']])
+  expect(group('Attention').map((a) => a.className.match(/(^|\s)(border-(accent|danger))(\s|$)/)?.[2])).toEqual([
+    'border-accent', 'border-danger', 'border-accent',
+  ])
+  throughputPlain()
+  unmount()
+
+  const counts = { ...COUNTS, waiting: 0, escalated: 0, running: 0 }
+  mockFetch({ 'GET /api/pages/dashboard': [200, page({ counts })] })
+  renderAt('/')
+  await screen.findByRole('list', { name: 'Attention' })
+  expect(group('Attention').map(tone)).toEqual([[], [], []])
+  group('Attention').forEach((a) => expect(a.className).toMatch(cls('border-line')))
+  throughputPlain()
+})
+
+test('FE10: one aria-hidden svg beside Average · Max, one rect per done task, oldest left, height by rounds', async () => {
+  mockFetch({ 'GET /api/pages/dashboard': [200, page({ done: DONE })] })
+  renderAt('/')
+  const section = (await screen.findByRole('heading', { name: /Rounds per task/ })).closest('section')
+  const svgs = section.querySelectorAll('svg')
+  expect(svgs).toHaveLength(1)
+  const [svg] = svgs
+  expect(svg.getAttribute('aria-hidden')).toBe('true')
+  expect(svg.parentElement.contains(within(section).getByText(fullText('Average 1.5 · Max 2')))).toBe(true)
+  const full = Number(svg.getAttribute('viewBox').split(' ')[3])
+  const rects = [...svg.querySelectorAll('rect')]
+  expect(rects.map((r) => r.querySelector('title').textContent)).toEqual(['#8 Add logout: 2 rounds', '#7 Add login: 1 round'])
+  const heights = rects.map((r) => Number(r.getAttribute('height')))
+  expect(heights).toEqual([full, full / 2]) // the max is full height; 2 rounds is twice 1
+  rects.forEach((r, i) => expect(Number(r.getAttribute('y')) + heights[i]).toBe(full)) // bottom-aligned
+  expect(Number(rects[0].getAttribute('x'))).toBeLessThan(Number(rects[1].getAttribute('x')))
+  expect(within(section).getByRole('table')).toBeTruthy() // Q8: the per-task table stays
+})
+
+test('FE11: done: [] → the empty text and no svg', async () => {
+  mockFetch({ 'GET /api/pages/dashboard': [200, page()] })
+  renderAt('/')
+  const section = (await screen.findByRole('heading', { name: /Rounds per task/ })).closest('section')
+  expect(within(section).getByText('No tasks done in the last 30 days.')).toBeTruthy()
+  expect(section.querySelector('svg')).toBeNull()
+})
+
+test('FE12: the open-tasks table sits in an overflow-x-auto box', async () => {
+  const open_tasks = [{ id: 1, name: 'personal', projects: [{ id: 3, name: 'api', backlog: 2, in_progress: 1, review: 0 }] }]
+  mockFetch({ 'GET /api/pages/dashboard': [200, page({ open_tasks })] })
+  renderAt('/')
+  const section = (await screen.findByRole('heading', { name: 'Open tasks' })).closest('section')
+  expect(within(section).getByRole('table').parentElement.className).toMatch(cls('overflow-x-auto'))
 })

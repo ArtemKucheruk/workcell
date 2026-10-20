@@ -114,14 +114,24 @@ class DoneTask(BaseModel):
     rounds: int
 
 
+class NeedsYou(BaseModel):
+    id: int
+    title: str
+    project_id: int
+    project: str
+    round: int | None  # the highest round n; null with no rounds
+    since: str  # 045 Q1: the task's updated_at
+
+
 class DashboardPage(BaseModel):
     tiles: dict[str, str]
     counts: dict[str, int]
     show: str
     listed: list[TileTask] | list[TileRun] | None  # runs only for show=runs_week
+    waiting: list[NeedsYou]  # stage human_review, newest since first, then id (045 Q2); ignores show
+    escalated: list[NeedsYou]  # stage escalated, likewise
     open_tasks: list[OpenWorkspace]
     done: list[DoneTask]
-    workspaces: list[WorkspaceOut]
 
 
 # --- GET /api/pages/workspaces/{id} (§8 item 2) ----------------------------------------

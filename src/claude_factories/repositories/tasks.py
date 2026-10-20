@@ -196,6 +196,16 @@ class TasksRepo:
             " ORDER BY t.updated_at DESC, t.id DESC"
         ).fetchall()
 
+    def needs_you(self, key: str) -> list[sqlite3.Row]:
+        """045: the Needs you rows of TILE_TASKS["waiting"] or ["escalated"], each with its highest round n
+        (NULL with none) and updated_at as `since` (Q1), in tile()'s order (Q2)."""
+        return self.conn.execute(
+            "SELECT t.id, t.title, p.id AS project_id, p.name AS project,"
+            " (SELECT MAX(n) FROM rounds WHERE task_id = t.id) AS round, t.updated_at AS since"
+            f" FROM tasks t JOIN projects p ON p.id = t.project_id WHERE {TILE_TASKS[key]}"
+            " ORDER BY t.updated_at DESC, t.id DESC"
+        ).fetchall()
+
     def open_by_project(self) -> list[sqlite3.Row]:
         """Q5: each project with open tasks, its backlog, in progress, and review counts, by workspace."""
         return self.conn.execute(

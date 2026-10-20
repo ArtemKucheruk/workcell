@@ -311,7 +311,9 @@ POST /api/auth/login/code                                         (Settings: Sub
   #     <code>#<state>, and the login stays pending
   # 500 {"detail":"claude auth login didn't finish"}: no exit within 60 s, so the login is stopped
 
-GET  /api/pages/dashboard                       tiles, open tasks per workspace → project, rounds per task
+GET  /api/pages/dashboard                       tiles, the waiting and escalated lists ({id, title, project_id,
+                                                project, round, since}, newest since first), open tasks per
+                                                workspace → project, rounds per task
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
 GET  /api/pages/projects/{id}                   the project (path, remote_url, default branch, test_cmd, workspace),
                                                 factory state and hint, board cards with stage, branch, chips per

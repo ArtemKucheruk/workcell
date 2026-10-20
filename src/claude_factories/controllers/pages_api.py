@@ -98,13 +98,14 @@ def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, task: in
 
 
 @router.get("/api/pages/dashboard")
-def dashboard(tasks: Tasks, runs: Runs, workspaces: Workspaces, show: str = "") -> dto.DashboardPage:
-    page = handler.dashboard(tasks, runs, workspaces, show)
+def dashboard(tasks: Tasks, runs: Runs, show: str = "") -> dto.DashboardPage:
+    page = handler.dashboard(tasks, runs, show)
     return page | {
         "counts": dict(page["counts"]), "listed": page["listed"] and objs(page["listed"]),
+        "waiting": objs(page["waiting"]), "escalated": objs(page["escalated"]),
         "open_tasks": [{"id": ws_id, "name": name, "projects": objs(projects)}
                        for (ws_id, name), projects in page["open_tasks"]],
-        "done": objs(page["done"]), "workspaces": objs(page["workspaces"]),
+        "done": objs(page["done"]),
     }
 
 
