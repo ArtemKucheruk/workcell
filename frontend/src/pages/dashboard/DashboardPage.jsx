@@ -3,11 +3,11 @@ import { Link, useSearchParams } from 'react-router'
 import { dashboardPage } from '../../api/pages.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
 const num = 'text-right tabular-nums'
-const muted = 'text-gray-600 dark:text-gray-400'
 
 const TaskLink = ({ id, title }) => <Link to={`/tasks/${id}`}>{`#${id} ${title}`}</Link>
 const ProjectLink = ({ id, name }) => <Link to={`/projects/${id}`}>{name}</Link>
@@ -20,7 +20,7 @@ function Tiles({ tiles, counts, show }) {
           <Link
             to={`/?show=${key}`}
             aria-current={key === show ? 'page' : undefined}
-            className="group grid h-full gap-1 rounded-md border border-gray-300 px-3 py-2 text-inherit hover:no-underline aria-[current=page]:border-blue-600 aria-[current=page]:ring-1 aria-[current=page]:ring-blue-600 dark:border-gray-700 dark:aria-[current=page]:border-blue-400 dark:aria-[current=page]:ring-blue-400"
+            className="group grid h-full gap-1 rounded-md border border-line px-3 py-2 text-inherit hover:no-underline aria-[current=page]:border-accent aria-[current=page]:ring-1 aria-[current=page]:ring-accent"
           >
             <span className={`text-sm group-hover:underline ${muted}`}>{label}</span>{' '}
             <strong className="text-3xl tabular-nums">{counts[key]}</strong>
@@ -161,7 +161,7 @@ export function DashboardPage() {
   if (!page) return <p className={muted}>Loading…</p>
   return (
     <>
-      <h1 className="mb-4 text-2xl font-semibold">Dashboard</h1>
+      <h1 className="mb-4">Dashboard</h1>
       <Tiles tiles={page.tiles} counts={page.counts} show={page.show} />
       {page.show && (
         <section aria-labelledby="listed">

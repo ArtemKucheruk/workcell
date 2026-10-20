@@ -4,11 +4,11 @@ import { workspacePage } from '../../api/pages.js'
 import { createWorkspace } from '../../api/workspaces.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { button, field, muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
 const num = 'text-right tabular-nums'
-const muted = 'text-gray-600 dark:text-gray-400'
 
 /** Q9: + Workspace. The API returns the existing workspace's id when the name is taken (§6.1). */
 function NewWorkspace() {
@@ -42,12 +42,9 @@ function NewWorkspace() {
         title="A name that isn't blank"
         aria-label="New workspace name"
         placeholder="New workspace"
-        className="rounded-md border border-gray-300 px-2 py-1 dark:border-gray-700"
+        className={field}
       />
-      <button
-        disabled={busy}
-        className="cursor-pointer rounded-md border border-gray-300 px-3 py-1 font-medium hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800"
-      >
+      <button disabled={busy} className={button}>
         + Workspace
       </button>
       {error && <ErrorMessage error={error} />}
@@ -72,7 +69,7 @@ export function WorkspacePage() {
       <nav aria-label="Breadcrumb" className="text-sm">
         <Link to="/">Claude Factories</Link>
       </nav>
-      <h1 className="mb-4 text-2xl font-semibold">{name}</h1>
+      <h1 className="mb-4">{name}</h1>
       {page.projects.length ? (
         <div className="overflow-x-auto">
           <table>

@@ -10,10 +10,10 @@ import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { StatusLine } from '../../components/StatusLine.jsx'
+import { muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
-const muted = 'text-gray-600 dark:text-gray-400'
 const blank = (md) => !md?.trim()
 
 /**
@@ -117,7 +117,7 @@ function Round({ round, standalone, agents }) {
           key={who}
           id={`verdict-${n}-${who}`}
           popover="auto"
-          className="m-auto w-[min(42rem,90vw)] rounded-lg border border-gray-300 p-4 shadow-lg dark:border-gray-700"
+          className="m-auto w-[min(42rem,90vw)] rounded-lg border border-line bg-surface p-4 text-fg shadow-lg"
         >
           <p className="font-semibold">{`${who} · ${p.verdict}`}</p>
           <Markdown html={p.body_html} className="mt-2" />
@@ -128,7 +128,7 @@ function Round({ round, standalone, agents }) {
       ) : (
         <details className="mt-1">
           <summary className="cursor-pointer text-sm">Build notes</summary>
-          <Markdown html={round.build_html} className="mt-2 border-l-2 border-gray-200 pl-3 dark:border-gray-700" />
+          <Markdown html={round.build_html} className="mt-2 border-l-2 border-line pl-3" />
         </details>
       )}
       {agents.length > 0 && (
@@ -167,7 +167,7 @@ function RunLog({ run }) {
       <summary className="cursor-pointer font-semibold">{`Run log · run #${run.id}`}</summary>
       <div
         ref={box}
-        className="mt-2 max-h-96 overflow-auto rounded-md bg-gray-100 p-3 font-mono text-sm whitespace-pre-wrap wrap-anywhere dark:bg-gray-900"
+        className="mt-2 max-h-96 overflow-auto rounded-md bg-raised p-3 font-mono text-sm whitespace-pre-wrap wrap-anywhere"
       >
         {lines.length ? lines.map((line, i) => <div key={i}>{line.text}</div>) : <p className={muted}>No output yet.</p>}
       </div>
@@ -217,7 +217,7 @@ export function TaskPage() {
         <nav aria-label="Breadcrumb" className="text-sm">
           <Link to={`/projects/${task.project_id}`}>{task.project}</Link>
         </nav>
-        <h1 className="text-2xl font-semibold wrap-anywhere">{heading}</h1>
+        <h1 className="wrap-anywhere">{heading}</h1>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <StatusLine task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
@@ -267,7 +267,7 @@ export function TaskPage() {
         </section>
       )}
       {page.approver && (
-        <section aria-label="Approver" className="mt-8 rounded-md border border-gray-200 p-3 dark:border-gray-800">
+        <section aria-label="Approver" className="mt-8 rounded-md border border-line p-3">
           <p>
             <strong>{`Approver · ${page.approver.decision}`}</strong>{' '}
             <span className={muted}>{`round ${page.approver.n}`}</span>

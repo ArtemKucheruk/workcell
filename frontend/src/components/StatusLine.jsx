@@ -7,7 +7,7 @@ export function StatusLine({ task }) {
     return (
       <span>
         {`${label} · `}
-        <strong className="text-red-700 dark:text-red-400">⚠ NEEDS YOU — escalated</strong>
+        <strong className="text-danger">⚠ NEEDS YOU — escalated</strong>
       </span>
     )
   }

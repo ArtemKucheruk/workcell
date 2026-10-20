@@ -3,11 +3,51 @@
 @import "highlight.js/styles/github.css" (prefers-color-scheme: light);
 @import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);
 
+/*
+ * 040: the theme. Light values here, dark values below; not `inline`, so utilities read the variables and
+ * follow the system's scheme. fg, muted, accent, success, warning, and danger clear 4.5:1 on surface and raised.
+ */
+@theme {
+  --color-surface: #fbfbf9;
+  --color-raised: #f2f1ed;
+  --color-line: #dad8d1;
+  --color-fg: #1c1b18;
+  --color-muted: #5d5a53;
+  --color-accent: #2a55c9;
+  --color-success: #1b7a3d;
+  --color-warning: #8a5700;
+  --color-danger: #c02a2a;
+  --font-sans: 'IBM Plex Sans Variable', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+}
+
+/* 040 FE2: each token's dark value, set once; docs/ui.md §8: light and dark follow the system setting */
+@layer theme {
+  @media (prefers-color-scheme: dark) {
+    :root, :host {
+      --color-surface: #121316;
+      --color-raised: #1b1d21;
+      --color-line: #2f3238;
+      --color-fg: #e8e7e3;
+      --color-muted: #a09f99;
+      --color-accent: #86a3f7;
+      --color-success: #55c785;
+      --color-warning: #e3ab42;
+      --color-danger: #f87777;
+    }
+  }
+}
+
 @layer base {
-  a { @apply text-blue-700 hover:underline dark:text-blue-400; }
-  th, td { @apply border-b border-gray-200 px-3 py-1.5 text-left dark:border-gray-800; }
+  body { @apply bg-surface font-sans text-fg; }
+  a { @apply text-accent hover:underline; }
+  th, td { @apply border-b border-line px-3 py-1.5 text-left; }
   th { @apply font-semibold; }
-  h2 { @apply mt-8 mb-2 text-lg font-semibold; }
+  /* 040 Q8: the heading scale, set once; h1 margins stay on each page */
+  h1 { @apply text-2xl/8 font-semibold; }
+  h2 { @apply mt-8 mb-2 text-lg/7 font-semibold; }
 }
 
 /* 023 Q7: rendered *_html, which preflight strips of list markers, heading sizes, and margins */
@@ -23,9 +63,9 @@
   .markdown ul { @apply list-disc; }
   .markdown ol { @apply list-decimal; }
   .markdown li + li, .markdown li > :is(ul, ol) { @apply mt-1; }
-  .markdown blockquote { @apply border-l-4 border-gray-300 pl-3 text-gray-600 dark:border-gray-700 dark:text-gray-400; }
-  .markdown code { @apply rounded bg-gray-100 px-1 text-[0.9em] dark:bg-gray-800; }
-  .markdown pre { @apply overflow-x-auto rounded-md bg-gray-100 p-3 text-sm dark:bg-gray-800; }
+  .markdown blockquote { @apply border-l-4 border-line pl-3 text-muted; }
+  .markdown code { @apply rounded bg-raised px-1 text-[0.9em]; }
+  .markdown pre { @apply overflow-x-auto rounded-md bg-raised p-3 text-sm; }
   .markdown pre code { @apply bg-transparent p-0 text-inherit; }
 }
 
@@ -33,14 +73,14 @@
 @layer components {
   .diff-table { @apply min-w-full font-mono text-[0.85rem]; }
   .diff-table td { @apply border-0 px-2 py-0 align-top whitespace-pre; }
-  .diff-table td.num, .diff-table td.sign { @apply w-[1%] text-right text-gray-600 select-none dark:text-gray-400; }
+  .diff-table td.num, .diff-table td.sign { @apply w-[1%] text-right text-muted select-none; }
   .diff-table td.num a { @apply text-inherit; }
-  .diff-table tr:is(.hunk, .note) td { @apply py-0.5 text-gray-600 dark:text-gray-400; }
-  .diff-table tr.hunk { @apply bg-blue-50 dark:bg-blue-950/40; }
-  /* Q10: GitHub's diff tints; highlight.js colors only the text, so the rows stay tinted */
+  .diff-table tr:is(.hunk, .note) td { @apply py-0.5 text-muted; }
+  .diff-table tr.hunk { @apply bg-accent/10; }
+  /* Q10, 040 Q5: GitHub's diff tints, the only dark variant left; highlight.js colors only the text, so the rows stay tinted */
   .diff-table tr.add { @apply bg-[#e6ffec] dark:bg-[#2ea04326]; }
   .diff-table tr.del { @apply bg-[#ffebe9] dark:bg-[#f851491a]; }
-  .diff-table tr.comments td { @apply border-y border-gray-200 p-2 font-sans whitespace-normal dark:border-gray-800; }
+  .diff-table tr.comments td { @apply border-y border-line p-2 font-sans whitespace-normal; }
   .diff-table tr.comments td > * { @apply sticky left-2 max-w-[min(48rem,80vw)]; }
   .diff-table .comment + .comment { @apply mt-3; }
 }

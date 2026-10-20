@@ -17,7 +17,7 @@ export function Chip({ n, who, verdict, posted }) {
       type="button"
       popoverTarget={`verdict-${n}-${who}`}
       title={title}
-      className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-blue-700 dark:hover:text-blue-400"
+      className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-accent"
     >
       {text}
     </button>
