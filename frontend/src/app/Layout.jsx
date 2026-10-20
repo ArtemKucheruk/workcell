@@ -6,13 +6,13 @@ import { usePoll } from '../hooks/usePoll.js'
 function AuthBadge({ auth }) {
   if (!auth.runs_enabled) {
     return (
-      <Link to="/settings" className="text-sm font-semibold text-red-700 dark:text-red-400">
+      <Link to="/settings" className="text-sm font-semibold text-danger">
         API key — runs disabled
       </Link>
     )
   }
   return (
-    <Link to="/settings" className="text-sm text-gray-600 dark:text-gray-400">
+    <Link to="/settings" className="text-sm text-muted">
       {`Claude: ${planName(auth.plan)} ✓`}
     </Link>
   )
@@ -24,7 +24,7 @@ export function Layout() {
   const { data: auth } = usePoll(getAuth, 3000)
   return (
     <>
-      <header className="flex items-center justify-between gap-4 border-b border-gray-200 px-6 py-3 dark:border-gray-800">
+      <header className="flex items-center justify-between gap-4 border-b border-line px-6 py-3">
         <Link to="/" className="font-semibold text-inherit">
           Claude Factories
         </Link>

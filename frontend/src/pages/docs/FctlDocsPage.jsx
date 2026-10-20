@@ -3,9 +3,8 @@ import { useLocation } from 'react-router'
 import { fctlDoc } from '../../api/pages.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
+import { muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
-
-const muted = 'text-gray-600 dark:text-gray-400'
 
 /**
  * docs/ui.md §8 item 7: the fctl reference, pre-rendered by the backend from fctl.md, with a Contents nav built
@@ -34,7 +33,7 @@ export function FctlDocsPage() {
 
   return (
     <>
-      <h1 className="mb-6 text-2xl font-semibold">fctl reference</h1>
+      <h1 className="mb-6">fctl reference</h1>
       {!doc ? (
         error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
       ) : (

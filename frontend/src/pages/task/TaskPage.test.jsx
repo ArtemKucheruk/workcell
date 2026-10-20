@@ -108,7 +108,7 @@ test('AC2: the status line words each status and stage; only escalated is red', 
   for (const [status, stage, text] of cases) {
     const { unmount } = await open(taskPage({ status, stage }))
     expect(within(header()).getByText(fullText(text))).toBeTruthy()
-    const red = [...document.querySelectorAll('main [class*="text-red-"]')]
+    const red = [...document.querySelectorAll('main [class*="text-danger"]')]
     expect(red.map((el) => el.textContent)).toEqual(stage === 'escalated' ? ['⚠ NEEDS YOU — escalated'] : [])
     unmount()
   }

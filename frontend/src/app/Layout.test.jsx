@@ -29,7 +29,7 @@ test('AC15: runs disabled shows the red API key badge', async () => {
   mockFetch(dashboard([200, { auth_method: null, plan: null, runs_enabled: false }]))
   renderAt('/')
   const badge = await screen.findByText('API key — runs disabled')
-  expect(badge.className).toMatch(/(^|\s)text-red-\d+/)
+  expect(badge.className).toMatch(/(^|\s)text-danger(\s|$)/)
 })
 
 test('AC16: a failed /api/auth shows no badge and the page still renders', async () => {
@@ -102,7 +102,7 @@ test('039 AC17: the badge links to /settings, and the runs-disabled one stays re
   renderAt('/')
   const off = await within(screen.getByRole('banner')).findByRole('link', { name: 'API key — runs disabled' })
   expect(off.getAttribute('href')).toBe('/settings')
-  expect(off.className).toMatch(/(^|\s)text-red-\d+/)
+  expect(off.className).toMatch(/(^|\s)text-danger(\s|$)/)
 })
 
 test('039 AC18: the header re-fetches /api/auth every 3 s and the badge follows it', async () => {

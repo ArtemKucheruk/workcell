@@ -2,15 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { rawUrl, transcript } from '../../api/transcripts.js'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
-import { button } from '../../components/ActionButton.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { button, muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
-const muted = 'text-gray-600 dark:text-gray-400'
-const pre = 'overflow-auto rounded-md bg-gray-100 p-3 font-mono text-sm whitespace-pre-wrap wrap-anywhere dark:bg-gray-900'
+const pre = 'overflow-auto rounded-md bg-raised p-3 font-mono text-sm whitespace-pre-wrap wrap-anywhere'
 
 /**
  * One content block. docs/MVP.md §4.5: only text arrives as `text_html`; a tool's input and result and thinking
@@ -40,7 +39,7 @@ function Block({ block, onShowAll }) {
   if (block.type === 'tool_result') {
     return (
       <div>
-        <p className={`text-sm ${block.is_error ? 'text-red-700 dark:text-red-400' : muted}`}>
+        <p className={`text-sm ${block.is_error ? 'text-danger' : muted}`}>
           {block.is_error ? 'Tool error' : 'Tool result'}
         </p>
         <pre className={pre}>{block.text}</pre>
@@ -80,7 +79,7 @@ export function TranscriptPage() {
         <nav aria-label="Breadcrumb" className="text-sm">
           <Link to={`/tasks/${t.task_id}`}>{`Task #${t.task_id}`}</Link>
         </nav>
-        <h1 className="text-2xl font-semibold wrap-anywhere">{label}</h1>
+        <h1 className="wrap-anywhere">{label}</h1>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>{`run #${t.run_id}`}</span>
           {t.round != null && <span>{`round ${t.round}`}</span>}
@@ -94,7 +93,7 @@ export function TranscriptPage() {
       {t.messages.length ? (
         <ol className="grid gap-4">
           {t.messages.map((m, i) => (
-            <li key={i} className="grid gap-2 border-l-2 border-gray-200 pl-3 dark:border-gray-700">
+            <li key={i} className="grid gap-2 border-l-2 border-line pl-3">
               <p className="text-sm">
                 <strong>{m.role}</strong>
                 {m.at && (

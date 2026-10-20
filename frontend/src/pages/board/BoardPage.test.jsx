@@ -177,11 +177,11 @@ test('AC9: an escalated card has the red badge and left bar; no other card does'
     review: [card(11, 'review', { stage: 'escalated', escalated: true }), card(12, 'review', { stage: 'human_review', waiting: true })],
   }))
   const badge = within(cardEl(11)).getByText('⚠ NEEDS YOU — escalated')
-  expect(badge.className).toMatch(/(^|\s)text-red-\d+/)
-  const bar = (li) => /(^|\s)border-l-4(\s|$)/.test(li.className) && /(^|\s)border-red-\d+/.test(li.className)
+  expect(badge.className).toMatch(/(^|\s)text-danger(\s|$)/)
+  const bar = (li) => /(^|\s)border-l-4(\s|$)/.test(li.className) && /(^|\s)border-danger(\s|$)/.test(li.className)
   expect(bar(cardEl(11))).toBe(true)
   for (const id of [1, 12]) {
-    expect(cardEl(id).className).not.toMatch(/(^|\s)(border-l-4|border-red-\d+)(\s|$)/)
+    expect(cardEl(id).className).not.toMatch(/(^|\s)(border-l-4|border-danger)(\s|$)/)
   }
   expect(screen.getAllByText('⚠ NEEDS YOU — escalated')).toHaveLength(1)
 })

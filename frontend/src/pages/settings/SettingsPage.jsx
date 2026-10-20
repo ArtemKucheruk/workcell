@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import { getAuth, planName, sendLoginCode, startLogin } from '../../api/auth.js'
-import { ActionButton, button } from '../../components/ActionButton.jsx'
+import { ActionButton } from '../../components/ActionButton.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { button, field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
-
-const muted = 'text-gray-600 dark:text-gray-400'
-const field = 'rounded-md border border-gray-300 px-2 py-1 dark:border-gray-700 dark:bg-gray-900'
 
 /** 039: GET /api/auth's answer as rows; Q3: a login that isn't claude.ai reports no method, plan, or account. */
 function LoginRows({ auth }) {
@@ -27,7 +25,7 @@ function LoginRows({ auth }) {
       {auth.runs_enabled ? (
         <p className="mt-2">Runs enabled</p>
       ) : (
-        <p className="mt-2 font-semibold text-red-700 dark:text-red-400">
+        <p className="mt-2 font-semibold text-danger">
           Not signed in with a Claude subscription — runs disabled
         </p>
       )}
@@ -82,7 +80,7 @@ export function SettingsPage() {
   const label = url ? 'Start over' : shown?.runs_enabled ? 'Log in again' : 'Log in with Claude'
   return (
     <>
-      <h1 className="mb-6 text-2xl font-semibold">Settings</h1>
+      <h1 className="mb-6">Settings</h1>
       {!shown ? (
         error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
       ) : (
@@ -94,7 +92,7 @@ export function SettingsPage() {
             <LoginRows auth={shown} />
           </div>
           {loggedIn && (
-            <p role="status" className="font-semibold text-green-700 dark:text-green-400">
+            <p role="status" className="font-semibold text-success">
               {shown.email ? `Logged in as ${shown.email}` : 'Logged in'}
             </p>
           )}

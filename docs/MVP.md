@@ -205,7 +205,10 @@ Python 3.12 with FastAPI and uvicorn. Storage is stdlib `sqlite3`, with no ORM a
 The package is built with uv and has 4 runtime dependencies.
 
 The frontend lives in `frontend/`: a Vite + React SPA in plain JSX, styled with Tailwind v4
-and routed with react-router. highlight.js, installed from npm, highlights code. Tests run on
+and routed with react-router. highlight.js, installed from npm, highlights code. The fonts
+come from `@fontsource-variable/ibm-plex-sans` and `@fontsource-variable/jetbrains-mono`, which
+Vite bundles into `dist/`: they are self-hosted, so the app on 127.0.0.1 works offline and
+calls no CDN. Tests run on
 vitest with @testing-library/react and jsdom. `frontend/server.js` serves the built SPA and
 proxies `/api` to the backend. It runs on `node:http` with no extra dependencies. The
 frontend needs Node 22 and npm.

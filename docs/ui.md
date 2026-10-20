@@ -6,7 +6,13 @@ Part of the [MVP design](MVP.md). Section numbers continue from it.
 The UI is a React SPA served by the frontend server (§4.1). Each page loads its view-model
 from `/api/pages/*` (§6.4). Markdown arrives pre-rendered by the backend as `*_html` fields,
 with raw HTML off, so the SPA has no markdown library. highlight.js comes from npm. Live
-parts poll every 3 s with fetch. Light and dark follow the system setting. Every page header
+parts poll every 3 s with fetch. Light and dark follow the system setting. The theme is nine
+color tokens in `frontend/src/index.css`: `surface`, `raised`, `line`, `fg`, `muted`,
+`accent`, `success`, `warning`, and `danger`. Each token has a light value and a dark value
+that follow the system, and pages style with them (`bg-surface text-muted border-line`), not
+with Tailwind's palette. Text is set in IBM Plex Sans; code, diffs, paths, and the run log in
+JetBrains Mono. Both are self-hosted (§4.2). The browser tab shows an SVG favicon,
+`frontend/public/favicon.svg`. Every page header
 links to the fctl reference (item 7) and shows the login runs will use, from
 `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
 subscription, or a red `API key — runs disabled` otherwise. The badge links to `/settings`

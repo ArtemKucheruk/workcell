@@ -4,9 +4,10 @@ import { boardPage } from '../../api/pages.js'
 import { createFactory, importBundle, moveProject, projectContext, saveProjectContext } from '../../api/projects.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, moveTask } from '../../api/tasks.js'
-import { ActionButton, button } from '../../components/ActionButton.jsx'
+import { ActionButton } from '../../components/ActionButton.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { button, field, muted, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -14,16 +15,12 @@ const COLUMNS = { backlog: 'Backlog', in_progress: 'In progress', review: 'Revie
 const SHORT = { security: 'sec', ux: 'ux', ui: 'ui', code: 'co' }
 const SYMBOL = { PASS: '✓', CHANGES: '✗', pending: '·' }
 
-const muted = 'text-gray-600 dark:text-gray-400'
-const smallButton = `${button} px-2 py-0.5 text-sm`
-const field = 'rounded-md border border-gray-300 px-2 py-1 dark:border-gray-700 dark:bg-gray-900'
-
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /** §8.1, as project.html: running, else stalled, else escalated, else waiting, else the stage. */
 function StatusLine({ card, running, retry }) {
   const stage = card.stage ? ` · ${card.stage}` : ''
-  if (running) return <p className="text-sm text-green-700 dark:text-green-400">{`● running${stage}`}</p>
+  if (running) return <p className="text-sm text-success">{`● running${stage}`}</p>
   if (card.stalled) {
     return (
       <p className="flex items-center justify-between gap-2 text-sm">
@@ -32,7 +29,7 @@ function StatusLine({ card, running, retry }) {
       </p>
     )
   }
-  if (card.escalated) return <p className="text-sm font-semibold text-red-700 dark:text-red-400">⚠ NEEDS YOU — escalated</p>
+  if (card.escalated) return <p className="text-sm font-semibold text-danger">⚠ NEEDS YOU — escalated</p>
   if (card.waiting) return <p className="text-sm"><strong>waiting on you</strong></p>
   return card.stage && <p className={`text-sm ${muted}`}>{card.stage}</p>
 }
@@ -69,8 +66,9 @@ function Card({ card, canRun, onRun, onDragStart, onDragEnd }) {
       draggable="true"
       onDragStart={(event) => onDragStart(event, card.id)}
       onDragEnd={onDragEnd}
-      className={`grid cursor-grab gap-1 rounded-md bg-white p-3 shadow-sm ring-1 ring-gray-200 dark:bg-gray-800 dark:ring-gray-700${
-        card.escalated ? ' border-l-4 border-red-600 dark:border-red-500' : ''
+      // 040: a space before ${, or Tailwind's scanner reads `ring-line$` and generates no ring-line
+      className={`grid cursor-grab gap-1 rounded-md bg-surface p-3 shadow-sm ring-1 ring-line ${
+        card.escalated ? 'border-l-4 border-danger' : ''
       }`}
     >
       <Link id={`task-${card.id}`} to={`/tasks/${card.id}`} draggable="false" className="font-medium">
@@ -124,7 +122,7 @@ function FactoryResult({ out }) {
     </ul>
   )
   return (
-    <div className="grid gap-1 rounded-md border border-gray-300 p-3 dark:border-gray-700">
+    <div className="grid gap-1 rounded-md border border-line p-3">
       {out.written.length > 0 && (
         <>
           <p>{`Wrote ${plural(out.written.length, 'file')}:`}</p>
@@ -138,7 +136,7 @@ function FactoryResult({ out }) {
         </>
       )}
       <p>Commit them so runs can see the factory:</p>
-      <pre className="overflow-x-auto rounded bg-gray-100 p-2 text-sm dark:bg-gray-900"><code>{out.commit_hint}</code></pre>
+      <pre className="overflow-x-auto rounded bg-raised p-2 text-sm"><code>{out.commit_hint}</code></pre>
     </div>
   )
 }
@@ -169,7 +167,7 @@ function NewTask({ projectId, onDone }) {
       <summary className={`${button} list-none [&::-webkit-details-marker]:hidden`}>+ New task</summary>
       <form
         onSubmit={submit}
-        className="absolute z-10 mt-2 grid w-96 max-w-[90vw] gap-2 rounded-md border border-gray-300 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        className="absolute z-10 mt-2 grid w-96 max-w-[90vw] gap-2 rounded-md border border-line bg-surface p-3 shadow-lg"
       >
         <label className="grid gap-1">
           Title
@@ -330,7 +328,7 @@ function ProjectContext({ projectId }) {
               <button disabled={busy || over} className={button}>
                 Save
               </button>
-              <span className={`text-sm tabular-nums ${over ? 'font-semibold text-red-700 dark:text-red-400' : muted}`}>
+              <span className={`text-sm tabular-nums ${over ? 'font-semibold text-danger' : muted}`}>
                 {`${bytes} / ${maxBytes} bytes${over ? ' · over the limit' : ''}`}
               </span>
             </div>
@@ -427,7 +425,7 @@ export function BoardPage() {
         <nav aria-label="Breadcrumb" className="text-sm">
           <Link to="/">Claude Factories</Link>
         </nav>
-        <h1 className="text-2xl font-semibold">
+        <h1>
           {project.name} · <Link to={`/workspaces/${project.workspace_id}`}>{project.workspace}</Link>
         </h1>
         <p className={`font-mono text-sm ${muted}`}>{project.path}</p>
@@ -458,7 +456,7 @@ export function BoardPage() {
               aria-labelledby={`column-${status}`}
               onDragOver={(event) => dragged.current != null && event.preventDefault()}
               onDrop={(event) => drop(event, status, cards)}
-              className="grid min-h-32 content-start gap-2 rounded-lg bg-gray-100 p-3 dark:bg-gray-900"
+              className="grid min-h-32 content-start gap-2 rounded-lg bg-raised p-3"
             >
               <h2 id={`column-${status}`} className="m-0 text-base">
                 {label} <span className={`font-normal ${muted}`}>{cards.length}</span>

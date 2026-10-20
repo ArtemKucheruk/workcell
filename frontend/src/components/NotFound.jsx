@@ -8,7 +8,7 @@ export function NotFound({ detail = 'Page not found' }) {
   }, [])
   return (
     <section>
-      <h1 className="text-2xl font-semibold">{detail}</h1>
+      <h1>{detail}</h1>
       <p className="mt-2">
         <Link to="/">Go to the dashboard</Link>
       </p>

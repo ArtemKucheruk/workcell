@@ -5,9 +5,9 @@ import { codePage } from '../../api/pages.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
-const muted = 'text-gray-600 dark:text-gray-400'
 // Q6: both <pre> share font, size, and line height, so the gutter's numbers line up with the code's lines
 const mono = 'm-0 p-2 font-mono text-[0.85rem]/[1.4]'
 
@@ -53,10 +53,10 @@ function highlight(text, lang) {
 function Code({ view, lang }) {
   const html = useMemo(() => highlight(view.text, lang), [view.text, lang])
   return (
-    <div className="flex overflow-x-auto rounded-md border border-gray-300 dark:border-gray-700">
+    <div className="flex overflow-x-auto rounded-md border border-line">
       <pre
         aria-hidden="true"
-        className={`${mono} sticky left-0 border-r border-gray-300 bg-[color:Canvas] text-right select-none dark:border-gray-700 ${muted}`}
+        className={`${mono} sticky left-0 border-r border-line bg-surface text-right select-none ${muted}`}
       >
         {Array.from({ length: view.lines }, (_, i) => i + 1).join('\n')}
       </pre>
@@ -97,7 +97,7 @@ export function CodePage() {
   return (
     <>
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold wrap-anywhere">
+        <h1 className="wrap-anywhere">
           <Link to={`/projects/${project.id}`}>{project.name}</Link> · Code
         </h1>
         {branch && (

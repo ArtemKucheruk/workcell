@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
+import { button, field } from '../../components/styles.js'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECTS = [
@@ -87,4 +88,11 @@ test('AC32: a failed workspace view-model shows its detail in an alert', async (
     expect((await screen.findByRole('alert')).textContent).toBe(detail)
     unmount()
   }
+})
+
+test('040 FE7: the + Workspace form uses the shared button and field', async () => {
+  mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal', PROJECTS) })
+  renderAt('/workspaces/2')
+  expect((await screen.findByRole('button', { name: '+ Workspace' })).className).toBe(button)
+  expect(screen.getByRole('textbox', { name: 'New workspace name' }).className).toBe(field)
 })

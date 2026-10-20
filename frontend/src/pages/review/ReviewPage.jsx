@@ -3,17 +3,16 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useParams, useSearchParams } from 'react-router'
 import { reviewPage } from '../../api/pages.js'
 import { addComment, approveTask, requestChanges } from '../../api/reviews.js'
-import { ActionButton, button } from '../../components/ActionButton.jsx'
+import { ActionButton } from '../../components/ActionButton.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { StatusLine } from '../../components/StatusLine.jsx'
+import { button, field, muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
-const muted = 'text-gray-600 dark:text-gray-400'
-const field = 'rounded-md border border-gray-300 bg-transparent px-2 py-1 disabled:opacity-50 dark:border-gray-700'
 const blank = (md) => !md?.trim()
 const plusMinus = ({ additions, deletions }) => `+${additions} −${deletions}`
 const CHANGE = { added: '(new)', deleted: '(deleted)' }
@@ -90,7 +89,7 @@ function Round({ round, standalone }) {
             {`${who} · ${posted[who].verdict} `}
             <span className={muted}>{posted[who].body_md.trim().split(/\r?\n/)[0]}</span>
           </summary>
-          <Markdown html={posted[who].body_html} className="my-2 border-l-2 border-gray-200 pl-3 dark:border-gray-700" />
+          <Markdown html={posted[who].body_html} className="my-2 border-l-2 border-line pl-3" />
         </details>
       ))}
     </li>
@@ -109,7 +108,7 @@ function Conversation({ page, onSent }) {
         {!blank(task.spec_md) && (
           <details className="mt-3">
             <summary className="cursor-pointer">Spec</summary>
-            <Markdown html={task.spec_html} className="mt-2 border-l-2 border-gray-200 pl-3 dark:border-gray-700" />
+            <Markdown html={task.spec_html} className="mt-2 border-l-2 border-line pl-3" />
           </details>
         )}
       </section>
@@ -126,7 +125,7 @@ function Conversation({ page, onSent }) {
         )}
       </section>
       {approver && (
-        <section aria-label="Approver" className="mt-8 rounded-md border border-gray-200 p-3 dark:border-gray-800">
+        <section aria-label="Approver" className="mt-8 rounded-md border border-line p-3">
           <p>
             <strong>{`Approver · ${approver.decision}`}</strong> <span className={muted}>{`round ${approver.n}`}</span>
           </p>
@@ -258,7 +257,7 @@ function DiffFile({ file, form, onLine, inline }) {
         )}{' '}
         <span className="ml-auto font-normal tabular-nums">{plusMinus(file)}</span>
       </h2>
-      <div className="overflow-x-auto rounded-md border border-gray-300 dark:border-gray-700">
+      <div className="overflow-x-auto rounded-md border border-line">
         <table className="diff-table">
           <tbody>
             {file.rows.map((row, i) => (
@@ -420,7 +419,7 @@ export function ReviewPage() {
           {' › '}
           <Link to={`/tasks/${task.id}`}>{`#${task.id}`}</Link>
         </nav>
-        <h1 className="col-start-1 row-start-2 text-2xl font-semibold wrap-anywhere">{heading}</h1>
+        <h1 className="col-start-1 row-start-2 wrap-anywhere">{heading}</h1>
         <p className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-1">
           <StatusLine task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
@@ -481,12 +480,12 @@ export function ReviewPage() {
             Commit it yourself
           </h2>
           <p className={muted}>Done. The app never runs git; run these in a terminal.</p>
-          <pre className="mt-2 overflow-x-auto rounded-md border border-gray-300 p-3 text-sm dark:border-gray-700">
+          <pre className="mt-2 overflow-x-auto rounded-md border border-line p-3 text-sm">
             {task.commit_hint}
           </pre>
         </section>
       )}
-      <nav aria-label="Review tabs" className="mb-6 flex gap-4 border-b border-gray-200 dark:border-gray-800">
+      <nav aria-label="Review tabs" className="mb-6 flex gap-4 border-b border-line">
         <Link to={tabHref()} aria-current={onFiles ? undefined : 'page'} className={tabClass}>
           Conversation
         </Link>
