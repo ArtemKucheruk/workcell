@@ -17,6 +17,15 @@ class AuthOut(BaseModel):
     auth_method: str | None
     plan: str | None
     runs_enabled: bool
+    email: str | None  # 039 Q3: the claude.ai login's account
+
+
+class LoginStarted(BaseModel):
+    url: str  # 039 Q2: always https
+
+
+class LoginCode(BaseModel):
+    code: str  # `<code>#<state>` from the sign-in page; handlers/pages.py checks its shape (039 AC12)
 
 
 # --- GET /api/docs/fctl (docs/ui.md §8 item 7) -----------------------------------------

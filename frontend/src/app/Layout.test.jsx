@@ -1,7 +1,7 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { fetched, mockFetch, renderAt } from '../test/render.jsx'
 
 const EMPTY_DASHBOARD = {
@@ -87,4 +87,43 @@ test('AC19: the page declares light and dark, and dark: follows the system', () 
   expect(html).toContain('<meta name="color-scheme" content="light dark">')
   expect(css).toContain('@import "tailwindcss";')
   expect(css).not.toMatch(/@(custom-)?variant\s+dark/)
+})
+
+const PRO = { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true, email: null }
+const OFF = { auth_method: null, plan: null, runs_enabled: false, email: null }
+
+test('039 AC17: the badge links to /settings, and the runs-disabled one stays red', async () => {
+  mockFetch(dashboard([200, PRO]))
+  const { unmount } = renderAt('/')
+  const pro = await within(screen.getByRole('banner')).findByRole('link', { name: 'Claude: Pro ✓' })
+  expect(pro.getAttribute('href')).toBe('/settings')
+  unmount()
+  mockFetch(dashboard([200, OFF]))
+  renderAt('/')
+  const off = await within(screen.getByRole('banner')).findByRole('link', { name: 'API key — runs disabled' })
+  expect(off.getAttribute('href')).toBe('/settings')
+  expect(off.className).toMatch(/(^|\s)text-red-\d+/)
+})
+
+test('039 AC18: the header re-fetches /api/auth every 3 s and the badge follows it', async () => {
+  vi.useFakeTimers()
+  try {
+    const responses = dashboard([200, OFF])
+    const fetch = mockFetch(responses)
+    const advance = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
+    const auths = () => fetched(fetch).filter((url) => url === '/api/auth').length
+    renderAt('/')
+    await advance(0)
+    const banner = within(screen.getByRole('banner'))
+    expect(banner.getByText('API key — runs disabled')).toBeTruthy()
+    responses['GET /api/auth'] = [200, PRO]
+    await advance(2999)
+    expect(auths()).toBe(1)
+    await advance(1)
+    expect(auths()).toBe(2)
+    expect(banner.getByText('Claude: Pro ✓')).toBeTruthy()
+    expect(banner.queryByText('API key — runs disabled')).toBeNull()
+  } finally {
+    vi.useRealTimers()
+  }
 })

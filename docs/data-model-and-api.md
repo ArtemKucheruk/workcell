@@ -285,15 +285,30 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
 `/projects/{id}` board · `/projects/{id}/code?path=` · `/tasks/{id}` ·
-`/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl`. Any other path
-outside `/api` gets the SPA's not-found page. `/transcripts/{id}` loads
+`/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl` · `/settings`. Any
+other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}` loads
 `GET /api/transcripts/{id}` (§6.2).
 
 Each page loads one view-model from the backend. Markdown fields arrive rendered as `*_html`
 (raw HTML off, §4.5). Unknown ids get a JSON 404.
 ```
-GET  /api/auth                                                    (every page header)
-← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true}
+GET  /api/auth                                                    (every page header, /settings)
+← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true,"email":"artem@example.com"}
+  # auth_method, plan, and email are null unless the login is claude.ai
+
+POST /api/auth/login                                              (Settings: Log in with Claude)
+← 200 {"url":"https://claude.ai/oauth/authorize?…"}
+  # starts `claude auth login --claudeai` (§4.3), stopping a pending one first
+  # 500 {"detail":"claude auth login printed no sign-in URL: Error: …"} with claude's last line
+
+POST /api/auth/login/code                                         (Settings: Submit code)
+→ {"code":"<code>#<state>"}
+← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true,"email":"artem@example.com"}
+  # the code goes to the pending login's stdin; the 200 is GET /api/auth's body, checked afresh
+  # 409 {"detail":"no login in progress"}
+  # 422 {"detail":"Login failed: Invalid code"}: claude refused it; or the code isn't
+  #     <code>#<state>, and the login stays pending
+  # 500 {"detail":"claude auth login didn't finish"}: no exit within 60 s, so the login is stopped
 
 GET  /api/pages/dashboard                       tiles, open tasks per workspace → project, rounds per task
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
