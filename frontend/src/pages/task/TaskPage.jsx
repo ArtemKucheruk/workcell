@@ -6,11 +6,12 @@ import { exportUrl } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
 import { TaskState } from '../../components/Badge.jsx'
+import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
-import { muted } from '../../components/styles.js'
+import { button, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -18,7 +19,7 @@ const blank = (md) => !md?.trim()
 
 /**
  * Q3: Stop while the latest run runs, whatever the status; else Run for backlog, Retry for in_progress with a run.
- * `can_run` disables Run and Retry, never Stop, and the hint shows only beside them.
+ * `can_run` disables Run and Retry, never Stop, and the hint shows only beside them. 047 Q8: on the title row, which wraps.
  */
 function RunControls({ page, onAction }) {
   const { task, run, hint } = page
@@ -46,6 +47,37 @@ function RunControls({ page, onAction }) {
         </span>
       )}
       {start && hint && <span className={`text-sm ${muted}`}>{hint}</span>}
+    </div>
+  )
+}
+
+/**
+ * 047 Q9: the Export button's popover, holding the Include transcripts box (032 Q10: off unless ticked) and one Download
+ * link. Esc or a click outside closes it; a download leaves it open. It sits after the status line, not in it (FE7): the
+ * browser draws it in the top layer under its button, and puts it after the button in tab order.
+ */
+function ExportPopover({ id }) {
+  const [withTranscripts, setWithTranscripts] = useState(false)
+  return (
+    <div
+      id="export"
+      popover="auto"
+      className={`${popover} w-80 max-w-[90vw] gap-3 p-3 open:grid [position-anchor:--export] [position-area:bottom_span-right]`}
+    >
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={withTranscripts}
+          onChange={(event) => setWithTranscripts(event.target.checked)}
+          className="mt-1"
+        />
+        <span>
+          Include transcripts <span className={muted}>(can hold paths, env, and secrets)</span>
+        </span>
+      </label>
+      <a href={exportUrl(id, withTranscripts)} download className={`${button} justify-self-start hover:no-underline`}>
+        Download
+      </a>
     </div>
   )
 }
@@ -185,7 +217,6 @@ export function TaskPage() {
   const load = useCallback(() => taskPage(id), [id, tick])
   const { data: page, error } = usePoll(load, 3000)
   const [actionError, setActionError] = useState(null)
-  const [withTranscripts, setWithTranscripts] = useState(false) // 032 Q10: Export leaves them out unless ticked
   const heading = page && `#${page.task.id} ${page.task.title}`
   useEffect(() => {
     if (heading) document.title = `${heading} · Claude Factories`
@@ -214,23 +245,21 @@ export function TaskPage() {
   return (
     <>
       <header className="mb-6 grid gap-2">
-        <nav aria-label="Breadcrumb" className="text-sm">
-          <Link to={`/projects/${task.project_id}`}>{task.project}</Link>
-        </nav>
-        <h1 className="wrap-anywhere">{heading}</h1>
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Breadcrumbs items={[...projectTrail(task), { label: `#${task.id}` }]} />
+        {/* 047: the title row; the run controls sit at its end, and wrap under the title when it's long */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <h1 className="mr-auto wrap-anywhere">{heading}</h1>
+          <RunControls page={page} onAction={runAction} />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <TaskState task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           <Link to={`/tasks/${task.id}/review`}>Review</Link>
-          <a href={exportUrl(task.id, withTranscripts)} download>
-            Export
-          </a>
-          <label className="flex items-center gap-1 text-sm">
-            <input type="checkbox" checked={withTranscripts} onChange={(event) => setWithTranscripts(event.target.checked)} />
-            Include transcripts <span className={muted}>(can hold paths, env, and secrets)</span>
-          </label>
-        </p>
-        <RunControls page={page} onAction={runAction} />
+          <button type="button" popoverTarget="export" className={`${smallButton} [anchor-name:--export]`}>
+            Export <span aria-hidden="true">▾</span>
+          </button>
+        </div>
+        <ExportPopover id={task.id} />
         {actionError && <ErrorMessage error={actionError} />}
         <Takeover page={page} />
       </header>

@@ -142,7 +142,7 @@ DETAIL = jsonl(
 )
 
 
-def test_detail(client, ran):  # AC17
+def test_detail(client, ran):  # AC17, 047 BE6
     tid = add_transcript(ran.id, ran.task, f"{ran.id}/{SID}.jsonl", round=1, started_at="2026-10-17T10:04:10Z",
                          text=DETAIL)
     r = client.get(f"/api/transcripts/{tid}")
@@ -153,6 +153,11 @@ def test_detail(client, ran):  # AC17
         "model": "claude-opus-4-1", "turns": 38, "input_tokens": 412, "cache_read_tokens": 1830211,
         "output_tokens": 20977, "started_at": "2026-10-17T10:04:10Z", "ended_at": "2026-10-17T10:21:40Z"}
     assert body["task_id"] == ran.task and "path" not in body
+    [(project_id, workspace_id)] = sql("SELECT p.id, p.workspace_id FROM tasks t JOIN projects p ON p.id = t.project_id"
+                                       " WHERE t.id = ?", (ran.task,))
+    assert {k: body[k] for k in ("project_id", "project", "workspace_id", "workspace")} == {
+        "project_id": project_id, "project": "p", "workspace_id": workspace_id, "workspace": str(ran.wt)}
+    assert client.get(f"/api/transcripts/{tid}/raw").content == copy(f"{ran.id}/{SID}.jsonl").read_bytes()
     assert body["messages"] == [
         {"role": "user", "at": "2026-10-17T10:04:11.500Z",
          "blocks": [{"type": "text", "text_html": "<p>Task 12, round 1.</p>\n"}]},

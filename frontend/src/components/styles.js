@@ -13,3 +13,11 @@ export const field = 'rounded-md border border-line bg-surface px-2 py-1 disable
 // 042: a tab link in a tabs <nav>; the current one (aria-current="page") is underlined and bold
 export const tab =
   '-mb-px border-b-2 border-transparent px-2 py-1 text-inherit hover:no-underline aria-[current=page]:border-current aria-[current=page]:font-semibold'
+
+// 044 Q10, moved here by 047 for the Move menu, + New task, Export, and Review changes: below its button where the
+// browser has anchor positioning, flipped when it would leave the viewport; else the UA's centered placement, which needs
+// m-auto back after preflight's margin reset
+export const popover = [
+  'm-auto rounded-md border border-line bg-surface text-fg shadow-lg',
+  'supports-[position-area:bottom]:m-0 supports-[position-area:bottom]:mt-1 [position-try-fallbacks:flip-block,flip-inline]',
+].join(' ')

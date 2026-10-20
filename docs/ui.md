@@ -54,6 +54,15 @@ The project pages (Board, Code, Reviews, Context, Settings) share one project he
 `<name> · <workspace>`, with the workspace linking to `/workspaces/{id}`, then the factory
 state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Settings.
 
+The task, review, code, and transcript pages open with one breadcrumb, a
+`<nav aria-label="Breadcrumb">` reading `workspace › project › #id › page`: the workspace
+links to `/workspaces/{id}`, the project to `/projects/{id}`, and `#id` to `/tasks/{id}`. The
+last item is the current page, as plain text: `#12` on the task page, `Review` on the review
+page, the agent's label on the transcript page, and `Code` on the code page, which has no
+`#id`. The `›` separators are hidden from screen readers. Its names come from the page's own
+view-model, as the project and workspace are now. The other pages have no breadcrumb: the
+sidebar and the project header cover them.
+
 1. **Dashboard** (`/`)
    - First, **Needs you**: the escalated tasks, then the ones waiting on me (`human_review`),
      each newest first. A row shows `#id title` linking to `/tasks/{id}/review`, its
@@ -96,11 +105,15 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
    - From `md` up each column's card list scrolls on its own under its heading. Below `md` the
      columns stack and the page scrolls.
 4. **Task detail** (`/tasks/{id}`)
-   - Header: title, the status pill and stage, branch, Review, Run / Stop / Retry, run
-     status. Next to Review, **Export** downloads the task bundle
-     (`GET /api/tasks/{id}/export`, a plain `<a download>`), and an **Include transcripts**
-     checkbox adds them, labelled with the warning that they can hold paths, env, and
-     secrets.
+   - Header: the breadcrumb, then the title row: the title, Run / Stop / Retry, the run
+     status (`run #N <status>`), and beside Run or Retry the hint for why runs are off. The
+     row wraps on narrow screens. Under it, the status line: the status pill and stage,
+     branch, Review, and an **Export** button.
+   - **Export** opens a native popover holding an **Include transcripts** checkbox,
+     labelled with the warning that they can hold paths, env, and secrets, and a
+     **Download** link to the task bundle (`GET /api/tasks/{id}/export`, a plain
+     `<a download>`, with `?transcripts=1` while the box is ticked). Esc or a click outside
+     closes it, and a download leaves it open.
    - Spec (rendered markdown).
    - Rounds: build notes (collapsible), 4 chips that open the verdict, and +/−.
    - Agents per round: one row per transcript of that round, with its name (else agent type,
@@ -117,9 +130,20 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
    - Round selector, defaulting to latest. The diff is a table built from the backend's diff
      rows, with one row per line and anchor `path:side:line`, and highlight.js colors it.
    - Clicking a line number opens an inline comment form.
-   - **Approve** and **Request changes** are enabled only in `review`. A summary box is
-     required for Request changes.
+   - The breadcrumb, then the title row with **Review changes**, which opens a native
+     popover: a **Summary** box, an **Approve** / **Request changes** radio with neither
+     picked, and **Submit review**. **Review changes** is enabled only in `review` with at
+     least one round. **Submit review** stays disabled until a choice is picked, and for
+     Request changes until the summary has text. The summary goes with either choice:
+     Approve sends it as its `body_md`, blank or not. A success closes and resets the
+     popover; a refusal shows its detail inside it and keeps what was typed.
+   - On a done task, **Commit it yourself** shows the commit commands (§3.7) with a **Copy**
+     button. It writes them with `navigator.clipboard` and then reads `Copied`. Without the
+     clipboard, or when the write fails, it selects the commands' text and says to press
+     Ctrl+C (⌘C on a Mac).
 6. **Project code** (`/projects/{id}/code`)
+   - The breadcrumb `workspace › project › Code` above the project header, both from the
+     code view-model's project.
    - Left: a file tree from `git ls-files` of the main checkout.
    - The landing view renders `README.md`.
    - Clicking a file opens a highlighted view with line numbers. Binary files and files
@@ -132,8 +156,9 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
      `fctl` with Docker (§4.6).
    - Its content comes from `GET /api/docs/fctl` (§6.4).
 8. **Transcript** (`/transcripts/{id}`)
-   - Header: the agent's label, `run #N`, a link to its task, model, turns, tokens, duration,
-     and **Download raw** (`GET /api/transcripts/{id}/raw`).
+   - Header: the breadcrumb, whose `#id` links to the task, then the agent's label,
+     `run #N`, model, turns, tokens, duration, and **Download raw**
+     (`GET /api/transcripts/{id}/raw`).
    - Each message's role and blocks: text as rendered markdown, a tool call's name and its
      input as text, a tool result as text, and thinking in a closed `<details>`.
    - Tool results over 4096 characters arrive cut; **Show all** reloads with `?full=1`.
@@ -200,7 +225,8 @@ columns: from md up each card list scrolls on its own under its heading
 
 ### 8.2 Review — Conversation
 ```
-#12 Rate-limit login endpoint                          [Request changes]  [Approve]
+personal › api-server › #12 › Review
+#12 Rate-limit login endpoint                                    [Review changes ▾]
 (Review) (waiting on you)   factory/12-rate-limit-login   round [2 ▾]   4 files  +126 −9
 ─ Conversation ─┬─ Files changed 4 ─────────────────────────────────────────────────────
                 │
@@ -216,6 +242,12 @@ columns: from md up each card list scrolls on its own under its heading
  ┌───────────────────────────────────────────────────────────────────────────────────┐
  │ Leave a comment…                                                                   │
  └───────────────────────────────────────────────────────────────────────────────────┘
+[Review changes ▾]: a popover under the button
+  ┌ Summary ───────────────────────────┐
+  │                                    │
+  └────────────────────────────────────┘
+  ( ) Approve    ( ) Request changes
+                        [Submit review]
 ```
 
 ### 8.3 Review — Files changed

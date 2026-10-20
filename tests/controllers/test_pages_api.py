@@ -24,8 +24,8 @@ PRO = '{"authMethod":"claude.ai","subscriptionType":"pro"}'
 PRO_EMAIL = '{"authMethod":"claude.ai","subscriptionType":"pro","email":"artem@example.com"}'
 APP_PY = "diff --git a/app.py b/app.py\nnew file mode 100644\n--- /dev/null\n+++ b/app.py\n@@ -0,0 +1 @@\n+x = 1\n"
 B_PY = "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1,2 +1,2 @@\n keep\n-x\n+y\n"
-TASK_KEYS = {"id", "project_id", "project", "title", "status", "stage", "branch", "worktree_path",
-             "description_md", "description_html", "spec_md", "spec_html"}
+TASK_KEYS = {"id", "project_id", "project", "workspace_id", "workspace", "title", "status", "stage", "branch",
+             "worktree_path", "description_md", "description_html", "spec_md", "spec_html"}
 SUMMARY_KEYS = {"n", "trigger", "files", "additions", "deletions", "verdicts"}
 CONSOLE = '{"authMethod":"console"}'
 UNCOMMITTED = ("factory isn't committed on main: on main, run git add .claude/skills/factory .claude/agents"
@@ -897,7 +897,8 @@ def test_task(client, project):  # AC13
     bare = review_task(project, status="backlog", stage=None)
     page = api(client, f"/api/pages/tasks/{tid}")
     assert page["task"] == {
-        "id": tid, "project_id": project, "project": "repo", "title": "T", "status": "review",
+        "id": tid, "project_id": project, "project": "repo", "workspace_id": ws_id("personal"),
+        "workspace": "personal", "title": "T", "status": "review",
         "stage": "human_review", "branch": "factory/1-t", "worktree_path": "/code/api/.claude/worktrees/12-x",
         "description_md": "Max **5**", "description_html": "<p>Max <strong>5</strong></p>\n",
         "spec_md": "## Goal", "spec_html": "<h2>Goal</h2>\n",
@@ -1138,9 +1139,10 @@ def code_project(client, repo):
     return connect(client, repo)
 
 
-def test_code_landing(client, code_project, repo):  # AC23
+def test_code_landing(client, code_project, repo):  # AC23, 047 BE3: exactly these project keys
     page = api(client, f"/api/pages/projects/{code_project}/code")
-    assert page["project"] == {"id": code_project, "name": "repo", "path": str(repo)}
+    assert page["project"] == {"id": code_project, "name": "repo", "path": str(repo),
+                               "workspace_id": ws_id("personal"), "workspace": "personal"}
     assert page["branch"] == "main"
     assert page["tree"] == {"README.md": {"path": "README.md"}, "src/": {"a.py": {"path": "src/a.py"}}}
     assert page["shown"] == "README.md"
@@ -1226,14 +1228,17 @@ def test_code_size_limit(client, repo):  # 026 AC29
 
 
 @pytest.mark.parametrize("kind", ["missing", "not a repo"])
-def test_code_git_failure(client, tmp_path, kind):  # 026 AC30
+def test_code_git_failure(client, tmp_path, kind):  # 026 AC30, 047 BE4
     """The JSON carries git's own message; the SPA prefixes "Can't list files in <path>: " (CodePage.jsx)."""
     path = tmp_path / kind.replace(" ", "-")
     if kind == "not a repo":
         path.mkdir()
-    page = code(client, connect(client, path)).json()
+    pid = connect(client, path)
+    page = code(client, pid).json()
     assert page["error"].startswith("fatal: ")
     assert page["tree"] == {}
+    assert page["project"] == {"id": pid, "name": "repo", "path": str(path),
+                               "workspace_id": ws_id("personal"), "workspace": "personal"}
 
 
 def test_code_branch(client, fixture_repo):  # 026 AC31
@@ -1297,6 +1302,67 @@ def test_raw_html_off(client, project):  # AC26
 ])
 def test_unknown_ids_json_404(client, url, detail):  # AC27
     assert api(client, url, 404) == {"detail": detail}
+
+
+# --- 047: the breadcrumb's workspace ---------------------------------------------------
+
+
+def test_task_workspace(client):  # 047 BE1
+    task, _ = task_in_work(client)
+    found = api(client, f"/api/pages/tasks/{task}")["task"]
+    assert set(found) == TASK_KEYS
+    assert (found["workspace_id"], found["workspace"]) == (ws_id("work"), "work")
+
+
+def test_review_workspace(client):  # 047 BE2
+    task, _ = task_in_work(client)
+    found = api(client, f"/api/pages/tasks/{task}/review")["task"]
+    assert set(found) == TASK_KEYS | {"commit_hint"}
+    assert (found["workspace_id"], found["workspace"]) == (ws_id("work"), "work")
+
+
+def test_moved_project_workspace(client):  # 047 BE5: joined at read time, never a stored copy
+    task, p = task_in_work(client)
+    transcript = add_transcript(add_run(task, "succeeded"), task, "x/agent.jsonl", text="")
+
+    def reported():
+        return {(got["workspace_id"], got["workspace"]) for got in (
+            api(client, f"/api/pages/tasks/{task}")["task"], api(client, f"/api/pages/tasks/{task}/review")["task"],
+            code(client, p).json()["project"], api(client, f"/api/transcripts/{transcript}"))}
+
+    assert reported() == {(ws_id("work"), "work")}
+    r = client.patch(f"/api/projects/{p}", json={"workspace_id": ws_id("aaa")}, headers=H)
+    assert r.status_code == 200, r.text
+    assert reported() == {(ws_id("aaa"), "aaa")}
+
+
+def test_breadcrumb_docs():  # 047 BE7
+    ui = section("ui.md", "## 8.")
+    intro = ui[:ui.index("1. **Dashboard**")]
+    for text in ("The task, review, code, and transcript pages", "breadcrumb", "›", "`/workspaces/{id}`"):
+        assert text in intro, text
+    task_item = ui[ui.index("4. **Task detail**"):ui.index("5. **Code review**")]
+    for text in ("title row", "**Export** opens a native popover", "**Include transcripts**"):
+        assert text in task_item, text
+    review_item = ui[ui.index("5. **Code review**"):ui.index("6. **Project code**")]
+    for text in ("**Review changes**", "**Submit review**", "**Copy**", "`navigator.clipboard`"):
+        assert text in review_item, text
+    wireframe = section("ui.md", "### 8.2")
+    assert "personal › api-server › #12 › Review" in wireframe and "[Review changes" in wireframe
+    assert "[Approve]" not in wireframe and "[Request changes]" not in wireframe
+    transcript_item = ui[ui.index("8. **Transcript**"):ui.index("9. **Settings**")]
+    assert "a link to its task" not in transcript_item and "breadcrumb" in transcript_item
+
+
+def test_breadcrumb_api_docs():  # 047 BE8
+    tasks_doc = section("data-model-and-api.md", "### 6.2")
+    row = tasks_doc[tasks_doc.index("GET  /api/transcripts/5[?full=1]"):tasks_doc.index("GET  /api/transcripts/5/raw")]
+    assert '"workspace_id"' in row and '"project_id"' in row
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    task_row = api_doc[api_doc.index("GET  /api/pages/tasks/{id} "):api_doc.index("GET  /api/pages/tasks/{id}/review")]
+    code_row = api_doc[api_doc.index("GET  /api/pages/projects/{id}/code?path="):api_doc.index("← 404", api_doc.index(
+        "GET  /api/pages/projects/{id}/code?path="))]
+    assert "workspace" in task_row and "workspace" in code_row
 
 
 # --- Nothing else moves ---------------------------------------------------------------

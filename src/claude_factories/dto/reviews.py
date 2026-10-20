@@ -36,7 +36,7 @@ class IdOut(BaseModel):
 
 
 class ApproveBody(BaseModel):
-    body_md: str = ""  # 009 Q9: optional; neither the page nor fctl approve sends one
+    body_md: str = ""  # 009 Q9: optional; 047 Q4: the page sends its summary, fctl approve sends none
 
 
 class ApproveOut(BaseModel):
