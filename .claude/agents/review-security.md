@@ -1,6 +1,6 @@
 ---
 name: review-security
-description: Security review of the latest round of a factory job. Used by /factory after the builder finishes a round.
+description: Security review of the latest round of a factory job. Used by /factory after the builders finish a round.
 tools: Read, Grep, Glob, Bash, Write
 model: opus
 ---

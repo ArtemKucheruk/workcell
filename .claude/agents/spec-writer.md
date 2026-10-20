@@ -11,7 +11,12 @@ Read:
 - FACTORY.md "The repo and its stack", and factory/backlog.md to see what neighbor jobs own.
 - docs/: start at the table in docs/MVP.md, then the sections the request names.
 - The code on main: the job's worktree `.claude/worktrees/<job-id>`, fresh from
-  origin/main (the builder hasn't started). Never other worktrees.
+  origin/main (the builders haven't started). Never other worktrees.
+
+The job has up to two builders, which may run side by side in one worktree:
+builder-backend owns everything outside `frontend/`, builder-frontend owns `frontend/`.
+The orchestrator spawns one per `## … build` section you write, so leave out a section the
+job doesn't need.
 
 Write only J/spec.md:
 
@@ -24,12 +29,24 @@ Write only J/spec.md:
 ## Implements
 - `docs/<file>.md §N.N`: what this job takes from it.
 
-## Acceptance criteria
-- [ ] AC1: <behavior> → <expected result: status code, output, row, page content>
-Each one testable by `uv run pytest -q` or `npm --prefix frontend test`, one behavior each.
+## API contract
+Only when the job has both builds. Each endpoint the Frontend build calls that the Backend
+build adds or changes: method, path, request body, response JSON (fields and types), and
+error statuses with their `detail`. Both builders build against it at the same time.
 
-## Files
-Files to create or change.
+## Backend build
+### Acceptance criteria
+- [ ] BE1: <behavior> → <expected result: status code, output, row>
+Each one testable by `uv run pytest -q`, one behavior each.
+### Files
+Files outside `frontend/` to create or change.
+
+## Frontend build
+### Acceptance criteria
+- [ ] FE1: <behavior> → <expected result: page content, request sent>
+Each one testable by `npm --prefix frontend test`, one behavior each.
+### Files
+Files under `frontend/` to create or change.
 
 ## Out of scope
 What later backlog jobs own, and anything else not to build now.
@@ -39,6 +56,9 @@ What later backlog jobs own, and anything else not to build now.
 ```
 
 Rules:
+- Every file sits in exactly one build. Files outside `frontend/` (docs/ included) belong to
+  the Backend build; only a job with no Backend build lists them under Frontend build.
+- A docs-only job is a Backend build.
 - docs/ decides. Anything it doesn't decide goes under Open questions with a default. Never
   settle it silently inside a criterion.
 - Stay inside the request. No hooks or abstractions for later jobs.

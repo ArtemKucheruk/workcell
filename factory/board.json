@@ -898,6 +898,1075 @@
           "stage": null
         }
       ]
+    },
+    {
+      "id": "019-docs-new-stack",
+      "title": "Docs and factory for the React frontend and Docker",
+      "description": "docs and factory updated before any code moves, no code: docs/MVP.md \u00a74.1 diagram (browser \u2192 frontend \u2192 backend), \u00a74.2 (frontend stack above, Node 22, npm, and why), \u00a74.5 (the frontend server's own Host check and `/api` proxy; Docker publishes on 127.0.0.1 only), \u00a73.0 install via `docker compose up`, and a new \u00a74.6 Containers (compose.yaml, compose.override.example.yaml copied to a gitignored compose.override.yaml, project repos mounted at the same path, `claude login` inside the container); docs/ui.md \u00a78 intro (SPA, markdown rendered by the backend, highlight.js from npm, polling via fetch) and a new item 7 `/docs/fctl`; docs/data-model-and-api.md \u00a76.4 as SPA routes plus the `/api/auth`, `/api/pages/*`, and `/api/docs/fctl` endpoints from 020 and 029; FACTORY.md stack and test commands (`uv run pytest -q` and `npm --prefix frontend test`), reviewers starting both apps, and the review-ui/ux skip rule keyed on `frontend/` instead of `templates/`/`static/` (.claude/skills/factory/SKILL.md, .claude/agents/review-ui.md, review-ux.md).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/docs/019-docs-new-stack",
+      "worktree": ".claude/worktrees/019-docs-new-stack",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/20",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T12:00:11Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T12:07:29Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T12:18:20Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T12:21:20Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T12:23:58Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-18T12:42:55Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "037-cli-package",
+      "title": "CLI package: split cli.py into cli/ modules",
+      "description": "cli.py becomes `cli/`: `main.py` (argparse and the `fctl` entry point), `client.py` (HTTP with `X-Requested-By`), `git.py` (main checkout, default branch, the \u00a77.4 temp-index capture), `output.py` (summaries, errors to stderr, exit codes), and `commands/` with one module per group (projects, tasks, runs, submit, review, agent); still stdlib only, which the architecture test checks for cli/. It touches no server code, so it can run alongside 034\u2013036.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/refactor/037-cli-package",
+      "worktree": ".claude/worktrees/037-cli-package",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/21",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T12:06:57Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T12:12:37Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T12:24:49Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T12:28:09Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T12:29:27Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T12:43:54Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "034-backend-layout",
+      "title": "Layered backend: server, domain, adapters, projects",
+      "description": "034-backend-layout: new docs/MVP.md \u00a74.7 Code layout with the tree and rules below; FACTORY.md conventions and the review-code checks point at \u00a74.7 (.claude/agents/review-code.md and the review-code factory template, \u00a77.3). Tree under `src/claude_factories/`: `server/` (`create_app`, lifespan, the \u00a74.5 middleware, domain error \u2192 HTTP mapping that keeps the `{\"detail\": \u2026}` shape, `deps.py` providers), `controllers/` (one `APIRouter` per resource, plus `pages/` for the Jinja routes until 026), `handlers/` (use cases as plain functions, one module per resource), `dto/` (pydantic request and response models per resource), `repositories/` (all SQL, one module per table group), `adapters/` (`git.py` and `claude.py`, each a `Protocol` plus its subprocess implementation with argument lists), `domain/` (Status, Stage, and Reviewer enums, the \u00a75.2 stage \u2192 status map, `NotFound` / `Conflict` / `TooLarge` errors), `lib/` (pure parsers and renderers: patch split, diff rows, run log, markdown, slug), `db/` (connection, `schema.sql`), `config.py` (env and limits), `cli/`. Rules: controllers \u2192 handlers \u2192 repositories and adapters; domain/ and lib/ import none of them; only server/ and controllers/ import fastapi, so handlers raise domain errors; handlers get repositories and adapters through `Depends`, so tests can swap in fakes; one handler call is one transaction. This job builds server/, config.py, domain/, db/, adapters/, and the deps, and moves workspaces, projects, and Create factory into the layers. app.py keeps the routes not moved yet, as a router that server/ includes. A pytest reads every module's imports with `ast` and fails on a wrong direction, on fastapi outside server/ and controllers/, or on SQL outside repositories/ and db/, with app.py exempt until 036.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/refactor/034-backend-layout",
+      "worktree": ".claude/worktrees/034-backend-layout",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/22",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T13:35:08Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T13:45:30Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T14:08:48Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T14:12:16Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T14:15:27Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-18T14:17:24Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "035-backend-tasks-reviews",
+      "title": "Layered backend: tasks, rounds, reviews",
+      "description": "into the \u00a74.7 layers: tasks (list, create, get, patch, moves, events, stage \u2192 status), rounds (submit, the patch split into lib/, round diff, the 5 MB limit), verdicts, comments, decisions, approve, request changes, and the context markdown; response models in dto/ for each.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/refactor/035-backend-tasks-reviews",
+      "worktree": ".claude/worktrees/035-backend-tasks-reviews",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/23",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T14:19:51Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T14:29:06Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T14:45:37Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T14:50:28Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T14:57:26Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T15:01:57Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T15:08:59Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T15:13:55Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "036-backend-runs-pages",
+      "title": "Layered backend: runs, pages, drop app.py",
+      "description": "runs into the \u00a74.7 layers through the claude and git adapters (worktree, env stripping, auth check, spawn, finish, stop, startup cleanup, run log parsing into lib/); the Jinja page routes and the code page into `controllers/pages/`, with each page's data built by a handler, so 020's `/api/pages/*` only adds JSON controllers; app.py deleted and `fctl serve` pointing at `server`; the architecture test drops its app.py exemption.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/refactor/036-backend-runs-pages",
+      "worktree": ".claude/worktrees/036-backend-runs-pages",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/24",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T15:19:32Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T15:28:45Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T15:49:17Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T15:55:58Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T15:57:46Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T16:03:29Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "020-pages-api",
+      "title": "Page view-model JSON API for the SPA",
+      "description": "one JSON view-model per page, as controllers and dto/ models over the page handlers from 036: `GET /api/auth` (auth method, plan, runs enabled, from `claude auth status`), `GET /api/pages/dashboard`, `/api/pages/workspaces/{id}`, `/api/pages/projects/{id}` (board cards with stage, chips per round, +/\u2212, waiting, escalated, stalled), `/api/pages/tasks/{id}` (with the active run and takeover command), `/api/pages/tasks/{id}/review?round=` (timeline; files with diff rows carrying side, old/new line, kind, text, and the `path:side:line` anchor; inline comments), `/api/pages/projects/{id}/code?path=` (tree, README or file, branch); markdown fields arrive pre-rendered as `*_html` by the existing markdown-it-py with raw HTML off, so the SPA needs no markdown library (\u00a74.5); JSON twins of the HTML-only form actions: `POST /api/workspaces` and `PATCH /api/projects/{id}` `workspace_id`; JSON 404 for unknown ids; pytest per endpoint.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/020-pages-api",
+      "worktree": ".claude/worktrees/020-pages-api",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/25",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T16:09:49Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T16:15:45Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T16:47:14Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T16:56:21Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T16:58:09Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T17:03:56Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "021-frontend-setup",
+      "title": "Vite + React frontend: setup, dashboard, workspace",
+      "description": "`frontend/` with Vite, React, Tailwind v4, react-router; `npm run dev` with the Vite proxy `/api` \u2192 `FCTL_API_URL` (default `http://127.0.0.1:4545`); `frontend/server.js` on `node:http`, no extra deps, for production: serves `dist/` with SPA fallback and path containment, binds 127.0.0.1 (`HOST`/`PORT` env), applies the \u00a74.5 Host check, and proxies `/api/*` to `FCTL_API_URL` with `Host: 127.0.0.1`; `frontend/src/` laid out as `app/` (router, layout), `pages/` (one folder per page), `components/` (shared UI such as chips, empty states, and the markdown HTML block), `api/` (`client.js`, which adds `X-Requested-By: fctl` to every mutating request and shows `detail` errors, plus one module per resource), and `hooks/` (`usePoll(fn, 3000)`), with each test next to the file it covers; layout with nav and the `Claude: Pro \u2713` / red `API key \u2014 runs disabled` badge from `/api/auth` (\u00a78), light/dark from `prefers-color-scheme`, not-found and error states; Dashboard `/` and Workspace `/workspaces/:id` with `+ Workspace`, ported from index.html and workspace.html (\u00a78 items 1\u20132); vitest + @testing-library/react + jsdom as `npm test`; `node_modules/` and `dist/` in .gitignore.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/021-frontend-setup",
+      "worktree": ".claude/worktrees/021-frontend-setup",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/26",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T17:06:36Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T17:12:35Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T17:26:44Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T17:31:32Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T17:33:32Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T17:53:50Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "022-frontend-board",
+      "title": "React project board page",
+      "description": "project board `/projects/:id` from `/api/pages/projects/{id}` (\u00a78 item 3, \u00a78.1): four columns with counts; cards with stage, chips per round, +/\u2212, \"waiting on you\", red escalated bar, and \"stalled \u00b7 <stage>\" with Retry; native HTML5 drag and drop between columns and to reorder Backlog (PATCH, a 409 shown inline); `+ New task` with title and markdown description (\u00a73.3); Code link, factory state or Create factory with the written and skipped lists and commit hint (\u00a73.2); Run next; move to another workspace; poll every 3 s; empty states. Ports project.html and factory_result.html.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/022-frontend-board",
+      "worktree": ".claude/worktrees/022-frontend-board",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/28",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T18:02:50Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T18:08:33Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T18:19:49Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T18:28:22Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T18:29:31Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T18:32:33Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "027-docker",
+      "title": "Docker images and compose for backend and frontend",
+      "description": "`Dockerfile` for the backend (python:3.12-slim, uv, git) running `fctl serve --host 0.0.0.0`, with a new `--host` flag whose default stays 127.0.0.1; `frontend/Dockerfile`, multi-stage `npm ci && npm run build` \u2192 `node server.js`; `compose.yaml` with `backend` and `frontend` services, `FCTL_HOME` on a named volume, `FCTL_API_URL=http://backend:4545`, healthchecks, and no published ports; `compose.override.example.yaml` publishing `127.0.0.1:3000:3000` and `127.0.0.1:4545:4545` (host `fctl` keeps using 4545), mounting my project roots at the same absolute path because projects store host paths from `fctl connect`, and running as my uid:gid so worktree files stay mine and git doesn't refuse \"dubious ownership\"; `compose.override.yaml` in .gitignore; `.dockerignore`; README quick start `cp compose.override.example.yaml compose.override.yaml && docker compose up --build`.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/027-docker",
+      "worktree": ".claude/worktrees/027-docker",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/27",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T18:05:32Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T18:10:55Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T18:18:36Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T18:20:55Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T18:22:11Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T18:25:06Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "028-docker-runs",
+      "title": "Agent runs inside the backend container",
+      "description": "runs work inside the backend container: `claude` CLI and Node in the image, `fctl` on PATH for agents with `FCTL_URL=http://127.0.0.1:4545`; a one-time `docker compose exec backend claude login` with the container's `~/.claude` on a named volume (macOS keeps my login in the Keychain, which the container can't read), and `claude auth status` reporting claude.ai there; env stripping and the auth check unchanged (\u00a74.3); worktree add, spawn, Stop, and run log against a mounted repo (\u00a74.4); `uv` and `node` in the image for project test commands, anything else through a custom image in compose.override.yaml; when `FCTL_IN_DOCKER=1` the takeover command is `docker compose exec -w <worktree> backend claude --resume <session-id>`, since the session lives in the container; the fake-`claude` tests still pass outside Docker.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/028-docker-runs",
+      "worktree": ".claude/worktrees/028-docker-runs",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/29",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T18:27:19Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T18:36:36Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T18:51:40Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T18:55:49Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T18:58:12Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-18T19:06:51Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "023-frontend-task",
+      "title": "React task page with run controls and log tail",
+      "description": "task page `/tasks/:id` from `/api/pages/tasks/{id}` (\u00a78 item 4): header with title, status \u00b7 stage, branch, Run / Stop / Retry, and run status; rendered spec; rounds with collapsible build notes, 4 chips that open the verdict, and +/\u2212; approver decision; status history; run log tail from `GET /api/runs/{id}/log?after=` every 3 s, collapsed; takeover command; link to Review. Ports task.html.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/023-frontend-task",
+      "worktree": ".claude/worktrees/023-frontend-task",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/30",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T18:33:53Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T18:39:44Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T18:50:57Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T18:57:53Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T18:59:44Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T19:06:58Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "033-project-context",
+      "title": "Project context for agents",
+      "description": "`projects.context_md` with `GET` and `PUT /api/projects/{id}/context`; `fctl context` prints it and `fctl context set` reads stdin; `GET /api/tasks/{id}/context`, and with it `fctl show <id>`, starts with a `## Project context` section, so every agent gets it in the call it already makes, with no new step; the agent templates (\u00a77.3) say the stack and conventions come from there, so agents stop re-reading docs for them; a project page editor with a backend-rendered preview and its size, capped at 16 KB (413 above) because every agent pays for it on every task.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/033-project-context",
+      "worktree": ".claude/worktrees/033-project-context",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/31",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T18:36:31Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T18:44:06Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T18:57:50Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T19:04:11Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T19:10:55Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T19:21:25Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T19:22:54Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T19:36:38Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "024-frontend-review",
+      "title": "React review page with diff and actions",
+      "description": "review page `/tasks/:id/review` from `/api/pages/tasks/{id}/review` (\u00a78 item 5, \u00a78.2, \u00a78.3): header, round selector defaulting to latest and kept in `?round=`; Conversation tab with description, spec summary, rounds with verdict chips and expandable bodies, approver decision, timeline, comment box, and \"no agent review\" for standalone tasks; Files changed tab with file tree and +/\u2212, diff table with one row per line and deep-linkable `path:side:line` anchors, highlight.js from npm, a click on a line number opens the inline comment form, agent and my comments in place; Approve and Request changes enabled only in review, summary required, commit commands shown after Approve (\u00a73.6, \u00a73.7). Ports review.html.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/024-frontend-review",
+      "worktree": ".claude/worktrees/024-frontend-review",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/32",
+      "reviews": {
+        "security": "PASS",
+        "ux": "CHANGES",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T21:07:59Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T21:15:05Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T21:29:14Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T21:34:07Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T21:38:04Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T21:42:00Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T21:43:13Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-18T21:46:27Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "025-frontend-code",
+      "title": "React code page with file tree and viewer",
+      "description": "code page `/projects/:id/code` from `/api/pages/projects/{id}/code?path=` (\u00a78 item 6): `git ls-files` tree, README landing, highlighted file viewer with line numbers, \"not shown\" for binary files and files over 1 MB, current branch in the header, `?path=` deep links, and the backend's path-containment refusal (\u00a74.5) shown as not found. Ports code.html.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/025-frontend-code",
+      "worktree": ".claude/worktrees/025-frontend-code",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/33",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T21:47:14Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T21:51:14Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T21:57:48Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T22:00:54Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T22:02:02Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-18T22:59:36Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "026-drop-jinja-pages",
+      "title": "Drop Jinja pages, htmx, and vendored assets",
+      "description": "after 021\u2013025, delete `templates/`, `static/`, `controllers/pages/` with the \u00a76.4 HTML routes and HTML-form POSTs, `Jinja2Templates`, and their tests, keeping page coverage in the `/api/pages/*` and frontend tests; `jinja2` stays as a dependency because Create factory renders its templates with it; htmx and the vendored highlight.js go.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/refactor/026-drop-jinja-pages",
+      "worktree": ".claude/worktrees/026-drop-jinja-pages",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/34",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T23:01:45Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T23:08:22Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-18T23:21:46Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-18T23:24:42Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-18T23:26:36Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-18T23:32:17Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "029-fctl-docs",
+      "title": "fctl reference page at /docs/fctl",
+      "description": "`fctl` reference page `/docs/fctl` (docs/ui.md \u00a78 item 7), linked from the header; markdown source shipped in the package as `src/claude_factories/fctl.md` and served by `GET /api/docs/fctl` rendered with the existing markdown-it-py (raw HTML off) plus its heading list for a table of contents; one anchored section per command in \u00a77.2 and `fctl --help`: synopsis, arguments and flags, stdin, output, exit codes and error messages, who calls it (me, a skill, or which agent), and a runnable example with heredocs; plus install (`uv tool install`, `fctl setup`), `FCTL_URL` and `FCTL_HOME`, and using `fctl` against the Docker setup; a pytest that fails when a cli.py subcommand has no section; docs/claude-code.md \u00a77.2 links to the page. Needs 021 only.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/029-fctl-docs",
+      "worktree": ".claude/worktrees/029-fctl-docs",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/35",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-18T23:33:10Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-18T23:40:49Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-19T09:41:48Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-19T09:47:15Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-19T09:50:21Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-19T09:53:03Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-19T09:54:35Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-19T10:18:45Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "038-mock-data",
+      "title": "fctl seed: demo data for every page and state",
+      "description": "`fctl seed` fills an empty `FCTL_HOME` with demo data so every page and state in docs/ui.md \u00a78 shows up without running an agent. It refuses (exit 1, `FCTL_HOME has data; seed an empty one`) when the DB has any workspace, so demo rows never mix with real ones: `FCTL_HOME=~/.claude-factories-demo fctl seed`, then `fctl serve` with the same `FCTL_HOME`. The seed lives in the \u00a74.7 layers (rows through repositories, no SQL elsewhere), imported lazily by the CLI the way `fctl serve` is, with timestamps spread over the last 30 days. Demo git repos under `FCTL_HOME/demo/` (README, nested files, a few commits) back the code page and factory state: one project per state none / uncommitted / ready (\u00a73.2) across two workspaces, one with `context_md`. Tasks cover every status and stage (\u00a75.2): backlog with markdown descriptions; in_progress at each stage, one stalled; human_review after 2 rounds (CHANGES then all PASS, build notes, approver APPROVE); escalated with ESCALATE; rework after my CHANGES_REQUESTED; a standalone submit with \"no agent review\" (\u00a77.4); done this week and earlier, so the dashboard tiles and rounds-per-task stats fill (\u00a78 item 1). Round diffs are real `git diff` output from the demo repos through the 005 splitter, covering added, modified, deleted, renamed, and binary files; agent and my inline comments on both sides, plus conversation comments. Runs succeeded, failed with an error, and stopped, each with a stream-json log in `runs/`, so the log tail and takeover command show; no `running` run, since the startup cleanup marks it failed (\u00a74.4). README \"Demo data\" section for host and Docker; a pytest seeds a temp `FCTL_HOME`, checks each `/api/pages/*` view shows the seeded states, and checks that a second seed refuses. After 029, so fctl.md gets a `seed` section.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/038-mock-data",
+      "worktree": ".claude/worktrees/038-mock-data",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/37",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-19T10:19:52Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-19T10:30:45Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-19T10:54:06Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-19T10:58:55Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-19T11:02:26Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-19T11:16:54Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "030-agent-transcripts",
+      "title": "Copy and show agent transcripts per run",
+      "description": "on run exit, Stop, and the startup cleanup, copy the run's Claude Code transcripts from `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude`), in the folder Claude Code names after the worktree path: the main `<session_id>.jsonl`, its `subagents/agent-*.jsonl` with the agent type from `*.meta.json`, and teammate sessions such as the named builder. They go into `FCTL_HOME/transcripts/<run-id>/`, because Claude Code prunes old transcripts and the worktree gets removed. New table `transcripts` with run, task, agent type, name, the round from the `Job <id>, round <n>.` prompt when there is one, path, model, turns, and tokens (input, cache read, output, summed from `usage` deduped by message id), started and ended; `GET /api/tasks/{id}/transcripts`, `GET /api/transcripts/{id}` as parsed messages (text, tool calls with input, tool results cut at 4 KB with a \"show all\", thinking collapsed), and `/raw` to download; an Agents section per round on the task page (model, turns, tokens, duration) linking to a transcript page; transcript text escaped, markdown through the backend renderer with raw HTML off (\u00a74.5); tests use a temp `CLAUDE_CONFIG_DIR` with fixture transcripts, never the real `~/.claude`.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/030-agent-transcripts",
+      "worktree": ".claude/worktrees/030-agent-transcripts",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/36",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-19T10:22:12Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-19T10:32:34Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-19T10:51:20Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-19T10:56:21Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-19T10:58:36Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-19T11:18:00Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "031-import-factory-jobs",
+      "title": "fctl import-factory: factory jobs into the app",
+      "description": "`fctl import-factory [--job ID]` in this repo calls `POST /api/projects/{id}/import-factory`, and the app reads `<project path>/factory/` with path containment. Rerunning updates the rows instead of duplicating them, keyed on a new unique `tasks.import_key` (`factory:014-run-ui`). Mapping: board.json gives title, description, status, stage, branch, done_at, and the PR URL (kept in the description), and history becomes `events` with actor orchestrator; spec.md \u2192 `spec_md`; round-N/build.md \u2192 `rounds.build_md`, with diff.patch split into `round_files` by the 005 splitter and `base_sha` taken from the PR merge commit's first parent, else `unknown`; review-<r>.md \u2192 `verdicts` (first line verdict, rest body); decision.md \u2192 the approver decision on the last round; feedback-N.md \u2192 my CHANGES_REQUESTED on round N\u22121. Bootstrap transcripts from this repo's Claude Code project folder are stored the 030 way: subagents whose first prompt is `Job <id>, round <n>.`, teammate builders, and each /factory session that ran the job. `factory/jobs/` and `factory/board.json` go into .gitignore. `/factory approve` gets a last step `fctl import-factory --job <id>` that only warns if the app is down (.claude/skills/factory/SKILL.md).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/031-import-factory-jobs",
+      "worktree": ".claude/worktrees/031-import-factory-jobs",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/38",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-19T11:18:53Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-19T11:28:07Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-19T11:45:21Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-19T11:49:55Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-19T11:52:53Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-19T12:01:25Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "032-task-bundles",
+      "title": "Task bundle export and import",
+      "description": "`GET /api/tasks/{id}/export` returns a zip in the 031 job-folder layout (spec.md, round-N/{build.md, diff.patch, review-*.md}, feedback-N.md, decision.md) plus `task.json` (title, description, status, stage, events, comments, import_key, no local paths). With `?transcripts=1` it adds the 030 transcripts, off by default because they can hold paths, env, and secrets. `POST /api/projects/{id}/import` takes the zip as the raw request body (no python-multipart) and reuses the 031 reader, keyed on import_key. It returns 413 over 50 MB, refuses entries with `..`, absolute paths, symlinks, or unknown names, and caps the total unpacked size (\u00a74.5). Imported done and review tasks keep their status; anything else lands in Backlog with its history. `fctl export <id> [-o FILE] [--transcripts]` and `fctl import FILE` work against the current repo's project; Export goes on the task page and Import on the board.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/032-task-bundles",
+      "worktree": ".claude/worktrees/032-task-bundles",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/39",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-19T12:05:44Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-19T12:17:14Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-19T12:41:21Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-19T12:47:00Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-19T12:50:38Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-19T12:58:01Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "039-user-settings",
+      "title": "User settings page with Claude login",
+      "description": "user settings page `/settings`, where I can also connect Claude: shows `claude auth status` (auth method, plan, account) and starts or redoes the claude.ai login from the browser, so I don't have to run `claude login` inside the container (\u00a74.6); subscription auth only, no API key field, since runs refuse anything but claude.ai auth (\u00a74.3); the header's `Claude: Pro \u2713` / `API key \u2014 runs disabled` badge links to it (\u00a78). Adds its own rows to docs/ (\u00a76 endpoints, \u00a78 page).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/039-user-settings",
+      "worktree": ".claude/worktrees/039-user-settings",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/40",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T07:09:37Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T07:19:07Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T07:35:28Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T07:38:57Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T07:40:22Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T07:44:15Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
     }
   ]
 }

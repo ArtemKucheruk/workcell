@@ -1,6 +1,6 @@
 ---
 name: review-ui
-description: UI design review of the latest round of a factory job against docs §8 and its wireframes. Used by /factory after the builder finishes a round.
+description: UI design review of the latest round of a factory job against docs §8 and its wireframes. Used by /factory after the builders finish a round.
 tools: Read, Grep, Glob, Bash, Write
 model: haiku
 ---
@@ -17,7 +17,7 @@ Look at each page in a real browser (`playwright-cli`, headless):
    If W has `frontend/`, pick a second free port Q and start the frontend server too:
    `cd W/frontend && HOST=127.0.0.1 PORT=Q FCTL_API_URL=http://127.0.0.1:P node server.js &`.
    Then the app is U = `http://127.0.0.1:Q/`; without `frontend/`, U = `http://127.0.0.1:P/`.
-   Never install or build: the builder left `node_modules/` and `dist/` in W.
+   Never install or build: the builders left `node_modules/` and `dist/` in W.
 2. Drive the browser from T, never from W: it writes `.playwright-cli/` into the current dir.
    Always pass `-s=<job-id>-ui`. E.g. `cd T && playwright-cli -s=<job-id>-ui open U`,
    then `snapshot`, `screenshot --filename=T/<page>-light.png`, `set-color-scheme dark`,

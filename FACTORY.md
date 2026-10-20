@@ -55,11 +55,15 @@ writes its job's entry in factory/board.json. To run a second job alongside, I r
                    │   spec-writer    │
                    │       opus       │
                    └─────────┬────────┘
-                             ▼
-                   ┌──────────────────┐
-                   │     builder      │◄────────────────────┐
-                   │       opus       │                     │
-                   └─────────┬────────┘                     │
+                             ▼ the spec's builds pick one or both
+    ┌─────────────────────────────────────────────────┐
+    │  ┌──────────────────┐     ┌──────────────────┐  │
+    │  │ builder-backend  │     │ builder-frontend │  │◄────┐
+    │  │       opus       │     │ opus + frontend- │  │     │
+    │  │ outside frontend/│     │   design skill   │  │     │
+    │  └──────────────────┘     └──────────────────┘  │     │
+    │    one or both, side by side in one worktree    │     │
+    └────────────────────────┬────────────────────────┘     │
         ┌─────────────┬──────┴──────┬─────────────┐         │
         ▼             ▼             ▼             ▼         │
   ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐   │
@@ -70,7 +74,7 @@ writes its job's entry in factory/board.json. To run a second job alongside, I r
                              ▼                              │
                    ┌──────────────────┐   any CHANGES:      │
                    │   WAIT FOR ALL   ├─────────────────────┤
-                   │   4 reviews in   │   resume builder    │
+                   │   4 reviews in   │   resume builders   │
                    └─────────┬────────┘   (max 2 rounds)    │
                              ▼ all PASS / rounds used up    │
                    ┌──────────────────┐                     │
@@ -124,7 +128,9 @@ factory/
   jobs/004-submit/                 # one folder per job
     spec.md
     round-1/                       # one folder per review round
-      build.md                     # builder: what changed, criteria → tests, test output
+      build-backend.md             # builder-backend: what changed, criteria → tests, test output
+      build-frontend.md            # builder-frontend: the same, plus its design choices
+      build.md                     # orchestrator: the build-*.md files joined
       diff.patch                   # orchestrator: worktree snapshot vs its base on main
       review-security.md           # one file per reviewer
       review-ux.md
@@ -138,7 +144,8 @@ factory/
 | agent | model | tools | reads | writes |
 |---|---|---|---|---|
 | spec-writer | opus | Read, Grep, Glob, Write | the feature or backlog line, docs/, code on main (the job's fresh worktree) | `spec.md` |
-| builder | opus | Read, Edit, Write, Grep, Glob, Bash | `spec.md`, the last round's reviews, `feedback-N.md` | code in its worktree, `round-N/build.md` |
+| builder-backend | opus | Read, Edit, Write, Grep, Glob, Bash | `spec.md` (Backend build, API contract), the last round's reviews, `feedback-N.md` | code outside `frontend/` in its worktree, `round-N/build-backend.md` |
+| builder-frontend | opus, frontend-design skill | same | `spec.md` (Frontend build, API contract), docs §8, the last round's reviews, `feedback-N.md` | `frontend/` in its worktree, `round-N/build-frontend.md` |
 | review-security | opus | Read, Grep, Glob, Bash, Write | spec, build.md, diff.patch, worktree | `round-N/review-security.md` |
 | review-ux | haiku | same | same | `round-N/review-ux.md` |
 | review-ui | haiku | same | same | `round-N/review-ui.md` |
@@ -146,15 +153,29 @@ factory/
 | approver | opus | Read, Grep, Glob, Write | the whole job folder | `decision.md` |
 
 What each one does:
-- **spec-writer** writes the goal, the doc sections the job implements, acceptance criteria
-  as a checklist (each one testable), the files it expects to touch, what's out of scope,
-  and open questions. Anything the docs don't decide goes under open questions, never
-  guessed silently.
-- **builder** implements the spec in the worktree, runs both test commands there, and maps
-  each acceptance criterion to its test in build.md. When the worktree has
-  `frontend/package.json`, it installs and builds once per round for the reviewers:
-  `npm --prefix frontend ci` if `frontend/node_modules` is missing, the frontend tests, then
-  `npm --prefix frontend run build`, leaving `node_modules/` and `dist/` in place.
+- **spec-writer** writes the goal, the doc sections the job implements, and the work
+  split into a Backend build (everything outside `frontend/`) and a Frontend build
+  (`frontend/`), each with its acceptance criteria (each one testable) and files, what's
+  out of scope, and open questions. It leaves out a build the job doesn't need, and when
+  the job has both, it writes the API contract between them. Anything the docs don't
+  decide goes under open questions, never guessed silently.
+- **the orchestrator picks the builders**: in round 1, one per build section in the spec;
+  in later rounds, by where the findings are (`frontend/` or a page → frontend, anything
+  else → backend, unsure → both). Picked builders run side by side in the job's one
+  worktree, since they own disjoint files. When they're done, it joins their
+  `build-<side>.md` files into `build.md`, which the reviewers, the approver, and
+  `fctl import-factory` read.
+- **builder-backend** implements the Backend build, runs `uv run pytest -q`, and maps each
+  criterion to its test in build-backend.md. Endpoints follow the API contract exactly. In
+  a job with no Frontend build, it still builds the frontend once for the reviewers
+  (`npm --prefix frontend ci` if needed, `npm --prefix frontend run build`) without
+  editing it.
+- **builder-frontend** implements the Frontend build with the frontend-design skill
+  preloaded (plugin `frontend-design@claude-plugins-official`): the skill decides what the
+  spec, docs §8 and its wireframes, and the theme leave open; where they decide, they win.
+  It tests against the API contract with mocked fetch, runs `npm --prefix frontend ci` if
+  `frontend/node_modules` is missing, the frontend tests, then `npm --prefix frontend run
+  build`, leaving `node_modules/` and `dist/` in place for the reviewers.
 - **security** checks docs §4.5 (127.0.0.1 bind, Host and `X-Requested-By` checks, raw
   HTML off in markdown, path containment, the 5 MB limit). Subprocesses must take argument
   lists, never shell strings. It also checks env stripping and the subscription-only auth
@@ -169,7 +190,7 @@ What each one does:
   has `frontend/`, they also start the frontend server on a second free port, pointed at
   that backend (`HOST=127.0.0.1 PORT=<port> FCTL_API_URL=http://127.0.0.1:<backend port>
   node server.js`), and drive the browser against the frontend. They never install or
-  build; the builder already did. They drive headless Chrome with `playwright-cli`
+  build; the builders already did. They drive headless Chrome with `playwright-cli`
   (`npm install -g @playwright/cli`), one `-s=<job-id>-<reviewer>` session each, from a temp
   dir so its output stays out of the worktree.
   If the diff touches nothing under `frontend/`, the orchestrator skips review-ui and writes
@@ -186,7 +207,7 @@ What each one does:
 .claude/agents/review-code.md  (Claude Code subagent syntax)
 ---
 name: review-code
-description: Code review of the latest round of a factory job. Use after the builder finishes a round.
+description: Code review of the latest round of a factory job. Use after the builders finish a round.
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---
@@ -217,8 +238,9 @@ factory/board.json
   `git worktree add --no-track -b factory/<type>/<job-id> .claude/worktrees/<job-id> origin/main`.
   `<type>` is feat, fix, ci, docs, refactor, test, or chore, picked from the job's
   description. The first time, it also adds `.claude/worktrees/` to `.git/info/exclude`.
-- The builder edits only its worktree, plus its own build.md, and runs every command
-  inside the worktree.
+- Builders edit only their own files in the job's worktree (builder-frontend `frontend/`,
+  builder-backend the rest), plus their own build-<side>.md, and run every command inside
+  the worktree.
 - Agents never run git writes. The orchestrator's are: fetch, `worktree add`, the job's
   commit + push + PR when it reaches review, and on approve the PR merge, `worktree remove`,
   and deleting the job branch. Nobody rebases, stashes, resets, force-pushes, or switches
@@ -237,14 +259,14 @@ factory/board.json
       GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' ':!*package-lock.json' > factory/jobs/<job-id>/round-<n>/diff.patch
       rm -rf $t
 - WAIT FOR ALL: a review round is done only when every reviewer's file exists in the
-  round folder. Never resume the builder mid-round.
+  round folder. Never resume a builder mid-round.
 - At most 2 agent review rounds per run. If round 2 still has CHANGES, the approver runs
   anyway and must ESCALATE.
-- Spawn the builder with a name (builder-<job-id>), and resume that same builder with
-  SendMessage for each new round, pointing it at the round folder. If it's gone (a new
-  session, or a rework after I quit), spawn a fresh builder-<job-id>. The files hold
-  everything it needs. On approve, once the PR is merged, the orchestrator stops
-  builder-<job-id>.
+- Spawn each builder with a name (builder-backend-<job-id>, builder-frontend-<job-id>), and
+  resume that same builder with SendMessage when a later round picks its side, pointing it
+  at the round folder. If it's gone (a new session, or a rework after I quit), or the side
+  is new to the job, spawn a fresh one. The files hold everything it needs. On approve,
+  once the PR is merged, the orchestrator stops both.
 - Orchestrators are the only writers of board.json. Each changes only its own job's entry,
   under a file lock, and appends every status or stage change to the job's history.
 
@@ -255,7 +277,7 @@ factory/board.json
 /factory approve <job-id>        merge the job's PR, mark it done, tick it in backlog.md, stop
                                  its builder, and remove its worktree and branch (below)
 /factory rework <job-id> <note>  save my note as feedback-<n>.md, set stage rework, and
-                                 resume the builder for round <n>; the new commit lands on
+                                 resume the builders it needs for round <n>; the new commit lands on
                                  the same PR
 
 When a job reaches review, the orchestrator runs:
@@ -266,7 +288,7 @@ When a job reaches review, the orchestrator runs:
 
 What `/factory approve` runs:
     gh pr merge factory/<type>/<job-id> --merge
-    TaskStop builder-<job-id>
+    TaskStop builder-backend-<job-id> builder-frontend-<job-id>
     git worktree remove .claude/worktrees/<job-id>
     git branch -D factory/<type>/<job-id> && git push origin --delete factory/<type>/<job-id>
     git fetch origin --prune

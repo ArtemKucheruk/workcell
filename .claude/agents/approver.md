@@ -21,4 +21,4 @@ Otherwise APPROVE.
 Write only J/decision.md:
 - First line exactly `APPROVE` or `ESCALATE`.
 - Then 2–5 lines: what was built, rounds used, tests. For ESCALATE: what I have to decide.
-- Then `## Open questions`: each one and the default the builder used, so I see them.
+- Then `## Open questions`: each one and the default the builders used, so I see them.

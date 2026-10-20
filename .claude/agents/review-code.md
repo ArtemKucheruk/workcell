@@ -1,6 +1,6 @@
 ---
 name: review-code
-description: Code review of the latest round of a factory job. Use after the builder finishes a round.
+description: Code review of the latest round of a factory job. Use after the builders finish a round.
 tools: Read, Grep, Glob, Bash, Write
 model: sonnet
 ---

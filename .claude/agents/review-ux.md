@@ -1,6 +1,6 @@
 ---
 name: review-ux
-description: UX review of the latest round of a factory job, covering the docs §3 flows and fctl ergonomics. Used by /factory after the builder finishes a round.
+description: UX review of the latest round of a factory job, covering the docs §3 flows and fctl ergonomics. Used by /factory after the builders finish a round.
 tools: Read, Grep, Glob, Bash, Write
 model: haiku
 ---
@@ -19,7 +19,7 @@ Walk the web parts of the flows in a real browser (`playwright-cli`, headless):
    If W has `frontend/`, pick a second free port Q and start the frontend server too:
    `cd W/frontend && HOST=127.0.0.1 PORT=Q FCTL_API_URL=http://127.0.0.1:P node server.js &`.
    Then the app is U = `http://127.0.0.1:Q/`; without `frontend/`, U = `http://127.0.0.1:P/`.
-   Never install or build: the builder left `node_modules/` and `dist/` in W.
+   Never install or build: the builders left `node_modules/` and `dist/` in W.
 2. Drive the browser from T, never from W: it writes `.playwright-cli/` into the current dir.
    Always pass `-s=<job-id>-ux`. E.g. `cd T && playwright-cli -s=<job-id>-ux open U`,
    then `snapshot`, `click <ref>`, `fill <ref> <text>`, `screenshot --filename=T/<step>.png`,
