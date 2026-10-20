@@ -4,11 +4,11 @@ import { Link, useLocation, useParams, useSearchParams } from 'react-router'
 import { reviewPage } from '../../api/pages.js'
 import { addComment, approveTask, requestChanges } from '../../api/reviews.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
+import { TaskState } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
-import { StatusLine } from '../../components/StatusLine.jsx'
 import { button, field, muted, tab } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -419,7 +419,7 @@ export function ReviewPage() {
         </nav>
         <h1 className="col-start-1 row-start-2 wrap-anywhere">{heading}</h1>
         <p className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-1">
-          <StatusLine task={task} />
+          <TaskState task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           {rounds.length > 0 && (
             <label>

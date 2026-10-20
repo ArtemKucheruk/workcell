@@ -5,11 +5,11 @@ import { runLog, runTask, stopRun } from '../../api/runs.js'
 import { exportUrl } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
+import { TaskState } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
-import { StatusLine } from '../../components/StatusLine.jsx'
 import { muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -219,7 +219,7 @@ export function TaskPage() {
         </nav>
         <h1 className="wrap-anywhere">{heading}</h1>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <StatusLine task={task} />
+          <TaskState task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           <Link to={`/tasks/${task.id}/review`}>Review</Link>
           <a href={exportUrl(task.id, withTranscripts)} download>

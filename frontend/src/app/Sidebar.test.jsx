@@ -187,14 +187,18 @@ test('FE11, 042 FE34: each project is a disclosure button for Board, Code, Revie
   expect(within(list).queryAllByRole('link')).toEqual([])
 })
 
-test("042 FE35: Reviews shows the project's review count above 0, and no number at 0", async () => {
+test("042 FE35, 043 FE15: Reviews shows the project's review count above 0 as a warning pill, and no number at 0", async () => {
   const counted = { id: 2, name: 'personal', projects: [{ ...project(3, 'api-server'), review: 2 }, project(7, 'web')] }
   await open('/', body(null, [counted]))
   fireEvent.click(projectButton('api-server'))
   fireEvent.click(projectButton('web'))
-  expect(linksOf('api-server').getByRole('link', { name: 'Reviews 2' }).getAttribute('href')).toBe('/projects/3/reviews')
+  const reviews = linksOf('api-server').getByRole('link', { name: 'Reviews 2' })
+  expect(reviews.getAttribute('href')).toBe('/projects/3/reviews')
+  const pill = within(reviews).getByText('2')
+  expect(pill.className.split(/\s+/)).toEqual(expect.arrayContaining(['rounded-full', 'bg-warning', 'text-surface']))
   const zero = linksOf('web').getByRole('link', { name: 'Reviews' })
   expect(zero.textContent).toBe('Reviews')
+  expect(zero.querySelector('span')).toBeNull()
   expect(zero.getAttribute('href')).toBe('/projects/7/reviews')
 })
 

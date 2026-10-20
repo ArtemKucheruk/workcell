@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
-import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PAGE = '/api/pages/tasks/12/review'
 const COMMENTS = '/api/tasks/12/comments'
@@ -106,16 +106,24 @@ test('AC1: /tasks/12/review fetches the view-model with no query and shows the t
   await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Review · Claude Factories'))
 })
 
-test('AC2: the status line, the branch in a <code>, and the selected round\'s files and +/−', async () => {
+const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)
+
+test('AC2, 043 FE12: the status pill and stage, the branch in a <code>, and the selected round\'s files and +/−', async () => {
   const cases = [
-    ['review', 'human_review', 'Review · waiting on you'],
-    ['review', 'escalated', 'Review · ⚠ NEEDS YOU — escalated'],
-    ['in_progress', 'build', 'In progress · build'],
-    ['done', null, 'Done'],
+    ['review', 'human_review', 'Review', 'text-warning', ['waiting on you', 'bg-warning']],
+    ['review', 'escalated', 'Review', 'text-warning', ['escalated', 'bg-danger']],
+    ['in_progress', 'build', 'In progress', 'text-accent', ['build', 'text-muted']],
+    ['backlog', null, 'Backlog', 'text-muted', null],
+    ['done', null, 'Done', 'text-success', null],
   ]
-  for (const [status, stage, text] of cases) {
+  for (const [status, stage, label, tone, after] of cases) {
     const { unmount } = await open(reviewPage({ status, stage }))
-    expect(within(header()).getByText(fullText(text))).toBeTruthy()
+    const pill = within(header()).getByText(label, { selector: 'span' })
+    expect(pill.className).toMatch(cls(tone))
+    const state = [...pill.parentElement.children]
+    expect(state.map((el) => el.textContent)).toEqual(after ? [label, after[0]] : [label])
+    if (after) expect(state[1].className).toMatch(cls(after[1]))
+    expect(header().textContent).not.toContain('●')
     unmount()
   }
   const two = await open(reviewPage())
@@ -201,7 +209,7 @@ test('AC7: the description renders its HTML or says No description.; a non-blank
   }
 })
 
-test('AC8: rounds show in order with plain chips titled by verdict, and nothing on the page is a popover', async () => {
+test('AC8, 043 FE12: rounds show in order with plain colored chips titled by verdict, and nothing on the page is a popover', async () => {
   await open(reviewPage())
   expect(rows().map((li) => li.querySelector('p').textContent)).toEqual([
     `Round 1 initial sec ✗ ux ✓ ui ✓ code ✓ +118 ${M}9`,
@@ -210,6 +218,10 @@ test('AC8: rounds show in order with plain chips titled by verdict, and nothing 
   const chips = [...rows()[0].querySelectorAll('p [title]')]
   expect(chips.map((el) => el.tagName)).toEqual(['SPAN', 'SPAN', 'SPAN', 'SPAN'])
   expect(chips.map((el) => el.getAttribute('title'))).toEqual(['security: CHANGES', 'ux: PASS', 'ui: PASS', 'code: PASS'])
+  // 043 FE12: colored as in FE5
+  expect(chips.map((el) => ['text-success', 'text-danger'].find((c) => cls(c).test(el.className)))).toEqual([
+    'text-danger', 'text-success', 'text-success', 'text-success',
+  ])
   expect(document.querySelector('[popover], [popovertarget]')).toBeNull()
 })
 

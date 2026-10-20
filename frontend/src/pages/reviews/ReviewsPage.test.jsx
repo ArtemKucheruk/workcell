@@ -39,6 +39,7 @@ const tabs = () => screen.getByRole('navigation', { name: 'Reviews tabs' })
 const listed = () => [...document.querySelectorAll('main li')].map((li) => within(li).getAllByRole('link')[0].textContent)
 const row = (id) => screen.getByRole('link', { name: new RegExp(`^#${id} `) }).closest('li')
 const advance = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
+const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)
 
 test('FE8: the page fetches the board view-model on load and again 3000 ms after each load settles', async () => {
   vi.useFakeTimers()
@@ -114,6 +115,10 @@ test('FE12: a row links to the review, with branch, round, shared chips, and +/�
   expect([...li.querySelectorAll('[title]')].map((s) => [s.tagName, s.textContent, s.title])).toEqual([
     ['SPAN', 'sec ✓', 'security: PASS'], ['SPAN', 'ux ✓', 'ux: PASS'], ['SPAN', 'ui ·', 'ui: pending'], ['SPAN', 'code ✗', 'code: CHANGES'],
   ])
+  // 043 FE13: colored as in FE5
+  expect([...li.querySelectorAll('[title]')].map((s) => ['text-success', 'text-danger', 'text-muted'].find((c) => cls(c).test(s.className)))).toEqual([
+    'text-success', 'text-success', 'text-muted', 'text-danger',
+  ])
   expect(within(li).queryByRole('button')).toBeNull() // no `posted`: plain chips
   expect(within(li).getByText('+126 −9')).toBeTruthy()
 
@@ -124,16 +129,19 @@ test('FE12: a row links to the review, with branch, round, shared chips, and +/�
   expect(within(row(15)).getByText('round 1')).toBeTruthy()
 })
 
-test('FE13: escalated Open rows have the red badge and bar, waiting ones say so; null stage and Closed rows neither', async () => {
+test('FE13, 043 FE13: escalated Open rows have the escalated pill and red bar, waiting ones the waiting pill; null stage and Closed rows neither', async () => {
   const page = board({
     review: [escalated(11), waiting(12), card(13, 'review')],
     done: [card(9, 'done', { stage: 'escalated', escalated: true }), card(8, 'done', { stage: 'human_review', waiting: true })],
   })
   const { unmount } = await open(page)
-  const badge = within(row(11)).getByText('⚠ NEEDS YOU — escalated')
-  expect(badge.className).toMatch(/(^|\s)text-danger(\s|$)/)
+  const pill = within(row(11)).getByText('escalated')
+  expect(pill.className).toMatch(cls('bg-danger'))
+  expect(pill.className).toMatch(cls('text-surface'))
   expect(row(11).className).toMatch(/(^|\s)border-danger(\s|$)/)
-  expect(within(row(12)).getByText('waiting on you')).toBeTruthy()
+  expect(within(row(11)).queryByText('waiting on you')).toBeNull()
+  expect(within(row(12)).getByText('waiting on you').className).toMatch(cls('bg-warning'))
+  expect(within(row(12)).queryByText('escalated')).toBeNull()
   for (const id of [12, 13]) expect(row(id).className).not.toMatch(/(^|\s)border-danger(\s|$)/)
   expect(row(13).textContent).toBe('#13 Task 13')
   unmount()

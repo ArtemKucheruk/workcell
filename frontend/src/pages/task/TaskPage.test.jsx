@@ -97,19 +97,29 @@ test('AC1: /tasks/12 shows the title, the breadcrumb to the board, the Review li
   await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Claude Factories'))
 })
 
-test('AC2: the status line words each status and stage; only escalated is red', async () => {
+const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)
+
+test('AC2, 043 FE10: the header shows the status pill, then the stage as its pill or muted text; only escalated is red; no running badge', async () => {
   const cases = [
-    ['in_progress', 'build', 'In progress · build'],
-    ['review', 'human_review', 'Review · waiting on you'],
-    ['review', 'escalated', 'Review · ⚠ NEEDS YOU — escalated'],
-    ['backlog', null, 'Backlog'],
-    ['done', null, 'Done'],
+    ['in_progress', 'build', 'In progress', 'text-accent', ['build', 'text-muted']],
+    ['review', 'human_review', 'Review', 'text-warning', ['waiting on you', 'bg-warning']],
+    ['review', 'escalated', 'Review', 'text-warning', ['escalated', 'bg-danger']],
+    ['backlog', null, 'Backlog', 'text-muted', null],
+    ['done', null, 'Done', 'text-success', null],
   ]
-  for (const [status, stage, text] of cases) {
-    const { unmount } = await open(taskPage({ status, stage }))
-    expect(within(header()).getByText(fullText(text))).toBeTruthy()
-    const red = [...document.querySelectorAll('main [class*="text-danger"]')]
-    expect(red.map((el) => el.textContent)).toEqual(stage === 'escalated' ? ['⚠ NEEDS YOU — escalated'] : [])
+  for (const [status, stage, label, tone, after] of cases) {
+    // Q4: a running run on the in_progress case, which still gets no ● running in the header
+    const running = status === 'in_progress' ? { run: run(41, 'running') } : {}
+    const { unmount } = await open(taskPage({ status, stage }, running), { [`GET ${LOG(41, 0)}`]: log(0) })
+    const pill = within(header()).getByText(label, { selector: 'span' })
+    expect(pill.className).toMatch(cls(tone))
+    const state = [...pill.parentElement.children]
+    expect(state.map((el) => el.textContent)).toEqual(after ? [label, after[0]] : [label])
+    if (after) expect(state[1].className).toMatch(cls(after[1]))
+    expect(pill.parentElement.textContent).toBe(after ? `${label} ${after[0]}` : label)
+    const red = [...document.querySelectorAll('main [class*="danger"]')]
+    expect(red.map((el) => el.textContent)).toEqual(stage === 'escalated' ? ['escalated'] : [])
+    expect(header().textContent).not.toContain('●')
     unmount()
   }
 })
@@ -165,9 +175,12 @@ test('AC7: rounds show in order as Round n trigger, four chips, and +A −D', as
     'Round 1 initial sec ✗ ux ✓ ui ✓ code ✓ +118 −9',
     'Round 2 agent sec ✓ ux ✓ ui ✓ code ✓ +126 −9',
   ])
+  // 043 FE11: colored as in FE5
+  const tones = [...rows()[0].querySelectorAll('[title]')].map((el) => ['text-success', 'text-danger'].find((c) => cls(c).test(el.className)))
+  expect(tones).toEqual(['text-danger', 'text-success', 'text-success', 'text-success'])
 })
 
-test('AC8: a verdict with a body is a popover button whose popover holds the rendered body', async () => {
+test('AC8, 043 FE11: a verdict with a body is a red popover button whose popover holds the rendered body', async () => {
   const security = { verdict: 'CHANGES', body_md: 'Trusts **X-Forwarded-For**', body_html: '<p>Trusts <strong>X-Forwarded-For</strong></p>\n' }
   await open(taskPage({}, {
     rounds: [round(1, { verdicts: { ...PENDING, security: 'CHANGES' }, posted: { security } })],
@@ -176,20 +189,22 @@ test('AC8: a verdict with a body is a popover button whose popover holds the ren
   expect(chip.getAttribute('type')).toBe('button')
   expect(chip.getAttribute('popovertarget')).toBe('verdict-1-security')
   expect(chip.getAttribute('title')).toBe('security: CHANGES')
+  expect(chip.className).toMatch(cls('text-danger'))
   const popover = document.getElementById('verdict-1-security')
   expect(popover.hasAttribute('popover')).toBe(true)
   expect(popover.textContent.startsWith('security · CHANGES')).toBe(true)
   expect(within(popover).getByText('X-Forwarded-For').tagName).toBe('STRONG')
 })
 
-test('AC9: a pending chip, or a posted one with a blank body, is plain text with a title and no popover', async () => {
+test('AC9, 043 FE11: a pending chip, or a posted one with a blank body, is a colored span with a title and no popover', async () => {
   await open(taskPage({}, {
     rounds: [round(1, { verdicts: { ...PENDING, ux: 'PASS' }, posted: { ux: { verdict: 'PASS', body_md: '  \n', body_html: '' } } })],
   }))
   const row = rows()[0]
-  for (const [text, title, id] of [['ui ·', 'ui: pending', 'verdict-1-ui'], ['ux ✓', 'ux: PASS', 'verdict-1-ux']]) {
+  for (const [text, title, id, tone] of [['ui ·', 'ui: pending', 'verdict-1-ui', 'text-muted'], ['ux ✓', 'ux: PASS', 'verdict-1-ux', 'text-success']]) {
     const chip = within(row).getByText(text)
     expect(chip.tagName).toBe('SPAN')
+    expect(chip.className).toMatch(cls(tone))
     expect(chip.getAttribute('title')).toBe(title)
     expect(chip.hasAttribute('popovertarget')).toBe(false)
     expect(document.getElementById(id)).toBeNull()
@@ -486,13 +501,13 @@ test('AC27: a log line and a run error with markup show as text and add no eleme
 test('AC28: the page reloads 3000 ms after the last load settles and shows the new view-model', async () => {
   const responses = { [`GET ${PAGE}`]: [200, taskPage()] }
   const fetch = await openFake(responses)
-  expect(within(header()).getByText('In progress · build')).toBeTruthy()
+  expect(within(header()).getByText(fullText('In progress build'))).toBeTruthy()
   responses[`GET ${PAGE}`] = [200, taskPage({ stage: 'agent_review' })]
   await advance(2999)
   expect(loads(fetch)).toBe(1)
   await advance(1)
   expect(loads(fetch)).toBe(2)
-  expect(within(header()).getByText('In progress · agent_review')).toBeTruthy()
+  expect(within(header()).getByText(fullText('In progress agent_review'))).toBeTruthy()
 })
 
 test('AC29: build notes opened with a click stay open across a poll', async () => {

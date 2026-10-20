@@ -4,6 +4,8 @@ import { boardPage } from '../../api/pages.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, moveTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
+import { LABELS, RunningBadge, Stage } from '../../components/Badge.jsx'
+import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
@@ -11,41 +13,43 @@ import { button, field, muted, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
-const COLUMNS = { backlog: 'Backlog', in_progress: 'In progress', review: 'Review', done: 'Done' }
-const SHORT = { security: 'sec', ux: 'ux', ui: 'ui', code: 'co' }
-const SYMBOL = { PASS: '✓', CHANGES: '✗', pending: '·' }
-
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
-/** §8.1, as project.html: running, else stalled, else escalated, else waiting, else the stage. */
+/**
+ * §8.1: running (the badge, then the stage), else stalled with Retry, else the stage's pill or muted text.
+ * 043 Q5: no status pill, since the column names it; dto/pages.py's `waiting` and `escalated` are exactly those stages.
+ */
 function StatusLine({ card, running, retry }) {
-  const stage = card.stage ? ` · ${card.stage}` : ''
-  if (running) return <p className="text-sm text-success">{`● running${stage}`}</p>
   if (card.stalled) {
     return (
       <p className="flex items-center justify-between gap-2 text-sm">
-        <span><strong>stalled</strong>{stage}</span>
+        <span><strong>stalled</strong>{card.stage && ` · ${card.stage}`}</span>
         {retry}
       </p>
     )
   }
-  if (card.escalated) return <p className="text-sm font-semibold text-danger">⚠ NEEDS YOU — escalated</p>
-  if (card.waiting) return <p className="text-sm"><strong>waiting on you</strong></p>
-  return card.stage && <p className={`text-sm ${muted}`}>{card.stage}</p>
+  if (!running && !card.stage) return null
+  return (
+    <p className="flex flex-wrap items-center gap-1.5 text-sm">
+      {running && <RunningBadge />}
+      {running && card.stage && ' '}
+      <Stage stage={card.stage} />
+    </p>
+  )
 }
 
-/** Q7: the chips stay on this page; `r2 sec✓ ux✓ ui· co✗`, then `+A −D`. Done cards show their rounds. */
+/** 043 Q2: `r2` then the shared chips, in a wrapping row, then `+A −D`. Done cards show their rounds. */
 function Rounds({ card }) {
   if (card.round == null) return null
   if (card.status === 'done') return <p className={`text-sm ${muted}`}>{plural(card.round, 'round')}</p>
   return (
     <>
-      <p className="text-sm">
-        {`r${card.round}`}
+      <p className="flex flex-wrap gap-x-2 text-sm">
+        <span className={muted}>{`r${card.round}`}</span>
         {Object.entries(card.verdicts ?? {}).map(([who, verdict]) => (
           <Fragment key={who}>
             {' '}
-            <span title={`${who}: ${verdict}`}>{`${SHORT[who] ?? who}${SYMBOL[verdict] ?? verdict}`}</span>
+            <Chip n={card.round} who={who} verdict={verdict} />
           </Fragment>
         ))}
       </p>
@@ -203,7 +207,7 @@ export function BoardPage() {
       {error && <ErrorMessage error={error} />}
       {actionError && <ErrorMessage error={actionError} />}
       <div className="mt-2 grid items-start gap-4 md:grid-cols-4">
-        {Object.entries(COLUMNS).map(([status, label]) => {
+        {Object.entries(LABELS).map(([status, label]) => {
           const cards = page.columns[status] ?? []
           return (
             <section
