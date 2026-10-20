@@ -65,9 +65,23 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
    status, factory state (none / uncommitted / ready), and last activity. **+ Workspace**
    creates one. For each project, its Settings page (item 12) moves it to another workspace.
 3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header is the project
-   header plus **+ New task**, **Run next**, and the hint for why runs are off. Cards move
-   between columns by drag and drop (native HTML5, no library). Clicking a card opens the task
-   detail.
+   header plus **+ New task**, **Run next**, and the hint for why runs are off. **+ New task**
+   opens its form in a native popover, which Esc or a click outside closes, and a created task
+   closes it. Clicking a card opens the task detail.
+   - Cards move by drag and drop (native HTML5, no library). While a card is dragged it dims,
+     the column under the pointer gets an `accent` ring, and an `accent` line marks the gap the
+     drop takes. No line shows where the drop would leave the card where it is.
+   - Each card also has a **Move** menu, a native popover: the other three columns, then **Up**
+     and **Down** on Backlog cards (no Up on the top card, no Down on the bottom one). A column
+     puts the card at its bottom; Up and Down move it one place, so Backlog reorders without
+     dragging. The menu sends the same `PATCH /api/tasks/{id}` as a drop (§6.2), and focus
+     comes back to the card's **Move** button after the board reloads.
+   - A move, by menu or drop, is announced in a visually hidden `aria-live` status region
+     (`Moved #14 Export CSV to Review.`). A refusal, such as the 409 while a run is active,
+     shows in the board's alert instead. The alert holds only refusals of Run, Retry, Run next,
+     and moves: the next of these empties it as it starts, and polls leave it alone.
+   - From `md` up each column's card list scrolls on its own under its heading. Below `md` the
+     columns stack and the page scrolls.
 4. **Task detail** (`/tasks/{id}`)
    - Header: title, the status pill and stage, branch, Review, Run / Stop / Retry, run
      status. Next to Review, **Export** downloads the task bundle
@@ -146,14 +160,16 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
 api-server · personal              Factory: ready ✓   [+ New task]  [Run next ▶]
 ┌ Backlog 3 ──────────┐ ┌ In progress 1 ─────────────┐ ┌ Review 2 ──────────────────┐ ┌ Done 5 ─────┐
 │ #14 Export CSV      │ │ #13 Audit log              │ │ #12 Rate-limit login       │ │ #9 Health   │
-│              [Run]  │ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round     │
-├─────────────────────┤ │ r1 sec ✓ ux ✓ ui · code ✗  │ │ r2 sec ✓ ux ✓ ui ✓ code ✓  │ ├─────────────┤
-│ #15 Dark mode       │ │ started 10:02              │ │ +126 −9                    │ │ #8 Login UX │
-│              [Run]  │ └────────────────────────────┘ ├────────────────────────────┤ │ 3 rounds    │
-├─────────────────────┤                                │▌#11 Webhooks               │ └─────────────┘
-│ #16 Rename env vars │                                │▌(escalated)                │
-│              [Run]  │                                │▌r2 sec ✗ ux ✓ ui ✓ code ✓  │
-└─────────────────────┘                                │▌+88 −4                     │
+│       [Move] [Run]  │ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round     │
+├─────────────────────┤ │ r1 sec ✓ ux ✓ ui · code ✗  │ │ r2 sec ✓ ux ✓ ui ✓ code ✓  │ │     [Move]  │
+│ #15 Dark mode       │ │ started 10:02              │ │ +126 −9                    │ ├─────────────┤
+│       [Move] [Run]  │ │                    [Move]  │ │                    [Move]  │ │ #8 Login UX │
+├─────────────────────┤ └────────────────────────────┘ ├────────────────────────────┤ │ 3 rounds    │
+│ #16 Rename env vars │                                │▌#11 Webhooks               │ │     [Move]  │
+│       [Move] [Run]  │                                │▌(escalated)                │ └─────────────┘
+└─────────────────────┘                                │▌r2 sec ✗ ux ✓ ui ✓ code ✓  │
+                                                       │▌+88 −4                     │
+                                                       │▌                   [Move]  │
                                                        └────────────────────────────┘
 pills, drawn ( ): a status is outlined in its token: Backlog muted, In progress accent,
   Review warning, Done success. (● running) is outlined accent; its dot pulses, and holds
@@ -162,6 +178,11 @@ pills, drawn ( ): a status is outlined in its token: Backlog muted, In progress 
 escalated cards: red left bar ▌ + (escalated)
 chips: ✓ PASS in success, ✗ CHANGES in danger, · pending in muted; title "security: PASS"
 stalled card: "stalled · build  [Retry]"
+[Move]: a popover menu on every card: the other columns, then Up and Down in Backlog. A
+  move is announced in a hidden aria-live region; a refusal shows in the board's alert.
+while dragging: the card dims, the column under the pointer gets an accent ring, and an
+  accent line marks the gap the drop takes (none where the card would stay put)
+columns: from md up each card list scrolls on its own under its heading
 ```
 
 ### 8.2 Review — Conversation

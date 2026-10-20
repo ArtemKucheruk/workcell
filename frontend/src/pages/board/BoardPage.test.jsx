@@ -58,19 +58,45 @@ function stubRects() {
   }
 }
 
-/** Drags card `id` onto the column headed `label` at `clientY`. */
-function drag(id, label, clientY) {
+/** Fires drag event `type` on `el`. jsdom has no DragEvent, so clientY and relatedTarget are set by hand. */
+function fireDrag(type, el, { clientY = 0, relatedTarget = null, ...init } = {}) {
+  const event = createEvent[type](el, init)
+  Object.defineProperty(event, 'clientY', { value: clientY })
+  Object.defineProperty(event, 'relatedTarget', { value: relatedTarget })
+  fireEvent(el, event)
+}
+
+/** Starts dragging card `id`, with every card's rect stubbed; returns its li. */
+function start(id) {
   stubRects()
   const source = cardEl(id)
   const dataTransfer = { setData: vi.fn(), effectAllowed: 'all' }
-  fireEvent.dragStart(source, { dataTransfer })
+  fireDrag('dragStart', source, { dataTransfer })
   expect(dataTransfer.setData).toHaveBeenCalledWith('text/plain', String(id))
+  return source
+}
+
+/** Drags card `id` onto the column headed `label` at `clientY`. */
+function drag(id, label, clientY) {
+  const source = start(id)
   const target = column(label)
-  fireEvent.dragOver(target)
-  const drop = createEvent.drop(target)
-  Object.defineProperty(drop, 'clientY', { value: clientY })
-  fireEvent(target, drop)
-  fireEvent.dragEnd(source)
+  fireDrag('dragOver', target, { clientY })
+  fireDrag('drop', target, { clientY })
+  fireDrag('dragEnd', source)
+}
+
+// 044: the Move menu sits inside each card
+const menuOf = (id) => document.getElementById(`move-${id}`)
+// jsdom's UA sheet hides a closed popover, so its buttons are queried with hidden: true
+const pick = (id, name) => fireEvent.click(within(menuOf(id)).getByRole('button', { name, hidden: true }))
+/** A card's buttons outside its Move menu, by text. */
+const cardButtons = (id) =>
+  within(cardEl(id)).queryAllByRole('button').filter((b) => !menuOf(id).contains(b)).map((b) => b.textContent)
+/** An element's text without the Move menus in it. */
+function shown(el) {
+  const copy = el.cloneNode(true)
+  for (const menu of copy.querySelectorAll('[popover]')) menu.remove()
+  return copy.textContent
 }
 
 // --- Page and header -------------------------------------------------------------------
@@ -212,11 +238,11 @@ test('AC9, 043 FE7: an escalated card has the escalated pill and the red left ba
   expect(screen.getAllByText('waiting on you')).toHaveLength(1)
 })
 
-test('AC10: a stage without a run shows the stage and no buttons; no stage shows no stage line', async () => {
+test('AC10: a stage without a run shows the stage and no buttons but Move; no stage shows no stage line', async () => {
   await open(board({ in_progress: [card(13, 'in_progress', { stage: 'build' }), card(15, 'in_progress')] }))
   expect(within(cardEl(13)).getByText('build')).toBeTruthy()
-  expect(within(cardEl(13)).queryAllByRole('button')).toEqual([])
-  expect([...cardEl(15).children].map((el) => el.textContent)).toEqual(['#15 Task 15'])
+  expect(cardButtons(13)).toEqual(['Move'])
+  expect([...cardEl(15).children].map(shown)).toEqual(['#15 Task 15', 'Move'])
 })
 
 test('AC11, 043 FE8: a running card shows the ● running badge, then its muted stage, its local start time, and no buttons', async () => {
@@ -231,12 +257,12 @@ test('AC11, 043 FE8: a running card shows the ● running badge, then its muted 
   expect(line.children[1].className).toMatch(cls('text-muted'))
   expect(within(li).getByText(fullText('started 10:02'))).toBeTruthy()
   expect(li.querySelector('time').getAttribute('datetime')).toBe('2026-10-18T01:02:00Z')
-  expect(within(li).queryAllByRole('button')).toEqual([])
+  expect(cardButtons(13)).toEqual(['Move'])
   const bare = within(cardEl(16)).getByText(fullText('● running'))
   expect([...bare.parentElement.children]).toEqual([bare])
   expect(within(cardEl(16)).getByText(fullText('started 10:02'))).toBeTruthy()
-  expect(within(cardEl(16)).queryAllByRole('button')).toEqual([])
-  for (const label of ['In progress', 'Backlog', 'Review', 'Done']) expect(within(li).queryByText(label)).toBeNull() // Q5: no status pill
+  expect(cardButtons(16)).toEqual(['Move'])
+  for (const label of ['In progress', 'Backlog', 'Review', 'Done']) expect(shown(li)).not.toContain(label) // Q5: no status pill
 })
 
 test('AC12, 043 FE8: a stalled card shows stalled · stage and Retry, which runs the task and reloads; no card has a status pill', async () => {
@@ -287,17 +313,17 @@ test('AC14: done cards show N rounds, no chips or +/−; a null round shows neit
     expect(cardEl(id).querySelectorAll('[title]')).toHaveLength(0)
     expect(cardEl(id).textContent).not.toMatch(/\+\d|−/)
   }
-  expect(cardEl(10).textContent).toBe('#10 Task 10')
+  expect(shown(cardEl(10))).toBe('#10 Task 10Move')
 })
 
-test('AC15: every backlog card has Run, which runs it and reloads; review and done cards have none', async () => {
+test('AC15: every backlog card has Run, which runs it and reloads; review and done cards have only Move', async () => {
   const { fetch } = await open(board({
     backlog: [card(14, 'backlog'), card(15, 'backlog')],
     review: [card(12, 'review', { stage: 'human_review', waiting: true })],
     done: [card(9, 'done', { round: 1 })],
   }), { 'POST /api/tasks/15/run': [202, { run_id: 50, session_id: 's', worktree: '/w' }] })
   for (const id of [14, 15]) expect(within(cardEl(id)).getByRole('button', { name: 'Run' })).toBeTruthy()
-  for (const id of [12, 9]) expect(within(cardEl(id)).queryAllByRole('button')).toEqual([])
+  for (const id of [12, 9]) expect(cardButtons(id)).toEqual(['Move'])
   fireEvent.click(within(cardEl(15)).getByRole('button', { name: 'Run' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
   expect(sent(fetch, 'POST', '/api/tasks/15/run')).toBeUndefined()
@@ -400,19 +426,349 @@ test('AC21: a refused move shows its detail in the board alert and reloads', asy
   expect(within(column('In progress')).getByRole('link', { name: '#13 Task 13' })).toBeTruthy()
 })
 
+// --- 044: card states and drop feedback ------------------------------------------------
+
+/** Backlog 1, 2, 3 at positions 1, 2, 3. */
+const BACKLOG = [card(1, 'backlog'), card(2, 'backlog'), card(3, 'backlog')]
+/** A card in every column: Backlog 1, 2, 3; In progress 7 at position 5; Review 12; Done 9. */
+const ALL = {
+  backlog: BACKLOG,
+  in_progress: [card(7, 'in_progress', { position: 5 })],
+  review: [card(12, 'review', { stage: 'human_review', waiting: true })],
+  done: [card(9, 'done', { round: 1 })],
+}
+const OK = (id, status) => [200, { id, status, stage: null }]
+/** The cards marked with data-drop, as [link text, before|after]. */
+const marked = () => [...document.querySelectorAll('[data-drop]')].map((li) => [li.querySelector('a').textContent, li.dataset.drop])
+/** The headings of the columns marked with data-over. */
+const highlighted = () => [...document.querySelectorAll('section[data-over]')].map((s) => s.querySelector('h2').textContent)
+const status = () => screen.getByRole('status')
+
+test('FE1: every card has a hover ring and an accent ring while its link or a button in it has keyboard focus; the li takes no focus', async () => {
+  await open(board(ALL))
+  const lis = document.querySelectorAll('main section li')
+  expect(lis).toHaveLength(6)
+  for (const li of lis) {
+    expect(li.className).toMatch(/(^|\s)hover:ring-\S+/)
+    expect(li.className).toMatch(/(^|\s)has-(focus-visible|\[:focus-visible\]):ring-2(\s|$)/)
+    expect(li.className).toMatch(/(^|\s)has-(focus-visible|\[:focus-visible\]):ring-accent(\s|$)/)
+    expect(li.hasAttribute('tabindex')).toBe(false)
+  }
+})
+
+test('FE2: dragstart sets data-dragging on the dragged card only, which dims it; dragend removes it', async () => {
+  await open(board({ backlog: BACKLOG }))
+  const li = start(2)
+  // Q9: set once the browser has taken the drag image
+  await waitFor(() => expect(li.hasAttribute('data-dragging')).toBe(true))
+  expect(document.querySelectorAll('[data-dragging]')).toHaveLength(1)
+  expect(li.className).toMatch(/(^|\s)data-dragging:opacity-\d+(\s|$)/)
+  fireDrag('dragEnd', li)
+  expect(document.querySelectorAll('[data-dragging]')).toHaveLength(0)
+})
+
+test('FE3: the column under the dragged card gets data-over; leaving it, a drop, or dragend clears it', async () => {
+  const { fetch } = await open(board(ALL), { 'PATCH /api/tasks/1': OK(1, 'review') })
+  const source = start(1)
+  fireDrag('dragOver', column('Review'), { clientY: 500 })
+  expect(highlighted()).toEqual(['Review 1'])
+  expect(column('Review').className).toMatch(cls('data-over:ring-accent'))
+  fireDrag('dragOver', column('In progress'), { clientY: 500 })
+  expect(highlighted()).toEqual(['In progress 1'])
+  // onto its own heading isn't leaving it
+  fireDrag('dragLeave', column('In progress'), { relatedTarget: column('In progress').querySelector('h2') })
+  expect(highlighted()).toEqual(['In progress 1'])
+  fireDrag('dragLeave', column('In progress'), { relatedTarget: column('Done') })
+  expect(highlighted()).toEqual([])
+  fireDrag('dragOver', column('Review'), { clientY: 500 })
+  fireDrag('dragLeave', column('Review'), { relatedTarget: null }) // out of the window
+  expect(highlighted()).toEqual([])
+  fireDrag('dragOver', column('Review'), { clientY: 500 })
+  fireDrag('dragEnd', source)
+  expect(highlighted()).toEqual([])
+  start(1)
+  fireDrag('dragOver', column('Review'), { clientY: 500 })
+  fireDrag('drop', column('Review'), { clientY: 500 })
+  expect(highlighted()).toEqual([])
+  fireDrag('dragEnd', source)
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+})
+
+test('FE4: dragover marks the gap the drop takes: the card below it is before, or the last card after', async () => {
+  await open(board({ backlog: BACKLOG, in_progress: ALL.in_progress }))
+  for (const [id, label, y, mark] of [
+    [3, 'Backlog', 150, ['#2 Task 2', 'before']],
+    [1, 'Backlog', 400, ['#3 Task 3', 'after']],
+    [1, 'In progress', 0, ['#7 Task 7', 'before']],
+  ]) {
+    const source = start(id)
+    fireDrag('dragOver', column(label), { clientY: y })
+    expect(marked()).toEqual([mark])
+    fireDrag('dragEnd', source)
+  }
+  // the mark follows the pointer, and stays on one card
+  const source = start(3)
+  fireDrag('dragOver', column('Backlog'), { clientY: 150 })
+  fireDrag('dragOver', column('In progress'), { clientY: 400 })
+  expect(marked()).toEqual([['#7 Task 7', 'after']])
+  fireDrag('dragEnd', source)
+})
+
+test('FE5: no line where a drop sends nothing or in an empty column, which keeps its highlight; drop and dragend clear the line', async () => {
+  const { fetch } = await open(board({ backlog: BACKLOG }), { 'PATCH /api/tasks/3': OK(3, 'backlog') })
+  for (const [id, y] of [[3, 190], [3, 400], [1, 50], [1, 140]]) {
+    const source = start(id)
+    fireDrag('dragOver', column('Backlog'), { clientY: y })
+    expect(highlighted()).toEqual(['Backlog 3'])
+    expect(marked()).toEqual([])
+    fireDrag('dragEnd', source)
+  }
+  let source = start(1)
+  fireDrag('dragOver', column('Review'), { clientY: 0 })
+  expect(highlighted()).toEqual(['Review 0'])
+  expect(marked()).toEqual([])
+  fireDrag('dragOver', column('Backlog'), { clientY: 400 })
+  expect(marked()).toEqual([['#3 Task 3', 'after']])
+  fireDrag('dragEnd', source)
+  expect(marked()).toEqual([])
+  source = start(3)
+  fireDrag('dragOver', column('Backlog'), { clientY: 150 })
+  expect(marked()).toEqual([['#2 Task 2', 'before']])
+  fireDrag('drop', column('Backlog'), { clientY: 150 })
+  expect(marked()).toEqual([])
+  fireDrag('dragEnd', source)
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'PATCH', '/api/tasks/3')).toEqual({ status: 'backlog', position: 1.5 })
+})
+
+test('FE6: the line takes no room: during a dragover each list holds just its cards, and the line is absolute on a relative card', async () => {
+  await open(board({ backlog: BACKLOG, in_progress: ALL.in_progress }))
+  const source = start(3)
+  fireDrag('dragOver', column('Backlog'), { clientY: 150 })
+  expect(marked()).toEqual([['#2 Task 2', 'before']])
+  for (const [label, ids] of [['Backlog', [1, 2, 3]], ['In progress', [7]]]) {
+    const items = [...column(label).querySelector('ol').children]
+    expect(items.map((el) => [el.tagName, el.querySelector('a').textContent])).toEqual(ids.map((n) => ['LI', `#${n} Task ${n}`]))
+  }
+  const li = cardEl(2)
+  expect(li.className).toMatch(cls('relative'))
+  for (const side of ['before', 'after']) expect(li.className).toMatch(cls(`data-\\[drop=${side}\\]:${side}:absolute`))
+  fireDrag('dragEnd', source)
+})
+
+test("FE7: the gap rule reads only the cards' rects, never a Move menu's: the AC19 drops send the same positions", async () => {
+  const cases = [
+    [3, 'Backlog', 150, '/api/tasks/3', { status: 'backlog', position: 1.5 }],
+    [3, 'Backlog', 100, '/api/tasks/3', { status: 'backlog', position: 0 }],
+    [1, 'In progress', 300, '/api/tasks/1', { status: 'in_progress', position: 1 }],
+    [2, 'Done', 0, '/api/tasks/2', { status: 'done', position: 1 }],
+  ]
+  for (const [id, label, y, url, body] of cases) {
+    const { fetch, unmount } = await open(board({ backlog: BACKLOG }), { [`PATCH ${url}`]: OK(id, body.status) })
+    const menu = menuOf(1)
+    expect(cardEl(1).contains(menu)).toBe(true)
+    // a rect that would move every gap, if the rule read it
+    const rect = vi.fn(() => ({ top: -1000, height: 5000, bottom: 4000, left: 0, right: 200, width: 200 }))
+    for (const el of [menu, ...menu.querySelectorAll('*')]) el.getBoundingClientRect = rect
+    drag(id, label, y)
+    await waitFor(() => expect(loads(fetch)).toBe(2))
+    expect(sent(fetch, 'PATCH', url)).toEqual(body)
+    expect(rect).not.toHaveBeenCalled()
+    unmount()
+  }
+})
+
+// --- 044: the Move menu ----------------------------------------------------------------
+
+test('FE8: every card in every column has a Move button opening its own popover="auto" menu', async () => {
+  await open(board(ALL))
+  for (const id of [1, 2, 3, 7, 12, 9]) {
+    const move = within(cardEl(id)).getByRole('button', { name: 'Move' })
+    expect(move.getAttribute('type')).toBe('button')
+    expect(move.getAttribute('aria-describedby')).toBe(`task-${id}`)
+    expect(move.getAttribute('popovertarget')).toBe(`move-${id}`)
+    expect(menuOf(id).getAttribute('popover')).toBe('auto')
+    expect(cardEl(id).contains(menuOf(id))).toBe(true)
+  }
+})
+
+test('FE9: a menu lists the other columns in order, then Up and Down in Backlog, not past its ends', async () => {
+  const names = (id) => within(menuOf(id)).getAllByRole('button', { hidden: true }).map((b) => b.textContent)
+  const { unmount } = await open(board(ALL))
+  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Down'])
+  expect(names(2)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Down'])
+  expect(names(3)).toEqual(['In progress', 'Review', 'Done', 'Up'])
+  expect(names(7)).toEqual(['Backlog', 'Review', 'Done'])
+  expect(names(12)).toEqual(['Backlog', 'In progress', 'Done'])
+  expect(names(9)).toEqual(['Backlog', 'In progress', 'Review'])
+  unmount()
+  await open(board({ backlog: [card(1, 'backlog')] }))
+  expect(names(1)).toEqual(['In progress', 'Review', 'Done'])
+})
+
+test('FE10: every menu button hides its menu natively', async () => {
+  await open(board(ALL))
+  const buttons = [...document.querySelectorAll('[id^="move-"] button')]
+  expect(buttons).toHaveLength(4 + 5 + 4 + 3 + 3 + 3)
+  for (const b of buttons) {
+    expect(b.getAttribute('popovertarget')).toBe(b.closest('[popover]').id)
+    expect(b.getAttribute('popovertargetaction')).toBe('hide')
+  }
+})
+
+test('FE11: a column button patches the card to the bottom of that column and reloads', async () => {
+  const cases = [
+    [{ backlog: BACKLOG }, 1, 'Review', { status: 'review', position: 1 }],
+    [{ backlog: BACKLOG, in_progress: ALL.in_progress }, 1, 'In progress', { status: 'in_progress', position: 6 }],
+    [{ backlog: BACKLOG, review: ALL.review }, 12, 'Backlog', { status: 'backlog', position: 4 }],
+  ]
+  for (const [columns, id, name, body] of cases) {
+    const { fetch, unmount } = await open(board(columns), { [`PATCH /api/tasks/${id}`]: OK(id, body.status) })
+    pick(id, name)
+    await waitFor(() => expect(loads(fetch)).toBe(2))
+    expect(sent(fetch, 'PATCH', `/api/tasks/${id}`)).toEqual(body)
+    unmount()
+  }
+})
+
+test('FE12: Up and Down move a backlog card one place, at the midpoint rule position, and reload', async () => {
+  for (const [id, name, position] of [[2, 'Up', 0], [3, 'Up', 1.5], [1, 'Down', 2.5], [2, 'Down', 4]]) {
+    const { fetch, unmount } = await open(board({ backlog: BACKLOG }), { [`PATCH /api/tasks/${id}`]: OK(id, 'backlog') })
+    pick(id, name)
+    await waitFor(() => expect(loads(fetch)).toBe(2))
+    expect(sent(fetch, 'PATCH', `/api/tasks/${id}`)).toEqual({ status: 'backlog', position })
+    unmount()
+  }
+})
+
+test('FE13: one hidden status region, empty from the first load, names each move by menu or drop', async () => {
+  const { fetch } = await open(board({ backlog: BACKLOG }), {
+    'PATCH /api/tasks/1': OK(1, 'review'), 'PATCH /api/tasks/2': OK(2, 'backlog'), 'PATCH /api/tasks/3': OK(3, 'backlog'),
+  })
+  expect(screen.getAllByRole('status')).toHaveLength(1)
+  expect(status().className).toMatch(cls('sr-only'))
+  expect(status().textContent).toBe('')
+  const steps = [
+    [() => pick(1, 'Review'), 'Moved #1 Task 1 to Review.'],
+    [() => pick(2, 'Up'), 'Moved #2 Task 2 up.'],
+    [() => pick(2, 'Down'), 'Moved #2 Task 2 down.'],
+    [() => drag(1, 'Review', 500), 'Moved #1 Task 1 to Review.'],
+    [() => drag(3, 'Backlog', 100), 'Moved #3 Task 3 within Backlog.'],
+  ]
+  for (const [step, words] of steps) {
+    const before = loads(fetch)
+    step()
+    await waitFor(() => expect(loads(fetch)).toBe(before + 1))
+    expect(status().textContent).toBe(words)
+  }
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test('FE14: a refused menu move shows in the board alert, not the status region, and reloads with the card in place', async () => {
+  const { fetch } = await open(board({ backlog: BACKLOG }), { 'PATCH /api/tasks/1': ACTIVE })
+  pick(1, 'Review')
+  expect((await screen.findByRole('alert')).textContent).toBe('run #41 active')
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'PATCH', '/api/tasks/1')).toEqual({ status: 'review', position: 1 })
+  expect(status().textContent).toBe('')
+  expect(within(column('Backlog')).getByRole('link', { name: '#1 Task 1' })).toBeTruthy()
+})
+
+test("FE15: after a menu move's reload, focus is on the moved card's Move button, in its new column or in place", async () => {
+  const { fetch, responses } = await open(board({ backlog: BACKLOG }), {
+    'PATCH /api/tasks/1': OK(1, 'review'), 'PATCH /api/tasks/2': ACTIVE,
+  })
+  responses[`GET ${BOARD}`] = [200, board({ backlog: [card(2, 'backlog'), card(3, 'backlog')], review: [card(1, 'review', { position: 1 })] })]
+  const moveButton = (id) => within(cardEl(id)).getByRole('button', { name: 'Move' })
+  pick(1, 'Review')
+  await waitFor(() => expect(within(column('Review')).queryByRole('link', { name: '#1 Task 1' })).toBeTruthy())
+  await waitFor(() => expect(document.activeElement).toBe(moveButton(1)))
+  expect(column('Review').contains(document.activeElement)).toBe(true)
+  document.activeElement.blur()
+  pick(2, 'Down')
+  await screen.findByRole('alert')
+  await waitFor(() => expect(loads(fetch)).toBe(3))
+  await waitFor(() => expect(document.activeElement).toBe(moveButton(2)))
+  expect(column('Backlog').contains(document.activeElement)).toBe(true)
+})
+
+// --- 044: the board alert --------------------------------------------------------------
+
+test('FE16: an action empties the alert and status region as it starts; a refusal outlasts polls; a success leaves no alert', async () => {
+  vi.useFakeTimers()
+  const responses = {
+    [`GET ${BOARD}`]: [200, board({ backlog: [card(14, 'backlog')] })],
+    'PATCH /api/tasks/14': OK(14, 'review'),
+    'POST /api/tasks/14/run': ACTIVE,
+  }
+  const fetch = mockFetch(responses)
+  renderAt('/projects/3')
+  await advance(0)
+  pick(14, 'Review')
+  await advance(0)
+  expect(status().textContent).toBe('Moved #14 Task 14 to Review.')
+  expect(screen.queryByRole('alert')).toBeNull()
+  // a refused Run: the status region empties, the alert stays through a successful poll
+  fireEvent.click(within(cardEl(14)).getByRole('button', { name: 'Run' }))
+  expect(status().textContent).toBe('')
+  await advance(0)
+  expect(screen.getByRole('alert').textContent).toBe('run #41 active')
+  const polled = loads(fetch)
+  await advance(3000)
+  expect(loads(fetch)).toBe(polled + 1)
+  expect(screen.getByRole('alert').textContent).toBe('run #41 active')
+  // Run next, pending: no alert until it settles, then the 409's
+  let settle
+  fetch.mockImplementationOnce(() => new Promise((resolve) => (settle = resolve)))
+  fireEvent.click(screen.getByRole('button', { name: 'Run next ▶' }))
+  expect(screen.queryByRole('alert')).toBeNull()
+  await advance(0)
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(fetch.mock.calls.at(-1)[0]).toBe('/api/projects/3/run-next')
+  settle(new Response(JSON.stringify(ACTIVE[1]), { status: 409 }))
+  await advance(0)
+  expect(screen.getByRole('alert').textContent).toBe('run #41 active')
+})
+
+// --- 044: columns ----------------------------------------------------------------------
+
+test('FE20: from md up each card list scrolls on its own under its heading, capped near the viewport height', async () => {
+  await open(board({ backlog: BACKLOG }))
+  const section = column('Backlog')
+  const list = section.querySelector('ol')
+  expect(list.className).toMatch(cls('md:overflow-y-auto'))
+  expect(list.className).toMatch(/(^|\s)md:max-h-\[[^\]\s]*\d+d?vh[^\]\s]*\](\s|$)/)
+  expect(list.contains(section.querySelector('h2'))).toBe(false)
+  // below md nothing caps or scrolls, so the page does
+  expect(`${section.className} ${list.className}`).not.toMatch(/(^|\s)(max-h-|overflow-)/)
+})
+
 // --- + New task ------------------------------------------------------------------------
 
-function openNewTask() {
-  const summary = screen.getByText('+ New task')
-  fireEvent.click(summary)
-  const details = summary.closest('details')
-  expect(details.open).toBe(true)
-  return within(details)
+/** + New task's popover, shown as a click would, with hidePopover stubbed: jsdom has no Popover API (Q12). */
+function newTask() {
+  const button = screen.getByRole('button', { name: '+ New task' })
+  const popover = document.getElementById(button.getAttribute('popovertarget'))
+  popover.style.display = 'block' // jsdom's UA sheet hides it while closed
+  popover.hidePopover = vi.fn()
+  return popover
 }
 
-test('AC22: + New task posts the title and markdown, then clears, closes, and reloads', async () => {
+test('FE17: + New task is a button opening a popover="auto" that holds the form; no details; Title has autofocus', async () => {
+  await open(board())
+  const button = within(header()).getByRole('button', { name: '+ New task' })
+  expect(button.getAttribute('type')).toBe('button')
+  const popover = document.getElementById(button.getAttribute('popovertarget'))
+  expect(popover.getAttribute('popover')).toBe('auto')
+  expect(popover.querySelector('form')).toBeTruthy()
+  expect(within(popover).getByRole('textbox', { name: 'Title', hidden: true }).hasAttribute('autofocus')).toBe(true)
+  expect(screen.getByRole('main').querySelector('details')).toBeNull()
+})
+
+test('AC22, FE18: + New task posts the title and markdown, then resets, hides its popover, and reloads', async () => {
   const { fetch } = await open(board(), { 'POST /api/projects/3/tasks': [201, { id: 14, status: 'backlog' }] })
-  const form = openNewTask()
+  const popover = newTask()
+  const form = within(popover)
   const title = form.getByRole('textbox', { name: 'Title' })
   expect(title.required).toBe(true)
   expect(title.getAttribute('pattern')).toBe('.*\\S.*')
@@ -426,18 +782,19 @@ test('AC22: + New task posts the title and markdown, then clears, closes, and re
   expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Export CSV', description_md: 'Rows as **CSV**' })
   expect(title.value).toBe('')
   expect(description.value).toBe('')
-  expect(title.closest('details').open).toBe(false)
+  expect(popover.hidePopover).toHaveBeenCalledTimes(1)
 })
 
-test('AC23: a refused create shows its detail in the form and keeps it open', async () => {
+test('AC23, FE19: a refused create shows its detail in the form and keeps the popover open with the input', async () => {
   await open(board(), { 'POST /api/projects/3/tasks': [422, { detail: 'title must not be blank' }] })
-  const form = openNewTask()
+  const popover = newTask()
+  const form = within(popover)
   fireEvent.change(form.getByRole('textbox', { name: 'Title' }), { target: { value: 'x' } })
   fireEvent.click(form.getByRole('button', { name: 'Add task' }))
   const alert = await form.findByRole('alert')
   expect(alert.textContent).toBe('title must not be blank')
   expect(alert.closest('form')).toBe(form.getByRole('button', { name: 'Add task' }).closest('form'))
-  expect(alert.closest('details').open).toBe(true)
+  expect(popover.hidePopover).not.toHaveBeenCalled()
   expect(form.getByRole('textbox', { name: 'Title' }).value).toBe('x')
 })
 
