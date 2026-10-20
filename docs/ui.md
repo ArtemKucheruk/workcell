@@ -8,8 +8,9 @@ from `/api/pages/*` (§6.4). Markdown arrives pre-rendered by the backend as `*_
 with raw HTML off, so the SPA has no markdown library. highlight.js comes from npm. Live
 parts poll every 3 s with fetch. Light and dark follow the system setting. Every page header
 links to the fctl reference (item 7) and shows the login runs will use, from
-`GET /api/auth` (`claude auth status`): `Claude: Pro ✓` when it is a subscription, or a red
-`API key — runs disabled` otherwise.
+`GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
+subscription, or a red `API key — runs disabled` otherwise. The badge links to `/settings`
+(item 9).
 
 1. **Dashboard** (`/`)
    - Tiles: tasks per status, waiting on me (`human_review`), escalated, running now, done
@@ -72,6 +73,15 @@ links to the fctl reference (item 7) and shows the login runs will use, from
      input as text, a tool result as text, and thinking in a closed `<details>`.
    - Tool results over 4096 characters arrive cut; **Show all** reloads with `?full=1`.
    - Loaded once, not polled (§6.2 `GET /api/transcripts/{id}`).
+9. **Settings** (`/settings`)
+   - A **Claude login** section: auth method, plan, account (the claude.ai email), and
+     whether runs are enabled, from `GET /api/auth`.
+   - **Log in with Claude** (**Log in again** when signed in) posts `POST /api/auth/login`
+     and shows **Open the Claude sign-in page**, which opens claude.ai in a new tab, and a
+     **Code** field. **Submit code** posts the pasted `<code>#<state>` to
+     `POST /api/auth/login/code`, and on success the section shows the new login. The button
+     then reads **Start over**, which begins a fresh login.
+   - Subscription login only (§4.3): no API key field.
 
 ### 8.1 Board
 ```

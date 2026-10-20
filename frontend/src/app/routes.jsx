@@ -4,6 +4,7 @@ import { CodePage } from '../pages/code/CodePage.jsx'
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
 import { FctlDocsPage } from '../pages/docs/FctlDocsPage.jsx'
 import { ReviewPage } from '../pages/review/ReviewPage.jsx'
+import { SettingsPage } from '../pages/settings/SettingsPage.jsx'
 import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { TranscriptPage } from '../pages/transcript/TranscriptPage.jsx'
 import { WorkspacePage } from '../pages/workspace/WorkspacePage.jsx'
@@ -22,6 +23,7 @@ export const routes = [
       { path: '/tasks/:id/review', element: <ReviewPage /> },
       { path: '/transcripts/:id', element: <TranscriptPage /> },
       { path: '/docs/fctl', element: <FctlDocsPage /> },
+      { path: '/settings', element: <SettingsPage /> },
       { path: '*', element: <NotFound /> },
     ],
   },

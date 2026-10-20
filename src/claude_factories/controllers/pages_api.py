@@ -1,6 +1,8 @@
-"""docs/data-model-and-api.md §6.4: /api/auth, /api/docs/fctl, and one view-model per SPA page. Each route
-calls its page handler in handlers/pages.py and maps the dict onto dto/pages.py (020 Q2): rows become objects,
-markdown gets `*_html`."""
+"""docs/data-model-and-api.md §6.4: /api/auth and its login (039), /api/docs/fctl, and one view-model per SPA
+page. Each route calls its page handler in handlers/pages.py and maps the dict onto dto/pages.py (020 Q2): rows
+become objects, markdown gets `*_html`."""
+
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Query
 
@@ -9,9 +11,28 @@ from ..dto import pages as dto
 from ..handlers import code as code_handler
 from ..handlers import pages as handler
 from ..lib.markdown import render
-from ..server.deps import ClaudeAdapter, GitAdapter, Projects, Reviews, Rounds, Runs, Tasks, Transcripts, Workspaces
+from ..server.deps import (
+    ClaudeAdapter,
+    GitAdapter,
+    Projects,
+    Reviews,
+    Rounds,
+    Runs,
+    Tasks,
+    Transcripts,
+    Workspaces,
+    get_claude,
+)
 
-router = APIRouter()
+
+@asynccontextmanager
+async def lifespan(app):
+    """039 AC15: a pending `claude auth login` ends with the server, as controllers/runs.py's runs do."""
+    yield
+    handler.login_stop(get_claude())
+
+
+router = APIRouter(lifespan=lifespan)
 KINDS = ("event", "round", "verdict", "decision", "comment")  # Q8: the timeline SQL's 0–4 sort key
 SIDE = {"add": "new", "ctx": "new", "del": "old"}  # Q5: hunk and note rows have no side
 
@@ -50,6 +71,16 @@ def diff_file(f: dict) -> dict:
 @router.get("/api/auth")
 def auth(claude: ClaudeAdapter) -> dto.AuthOut:
     return handler.auth(claude)
+
+
+@router.post("/api/auth/login")
+def login(claude: ClaudeAdapter) -> dto.LoginStarted:
+    return handler.login_start(claude)
+
+
+@router.post("/api/auth/login/code")
+def login_code(body: dto.LoginCode, claude: ClaudeAdapter) -> dto.AuthOut:
+    return handler.login_code(claude, body.code)
 
 
 @router.get("/api/docs/fctl")

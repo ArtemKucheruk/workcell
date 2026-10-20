@@ -1,17 +1,20 @@
 """Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), the header's
-login badge, and the fctl reference (§8 item 7). Each page returns the dict controllers/pages_api.py maps
-onto its dto/pages.py view-model."""
+login badge, the Settings page's Claude login (§8 item 9), and the fctl reference (§8 item 7). Each page
+returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
+import re
 import shlex
+import subprocess
+from contextlib import suppress
 from itertools import groupby
 from pathlib import Path
 from time import monotonic
 
 from .. import config
-from ..adapters.claude import Claude, stripped_env
+from ..adapters.claude import Claude, last_line, read, stripped_env
 from ..adapters.git import Git
 from ..domain.enums import Reviewer, Status
-from ..domain.errors import NotFound
+from ..domain.errors import Conflict, Failed, Invalid, NotFound
 from ..lib.diff import diff_rows, file_tree
 from ..lib.markdown import render_with_headings
 from ..repositories.projects import ProjectsRepo
@@ -35,13 +38,91 @@ TILES = {
     "waiting": "Waiting on me", "escalated": "Escalated", "running": "Running now",
     "done_week": "Done this week", "runs_week": "Runs this week",
 }
-LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": auth_status()'s answer}; the pages' only state
+LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": auth_status()'s answer}
+# 039: the one `claude auth login` waiting for its code, {"proc", "url"}.
+# ponytail: no lock (Q9): one user, one pending login, and a new login stops the old one first
+PENDING: dict = {}
+LOGIN_CODE_TIMEOUT = 60  # 039 Q4: seconds for claude to exchange the code and exit
+CODE = re.compile(r"[^\s#]+#[^\s#]+")  # 039 Q1: <code>#<state>, as the sign-in page shows it
+
+
+def reap(proc: subprocess.Popen) -> None:
+    """Wait for `proc` (SIGKILL if it outlives SIGTERM by 5 s) and close its pipes."""
+    try:
+        proc.wait(5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    with suppress(BrokenPipeError), proc:  # stdin's close may flush a code claude never read
+        pass
+
+
+def pending() -> dict | None:
+    """039: the pending login. Once its process has exited it's dropped, with the auth cache, so a login
+    finished in claude's own browser tab (Q6) shows at once (AC14)."""
+    if PENDING and PENDING["proc"].poll() is not None:
+        reap(PENDING.pop("proc"))
+        PENDING.clear()
+        LOGIN.clear()
+    return PENDING or None
+
+
+def login_stop(claude: Claude) -> None:
+    """039: stop the pending login's process group and forget it: before a new login (AC7), after the code
+    timeout (AC13), and on shutdown (AC15)."""
+    if PENDING:
+        claude.stop(PENDING["proc"].pid)
+        reap(PENDING.pop("proc"))
+        PENDING.clear()
+
+
+def login_start(claude: Claude) -> dict:
+    """039 Q1: `claude auth login --claudeai` with the runs' stripped env from the data dir (MVP §4.3), and
+    its sign-in URL. Q5: allowed while runs are active."""
+    login_stop(claude)
+    try:
+        proc, url, out = claude.login(str(config.data_dir()), stripped_env())
+    except OSError as e:
+        raise Failed(f"claude auth login didn't start: {e}") from None
+    if url is None:
+        claude.stop(proc.pid)
+        reap(proc)
+        line = last_line(out)
+        raise Failed("claude auth login printed no sign-in URL" + (f": {line}" if line else ""))
+    PENDING.update(proc=proc, url=url)
+    return {"url": url}
+
+
+def login_code(claude: Claude, code: str) -> dict:
+    """039 Q1: write `<code>#<state>` to the pending login's stdin, kept open, and wait for claude to exit.
+    Exit 0 answers /api/auth afresh; otherwise claude's `Login failed: …` line is the 422's detail (Q4)."""
+    found = pending()
+    if found is None:
+        raise Conflict("no login in progress")
+    code = code.strip()
+    if len(code) > 2048 or not CODE.fullmatch(code):  # AC12: claude would only re-prompt; the login stays
+        raise Invalid("code must be <code>#<state>, as the sign-in page shows it")
+    proc = found["proc"]
+    with suppress(BrokenPipeError):  # it exited just now: its exit code still answers
+        proc.stdin.write(code + "\n")
+        proc.stdin.flush()
+    try:
+        returncode = proc.wait(LOGIN_CODE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        login_stop(claude)
+        raise Failed("claude auth login didn't finish") from None
+    out = read(proc.stdout, 2) if returncode else ""  # 2 s: a lingering child may hold the pipe open
+    pending()  # drops it and the auth cache
+    if returncode:
+        raise Invalid(last_line(out) or f"claude auth login exited with code {returncode}")
+    return auth(claude)
 
 
 def auth_status(claude: Claude) -> dict | None:
     """MVP §4.3: `claude auth status`'s parsed claude.ai answer, or None, checked with the runs' stripped
     env from the neutral data dir (014 Q1), cached 60 s (014 Q3) for the badge and /api/auth alike (020 Q3).
+    A pending login that has exited clears the cache first (039).
     ponytail: no lock, so two cold requests may both run the check."""
+    pending()
     now = monotonic()
     if not LOGIN or now - LOGIN["at"] >= 60:
         LOGIN.update(at=now, value=claude.auth_status(str(config.data_dir()), stripped_env()))
@@ -59,11 +140,11 @@ def claude_login(claude: Claude) -> tuple[str, bool]:
 
 def auth(claude: Claude) -> dict:
     """docs/data-model-and-api.md §6.4's /api/auth. 020 Q3: a non-claude.ai login's method is unknown, so null;
-    `plan` is the raw subscriptionType."""
+    `plan` is the raw subscriptionType. 039 Q3: `email` is the claude.ai login's account, else null."""
     info = auth_status(claude) or {}
-    plan = info.get("subscriptionType")
+    plan, email = info.get("subscriptionType"), info.get("email")
     return {"auth_method": info.get("authMethod"), "plan": plan if isinstance(plan, str) else None,
-            "runs_enabled": bool(info)}
+            "runs_enabled": bool(info), "email": email if isinstance(email, str) else None}
 
 
 def fctl_doc() -> dict:

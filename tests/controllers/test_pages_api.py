@@ -1,17 +1,24 @@
 import ast
+import json
 import os
+import re
 import shlex
+import sys
+import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from conftest import commit, git, sql, write
 from controllers.test_runs import H, OLD, SKILL, add_task, connect, fake, project  # noqa: F401
-from test_architecture import PKG, checked, fastapi_outside, sql_outside, wrong_edges
+from fastapi.testclient import TestClient
+from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, wrong_edges
 
 from claude_factories import db
 from claude_factories.handlers import pages
+from claude_factories.server.app import create_app
 
 PRO = '{"authMethod":"claude.ai","subscriptionType":"pro"}'
+PRO_EMAIL = '{"authMethod":"claude.ai","subscriptionType":"pro","email":"artem@example.com"}'
 APP_PY = "diff --git a/app.py b/app.py\nnew file mode 100644\n--- /dev/null\n+++ b/app.py\n@@ -0,0 +1 @@\n+x = 1\n"
 B_PY = "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1,2 +1,2 @@\n keep\n-x\n+y\n"
 TASK_KEYS = {"id", "project_id", "project", "title", "status", "stage", "branch", "worktree_path",
@@ -180,15 +187,25 @@ def unready(client, tmp_path, fake):
 # --- GET /api/auth -------------------------------------------------------------------
 
 
-def test_auth_claude_ai(client, fake):  # AC1
-    fake(auth=PRO)
-    assert api(client, "/api/auth") == {"auth_method": "claude.ai", "plan": "pro", "runs_enabled": True}
+def test_auth_claude_ai(client, fake):  # AC1, 039 AC1
+    fake(auth=PRO_EMAIL)
+    assert api(client, "/api/auth") == {"auth_method": "claude.ai", "plan": "pro", "runs_enabled": True,
+                                        "email": "artem@example.com"}
 
 
 @pytest.mark.parametrize("auth", ['{"authMethod":"console"}', "not json"])
 def test_auth_not_claude_ai(client, fake, auth):  # AC2
     fake(auth=auth)
-    assert api(client, "/api/auth") == {"auth_method": None, "plan": None, "runs_enabled": False}
+    assert api(client, "/api/auth") == {"auth_method": None, "plan": None, "runs_enabled": False, "email": None}
+
+
+def test_auth_email_null(client, fake):  # 039 AC2
+    fake(auth=PRO)
+    assert api(client, "/api/auth") == {"auth_method": "claude.ai", "plan": "pro", "runs_enabled": True,
+                                        "email": None}
+    pages.LOGIN.clear()
+    fake(auth='{"authMethod":"console","email":"x@y.z"}')
+    assert api(client, "/api/auth") == {"auth_method": None, "plan": None, "runs_enabled": False, "email": None}
 
 
 def test_auth_check_env_and_cwd(client, fake, monkeypatch):  # 026 AC12
@@ -215,6 +232,226 @@ def test_auth_cached_60s(client, tmp_path, monkeypatch):  # AC3, 026 AC13
     clock[0] += 2  # 61 s after the first
     assert api(client, "/api/auth")["plan"] == "pro"
     assert count() == 2
+
+
+# --- POST /api/auth/login, /api/auth/login/code (039) ---------------------------------
+
+SIGN_IN = "https://claude.ai/oauth/authorize?code=true&client_id=c&state=abc"
+# 039 Q1: claude 2.1.304's `auth login`, acted out per the `mode` file; `auth status` prints the `status` file
+LOGIN_FAKE = r'''
+import json, os, sys, time
+d = os.environ["FAKE_LOGIN_DIR"]
+def put(name, text, how="w"):
+    with open(os.path.join(d, name), how) as f:
+        f.write(text)
+if sys.argv[1:] == ["auth", "status"]:
+    print(open(os.path.join(d, "status")).read())
+    sys.exit(0)
+put("starts", json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ),
+                          "pgid": os.getpgrp()}) + "\n", "a")
+mode = open(os.path.join(d, "mode")).read()
+url = "SIGN_IN"
+print("Opening browser to sign in…")
+if mode.startswith("fail"):
+    if mode == "fail-http":
+        print("If the browser didn't open, visit: http://localhost:5555/callback")
+    print("Error: managed settings forbid this", flush=True)
+    sys.exit(1)
+osc = "\x1b]8;;" + url + "\x07" + url + "\x1b]8;;\x07"
+print("If the browser didn't open, visit: " + (osc if mode == "osc" else url))
+print("Paste code here if prompted > ", end="", flush=True)
+if mode == "self":  # Q6: claude's own browser tab finished the sign-in
+    put("status", 'PRO_EMAIL')
+    sys.exit(0)
+while line := sys.stdin.readline():
+    put("stdin", line, "a")
+    if mode == "hang":
+        time.sleep(60)
+    if mode == "reject":
+        print("Login failed: Invalid code", file=sys.stderr)
+        sys.exit(1)
+    if line == "good#state\n":
+        put("status", 'PRO_EMAIL')
+        print("Login successful.")
+        sys.exit(0)
+    print("Invalid code", file=sys.stderr)
+'''.replace("SIGN_IN", SIGN_IN).replace("PRO_EMAIL", PRO_EMAIL)
+NO_LOGIN = {"detail": "no login in progress"}
+
+
+@pytest.fixture
+def fake_login(tmp_path, monkeypatch):
+    """039: fake_login(mode, status) sets the fake's behaviour; starts() and stdin() read what it saw."""
+    d = tmp_path / "login"
+    d.mkdir()
+    monkeypatch.setenv("FAKE_LOGIN_DIR", str(d))
+    claude = tmp_path / "bin" / "claude"
+    claude.write_text(f"#!{sys.executable}{LOGIN_FAKE}")
+    claude.chmod(0o755)
+
+    def install(mode="ok", status=CONSOLE):
+        (d / "mode").write_text(mode)
+        (d / "status").write_text(status)
+
+    def lines(name):
+        return (d / name).read_text().splitlines() if (d / name).exists() else []
+
+    install()
+    install.starts = lambda: [json.loads(line) for line in lines("starts")]
+    install.stdin = lambda: lines("stdin")
+    return install
+
+
+def start(client, status=200):
+    r = client.post("/api/auth/login", headers=H)
+    assert r.status_code == status, r.text
+    return r.json()
+
+
+def send(client, code, status=200):
+    r = client.post("/api/auth/login/code", json={"code": code}, headers=H)
+    assert r.status_code == status, r.text
+    return r.json()
+
+
+def gone(pgid) -> bool:
+    """Whether process group `pgid` is empty, waiting up to 5 s."""
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_login_start(client, fake_login, monkeypatch):  # 039 AC3
+    for name in STRIPPED + ("CLAUDE_CODE_USE_VERTEX",):
+        monkeypatch.setenv(name, "x")
+    assert start(client) == {"url": SIGN_IN}
+    [seen] = fake_login.starts()
+    assert seen["argv"] == ["auth", "login", "--claudeai"]
+    assert os.path.realpath(seen["cwd"]) == os.path.realpath(os.environ["FCTL_HOME"])
+    leaked = [k for k in seen["env"] if k in STRIPPED or k.startswith("CLAUDE_CODE_USE_")]
+    assert leaked == []
+
+
+def test_login_osc8_url(client, fake_login):  # 039 AC4
+    fake_login("osc")
+    url = start(client)["url"]
+    assert url == SIGN_IN
+    assert "\x1b" not in url and "\x07" not in url
+
+
+def test_login_needs_header(client, fake_login):  # 039 AC5
+    r = client.post("/api/auth/login")
+    assert r.status_code == 403
+    assert fake_login.starts() == []
+
+
+@pytest.mark.parametrize("mode", ["fail", "fail-http"])
+def test_login_no_url(client, fake_login, mode):  # 039 AC6
+    fake_login(mode)
+    assert start(client, 500) == {
+        "detail": "claude auth login printed no sign-in URL: Error: managed settings forbid this"}
+    assert send(client, "good#state", 409) == NO_LOGIN
+
+
+def test_login_restart_stops_first(client, fake_login):  # 039 AC7
+    start(client)
+    first = fake_login.starts()[0]["pgid"]
+    assert start(client) == {"url": SIGN_IN}
+    assert gone(first)
+
+
+def test_login_code_success(client, fake_login):  # 039 AC8
+    assert api(client, "/api/auth")["runs_enabled"] is False  # primes the 60 s cache
+    start(client)
+    assert send(client, "good#state") == {"auth_method": "claude.ai", "plan": "pro", "runs_enabled": True,
+                                          "email": "artem@example.com"}
+    assert fake_login.stdin() == ["good#state"]
+    assert api(client, "/api/auth")["runs_enabled"] is True
+
+
+def test_login_code_after_success(client, fake_login):  # 039 AC9
+    start(client)
+    send(client, "good#state")
+    assert send(client, "good#state", 409) == NO_LOGIN
+
+
+def test_login_code_without_login(client, fake_login):  # 039 AC10
+    assert send(client, "good#state", 409) == NO_LOGIN
+    assert fake_login.starts() == []
+
+
+def test_login_code_refused(client, fake_login):  # 039 AC11
+    fake_login("reject")
+    start(client)
+    assert send(client, "good#state", 422) == {"detail": "Login failed: Invalid code"}
+    assert send(client, "good#state", 409) == NO_LOGIN
+
+
+def test_login_code_shape(client, fake_login):  # 039 AC12
+    start(client)
+    for bad in ["goodstate", "#state", "good#", "#", "go od#state", "good#st\nate", "a" * 2047 + "#b", ""]:
+        r = client.post("/api/auth/login/code", json={"code": bad}, headers=H)
+        assert r.status_code == 422, bad
+    assert fake_login.stdin() == []
+    assert send(client, "  good#state\n")["runs_enabled"] is True
+    assert fake_login.stdin() == ["good#state"]
+
+
+def test_login_code_timeout(client, fake_login, monkeypatch):  # 039 AC13
+    fake_login("hang")
+    monkeypatch.setattr(pages, "LOGIN_CODE_TIMEOUT", 0.5)
+    start(client)
+    pgid = fake_login.starts()[0]["pgid"]
+    assert send(client, "good#state", 500) == {"detail": "claude auth login didn't finish"}
+    assert gone(pgid)
+
+
+def test_login_finished_by_claude(client, fake_login):  # 039 AC14
+    fake_login("self")
+    assert api(client, "/api/auth")["runs_enabled"] is False  # primes the 60 s cache
+    start(client)
+    pages.PENDING["proc"].wait(5)  # claude's own tab finished; nothing has looked yet
+    assert api(client, "/api/auth")["runs_enabled"] is True
+    assert send(client, "good#state", 409) == NO_LOGIN
+
+
+def test_login_stopped_on_shutdown(fake_login):  # 039 AC15
+    with TestClient(create_app(), base_url="http://127.0.0.1:4545") as c:
+        start(c)
+        pgid = fake_login.starts()[0]["pgid"]
+    assert gone(pgid)
+
+
+def section(name, heading):
+    """docs/<name>'s section from `heading` up to the next heading of the same or a higher level."""
+    text = (REPO / "docs" / name).read_text(encoding="utf-8")
+    level = heading.split(" ")[0]
+    body = text[text.index(f"\n{heading}") + 1:]
+    end = re.search(rf"\n#{{1,{len(level)}}} ", body)
+    return body[:end.start()] if end else body
+
+
+def test_login_docs():  # 039 AC16
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    routes = api_doc[:api_doc.index("```")]
+    assert "`/settings`" in routes
+    auth_row = api_doc[api_doc.index("GET  /api/auth"):api_doc.index("POST /api/auth/login")]
+    assert '"email"' in auth_row
+    login_rows = api_doc[api_doc.index("POST /api/auth/login"):api_doc.index("GET  /api/pages/dashboard")]
+    assert "POST /api/auth/login/code" in login_rows
+    assert '{"url":' in login_rows and '{"code":' in login_rows
+    for status in ("409", "422", "500"):
+        assert f"# {status} {{\"detail\":" in login_rows
+    ui = section("ui.md", "## 8.")
+    assert "/settings" in ui[:ui.index("1. **Dashboard**")]
+    assert ui.index("8. **Transcript**") < ui.index("9. **Settings** (`/settings`)")
+    login_bullet = section("MVP.md", "### 4.6").split("- **Login.**")[1].split("\n- ")[0]
+    assert "Settings page" in login_bullet
 
 
 # --- GET /api/pages/dashboard --------------------------------------------------------
