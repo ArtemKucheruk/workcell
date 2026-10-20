@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { expectOfflineBanner, fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECT = {
   id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
@@ -162,7 +162,7 @@ test('FE14: an empty Open and an empty Closed say so', async () => {
   expect(screen.queryByText('Nothing waiting for review.')).toBeNull()
 })
 
-test('FE15: the title; a 404 is not-found; a failed first load is the alert alone; a failed poll keeps the list', async () => {
+test('FE15, 046 FE11, FE12, FE13: the title; a 404 is not-found; a failed first load is the alert alone; a failed poll keeps the list under the offline banner', async () => {
   const { unmount } = await open(board())
   await waitFor(() => expect(document.title).toBe('api · Reviews · Claude Factories'))
   unmount()
@@ -186,12 +186,5 @@ test('FE15: the title; a 404 is not-found; a failed first load is the alert alon
   renderAt('/projects/3/reviews')
   await advance(0)
   expect(listed()).toEqual(['#12 Task 12'])
-  responses[`GET ${BOARD}`] = [502, { detail: 'Backend unreachable at http://127.0.0.1:4545' }]
-  await advance(3000)
-  expect(screen.getByRole('alert').textContent).toBe('Backend unreachable at http://127.0.0.1:4545')
-  expect(listed()).toEqual(['#12 Task 12'])
-  responses[`GET ${BOARD}`] = [200, board({ review: [waiting(12)] })]
-  await advance(3000)
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(listed()).toEqual(['#12 Task 12'])
+  await expectOfflineBanner(responses, `GET ${BOARD}`, () => expect(listed()).toEqual(['#12 Task 12']))
 })

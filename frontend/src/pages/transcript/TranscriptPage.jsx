@@ -6,6 +6,7 @@ import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { Block as Placeholder, Lines, Skeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -55,6 +56,25 @@ function Block({ block, onShowAll }) {
   return null
 }
 
+/** 046 Q5: the breadcrumb, the label, the stats line, then a few messages. */
+function TranscriptSkeleton() {
+  return (
+    <Skeleton>
+      <TitleSkeleton>
+        <Placeholder className="h-6 w-96 max-w-full" />
+      </TitleSkeleton>
+      <div className="grid gap-4">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="grid gap-2 border-l-2 border-line pl-3">
+            <Placeholder className="h-5 w-40" />
+            <Lines n={3} />
+          </div>
+        ))}
+      </div>
+    </Skeleton>
+  )
+}
+
 /**
  * docs/ui.md §8 item 8: one agent's transcript. Fetched once, no poll: a copy only changes when a run ends.
  * Q9: "Show all" refetches with ?full=1, after which every tool result is whole. 047 Q2: the breadcrumb's `#id` is the link
@@ -73,7 +93,7 @@ export function TranscriptPage() {
   }, [label])
 
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!t) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!t) return error ? <ErrorMessage error={error} /> : <TranscriptSkeleton />
 
   return (
     <>

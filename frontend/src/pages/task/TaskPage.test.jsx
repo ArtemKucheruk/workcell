@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
-import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { expectOfflineBanner, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PAGE = '/api/pages/tasks/12'
 const LOG = (id, after) => `/api/runs/${id}/log?after=${after}`
@@ -270,7 +270,8 @@ test("AC13: the approver's decision shows with its round and rendered body; null
   expect(screen.queryByText(/Approver ·/)).toBeNull()
 })
 
-test('AC14: the status history is an ordered list of local times and labels', async () => {
+test('AC14, 046 FE4: the status history is an ordered list of relative times, each with its local time as title, and labels', async () => {
+  vi.setSystemTime(new Date('2026-10-18T01:07:00Z'))
   await open(taskPage({}, {
     history: [
       { created_at: '2026-10-18T01:02:00Z', label: 'created · backlog' },
@@ -278,10 +279,31 @@ test('AC14: the status history is an ordered list of local times and labels', as
     ],
   }))
   const items = [...section('Status history').querySelectorAll('ol > li')]
-  expect(items.map((li) => li.textContent)).toEqual(['2026-10-18 10:02 created · backlog', '2026-10-18 10:05 in_progress · build'])
+  expect(items.map((li) => li.textContent)).toEqual(['5m ago created · backlog', '2m ago in_progress · build'])
   expect(items.map((li) => li.querySelector('time').getAttribute('datetime'))).toEqual([
     '2026-10-18T01:02:00Z', '2026-10-18T01:05:00Z',
   ])
+  expect(items.map((li) => li.querySelector('time').getAttribute('title'))).toEqual(['2026-10-18 10:02', '2026-10-18 10:05'])
+})
+
+test('046 FE5: relative times refresh with the 3 s polls and no timer of their own', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-10-18T01:07:01Z')) // the entry is 5m 1s old
+  const fetch = mockFetch({
+    [`GET ${PAGE}`]: [200, taskPage({}, { history: [{ created_at: '2026-10-18T01:02:00Z', label: 'created · backlog' }] })],
+  })
+  renderAt('/tasks/12')
+  await advance(0)
+  const entry = () => section('Status history').querySelector('li').textContent
+  expect(entry()).toBe('5m ago created · backlog')
+  // act renders at its end, so step to the last poll before the minute turns (57 s), then past the turn (59 s) to
+  // just before the next poll (60 s): nothing but a poll renders the text again
+  await advance(57_000)
+  await advance(2_500)
+  expect(entry()).toBe('5m ago created · backlog')
+  await advance(500)
+  expect(loads(fetch)).toBe(21)
+  expect(entry()).toBe('6m ago created · backlog')
 })
 
 // --- Run controls ----------------------------------------------------------------------
@@ -297,14 +319,16 @@ test('AC15: a backlog task without a run has only Run, which posts and reloads',
   await clickAndReload(fetch, 'Run', 'POST', '/api/tasks/12/run')
 })
 
-test('AC16: a running run shows Stop and its start time; Stop posts and reloads', async () => {
+test('AC16, 046 FE3: a running run shows Stop and how long ago it started; Stop posts and reloads', async () => {
+  vi.setSystemTime(new Date('2026-10-18T01:07:00Z'))
   const { fetch } = await open(taskPage({}, { run: run(41, 'running') }), {
     'POST /api/runs/41/stop': [200, { id: 41, status: 'stopped' }],
     [`GET ${LOG(41, 0)}`]: log(0),
   })
   expect(runButtons()).toEqual(['Stop'])
-  expect(within(header()).getByText(fullText('run #41 running · started 10:02'))).toBeTruthy()
+  expect(within(header()).getByText(fullText('run #41 running · started 5m ago'))).toBeTruthy()
   expect(runStatus().querySelector('time').getAttribute('datetime')).toBe('2026-10-18T01:02:00Z')
+  expect(runStatus().querySelector('time').getAttribute('title')).toBe('2026-10-18 10:02')
   await clickAndReload(fetch, 'Stop', 'POST', '/api/runs/41/stop')
 })
 
@@ -542,7 +566,7 @@ test("AC30: the API's 404 shows the not-found state with its detail and a link h
   expect(screen.getByRole('link', { name: 'Go to the dashboard' }).getAttribute('href')).toBe('/')
 })
 
-test('AC31: a failed first load shows only the alert; a failed later poll keeps the page until the next success', async () => {
+test('AC31, 046 FE10, FE12, FE13: a failed first load shows only the alert; a failed poll over the page shows the offline banner until the next success', async () => {
   mockFetch({ [`GET ${PAGE}`]: [500, { detail: 'boom' }] })
   const first = renderAt('/tasks/12')
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
@@ -552,14 +576,9 @@ test('AC31: a failed first load shows only the alert; a failed later poll keeps 
   const responses = { [`GET ${PAGE}`]: [200, taskPage()] }
   await openFake(responses)
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
-  responses[`GET ${PAGE}`] = [502, { detail: 'Backend unreachable at http://127.0.0.1:4545' }]
-  await advance(3000)
-  expect(screen.getByRole('alert').textContent).toBe('Backend unreachable at http://127.0.0.1:4545')
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
-  responses[`GET ${PAGE}`] = [200, taskPage()]
-  await advance(3000)
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+  await expectOfflineBanner(responses, `GET ${PAGE}`, () => {
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
+  })
 })
 
 // --- 030: Agents ------------------------------------------------------------------------
@@ -632,10 +651,11 @@ test('030 Q4: a transcript whose round has no Round row yet shows under Other ag
 // --- 047: the title row and Export ----------------------------------------------------
 
 test('047 FE6: the title row holds Run, Retry, or Stop, the run status, and the hint; the status line holds none of them', async () => {
+  vi.setSystemTime(new Date('2026-10-18T01:07:00Z')) // 046 FE3
   const cases = [
     [{ status: 'backlog', stage: null }, null, 'Run', null],
     [{}, run(41, 'failed', { error: 'exit code 3' }), 'Retry', 'run #41 failed: exit code 3'],
-    [{}, run(41, 'running'), 'Stop', 'run #41 running · started 10:02'],
+    [{}, run(41, 'running'), 'Stop', 'run #41 running · started 5m ago'],
   ]
   for (const [task, latest, label, status] of cases) {
     const { unmount } = await open(taskPage(task, { run: latest, can_run: false, hint: HINT }), { [`GET ${LOG(41, 0)}`]: log(0) })

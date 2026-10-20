@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, expect, test, vi } from 'vitest'
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PAGE = '/api/pages/tasks/12/review'
@@ -55,6 +55,9 @@ const appFile = (extra = {}) => file('app.py', { additions: 1, deletions: 1, lan
 
 beforeEach(() => {
   vi.stubEnv('TZ', 'Asia/Tokyo') // UTC+9, as in the other page tests
+})
+afterEach(() => {
+  vi.useRealTimers() // 046 FE6's clock
 })
 
 /** Renders `path` with `page` as the view-model its round fetches; mutate `responses` to change later replies. */
@@ -284,21 +287,30 @@ test("AC12: the approver's decision shows with its round and rendered body; null
   expect(screen.queryByText(/Approver ·/)).toBeNull()
 })
 
-test('AC13: the timeline is an ordered list of local times, labels, and rendered bodies', async () => {
-  await open(reviewPage({}, {
-    timeline: [
-      { created_at: '2026-10-18T01:02:00Z', kind: 'event', id: 1, label: 'created · backlog', body_md: null, body_html: '' },
-      { created_at: '2026-10-18T01:41:00Z', kind: 'decision', id: 7, label: 'approver APPROVE · round 2', body_md: 'All **4**', body_html: '<p>All <strong>4</strong></p>\n' },
-    ],
-  }))
+test('AC13, 046 FE6: the timeline is an ordered list of relative times with local titles, labels, and rendered bodies; no polling', async () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(new Date('2026-10-18T03:02:00Z'))
+  const fetch = mockFetch({
+    [`GET ${PAGE}`]: [200, reviewPage({}, {
+      timeline: [
+        { created_at: '2026-10-18T01:02:00Z', kind: 'event', id: 1, label: 'created · backlog', body_md: null, body_html: '' },
+        { created_at: '2026-10-18T01:41:00Z', kind: 'decision', id: 7, label: 'approver APPROVE · round 2', body_md: 'All **4**', body_html: '<p>All <strong>4</strong></p>\n' },
+      ],
+    })],
+  })
+  renderAt('/tasks/12/review')
+  await act(() => vi.advanceTimersByTimeAsync(0))
   const items = [...section('Timeline').querySelectorAll('ol > li')]
   expect(items).toHaveLength(2)
-  expect(items[0].textContent).toBe('2026-10-18 10:02 created · backlog')
-  expect(items[1].textContent.startsWith('2026-10-18 10:41 approver APPROVE · round 2')).toBe(true)
+  expect(items[0].textContent).toBe('2h ago created · backlog')
+  expect(items[1].textContent.startsWith('1h ago approver APPROVE · round 2')).toBe(true)
   expect(items.map((li) => li.querySelector('time').getAttribute('datetime'))).toEqual([
     '2026-10-18T01:02:00Z', '2026-10-18T01:41:00Z',
   ])
+  expect(items.map((li) => li.querySelector('time').getAttribute('title'))).toEqual(['2026-10-18 10:02', '2026-10-18 10:41'])
   expect(within(items[1]).getByText('4').tagName).toBe('STRONG')
+  await act(() => vi.advanceTimersByTimeAsync(10_000)) // Q3: still loaded once
+  expect(fetched(fetch).filter((url) => url === PAGE)).toHaveLength(1)
 })
 
 test('AC14: the comment box posts my comment, reloads, and empties; Comment is disabled while blank', async () => {

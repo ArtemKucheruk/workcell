@@ -4,6 +4,7 @@ import { dashboardPage } from '../../api/pages.js'
 import { EscalatedPill, RunningBadge, TaskState, WaitingPill } from '../../components/Badge.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { Block, Skeleton } from '../../components/Skeleton.jsx'
 import { muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -240,6 +241,32 @@ function Rounds({ done }) {
   )
 }
 
+/** 046 Q5: the h1, a one-row Needs you box, and the two tile groups (3 and 6 tiles) in the tiles' grid. */
+function DashboardSkeleton() {
+  return (
+    <Skeleton>
+      <Block className="mb-4 h-8 w-40" />
+      <Block className="mb-2 h-7 w-28" />
+      <div className="rounded-md border border-line px-4 py-2.5">
+        <Block className="h-6 w-80 max-w-full" />
+      </div>
+      <div className="mt-8 grid gap-4">
+        {[3, 6].map((n) => (
+          <div key={n}>
+            <Block className="mb-1.5 h-4 w-20" />
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-3">
+              {Array.from({ length: n }, (_, i) => (
+                // a tile: py-2, a text-sm label, gap-1, a text-3xl count, and its border
+                <Block key={i} className="h-19.5" />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 1. */
 export function DashboardPage() {
   const [params] = useSearchParams()
@@ -251,7 +278,7 @@ export function DashboardPage() {
   }, [])
 
   if (error) return error.status === 404 ? <NotFound detail={error.message} /> : <ErrorMessage error={error} />
-  if (!page) return <p className={muted}>Loading…</p>
+  if (!page) return <DashboardSkeleton />
   return (
     <>
       <h1 className="mb-4">Dashboard</h1>

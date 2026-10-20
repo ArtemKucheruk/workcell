@@ -3,7 +3,7 @@ import { useLocation } from 'react-router'
 import { fctlDoc } from '../../api/pages.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
-import { muted } from '../../components/styles.js'
+import { Lines, Skeleton } from '../../components/Skeleton.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
 /**
@@ -35,7 +35,17 @@ export function FctlDocsPage() {
     <>
       <h1 className="mb-6">fctl reference</h1>
       {!doc ? (
-        error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+        error ? (
+          <ErrorMessage error={error} />
+        ) : (
+          // 046 Q5: under the static h1, the Contents column and the text in the page's grid
+          <Skeleton>
+            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">
+              <Lines n={8} />
+              <Lines n={12} />
+            </div>
+          </Skeleton>
+        )
       ) : (
         // Q10: the code page's grid; minmax(0, 1fr) and min-w-0 keep a wide code block from widening the page
         <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">

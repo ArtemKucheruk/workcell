@@ -3,9 +3,10 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
 import { EscalatedPill, WaitingPill } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
-import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Block, ProjectHeaderSkeleton, Skeleton, TabsSkeleton } from '../../components/Skeleton.jsx'
 import { muted, tab } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -51,6 +52,24 @@ function Row({ card, open }) {
   )
 }
 
+/** 046 Q5: the project header, the tabs, and a two-row list box. */
+function ReviewsSkeleton() {
+  return (
+    <Skeleton>
+      <ProjectHeaderSkeleton />
+      <TabsSkeleton className="mb-4" />
+      <div className="grid gap-px overflow-hidden rounded-md border border-line bg-line">
+        {[0, 1].map((i) => (
+          <div key={i} className="grid gap-1 bg-surface px-4 py-3">
+            <Block className="h-6 w-72 max-w-full" />
+            <Block className="h-5 w-96 max-w-full" />
+          </div>
+        ))}
+      </div>
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 10, §8.5: the Review column as Open, the Done column as Closed. */
 export function ReviewsPage() {
   const { id } = useParams()
@@ -65,7 +84,7 @@ export function ReviewsPage() {
   }, [name])
 
   if (error?.status === 404) return <NotFound detail={error.message} />
-  if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
+  if (!page) return error ? <ErrorMessage error={error} /> : <ReviewsSkeleton />
   const { project, columns } = page
   const open = [...(columns.review ?? [])].sort((a, b) => rank(a) - rank(b))
   const done = columns.done ?? []
@@ -75,7 +94,7 @@ export function ReviewsPage() {
   return (
     <>
       <ProjectHeader project={project} factory={page.factory} />
-      {error && <ErrorMessage error={error} />}
+      {error && <OfflineBanner />}
       <nav aria-label="Reviews tabs" className="mb-4 flex gap-4 border-b border-line">
         <Link to={base} aria-current={closed ? undefined : 'page'} className={tab}>
           {'Open '}

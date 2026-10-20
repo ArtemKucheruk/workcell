@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { expect, test } from 'vitest'
-import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { expectSkeleton, fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const API = '/api/docs/fctl'
 /** 029's FctlDoc: body_html with heading ids, and its headings. */
@@ -85,15 +85,15 @@ test('AC19: a malformed or unknown hash throws nothing and scrolls nothing', asy
   }
 })
 
-test('AC20: Loading… before the response; a 500 shows its detail in an alert, with no Contents', async () => {
+test('AC20, 046 FE14: a skeleton before the response; a 500 shows its detail in an alert, with no Contents', async () => {
   mockFetch({}).mockImplementation(() => new Promise(() => {})) // nothing ever answers
   const { unmount } = renderAt('/docs/fctl')
-  expect(await screen.findByText('Loading…')).toBeTruthy()
+  expectSkeleton(await screen.findByRole('status'))
   expect(contents()).toBeNull()
   unmount()
 
   await open([500, { detail: 'boom' }])
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
   expect(contents()).toBeNull()
-  expect(screen.queryByText('Loading…')).toBeNull()
+  expect(screen.queryByRole('status')).toBeNull()
 })

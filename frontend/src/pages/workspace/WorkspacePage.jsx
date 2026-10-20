@@ -4,6 +4,7 @@ import { workspacePage } from '../../api/pages.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { useNewWorkspace, WorkspaceNameField } from '../../components/NewWorkspace.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { Block, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -24,6 +25,20 @@ function NewWorkspace() {
   )
 }
 
+/** 046 Q5: the h1, then the table's header row and three project rows. */
+function WorkspaceSkeleton() {
+  return (
+    <Skeleton>
+      <Block className="mb-4 h-8 w-48" />
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="border-b border-line py-1.5">
+          <Block className="h-6" />
+        </div>
+      ))}
+    </Skeleton>
+  )
+}
+
 /** docs/ui.md §8 item 2. */
 export function WorkspacePage() {
   const { id } = useParams()
@@ -35,7 +50,7 @@ export function WorkspacePage() {
   }, [name])
 
   if (error) return error.status === 404 ? <NotFound detail={error.message} /> : <ErrorMessage error={error} />
-  if (!page) return <p className={muted}>Loading…</p>
+  if (!page) return <WorkspaceSkeleton />
   return (
     <>
       <h1 className="mb-4">{name}</h1>
@@ -59,7 +74,7 @@ export function WorkspacePage() {
                   <td className={num}>{p.review}</td>
                   <td className={num}>{p.done}</td>
                   <td>{p.factory}</td>
-                  <td><Time iso={p.last_activity} /></td>
+                  <td><Time iso={p.last_activity} relative /></td>
                 </tr>
               ))}
             </tbody>

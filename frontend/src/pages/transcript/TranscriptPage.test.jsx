@@ -126,3 +126,15 @@ test("030 AC28: a 404 shows the not-found page with the API's detail; any other 
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
   expect(screen.queryByRole('heading', { level: 1 })).toBeNull()
 })
+
+test('046 FE8: message times stay absolute local YYYY-MM-DD HH:MM, with no title, however recent', async () => {
+  vi.stubEnv('TZ', 'Asia/Tokyo')
+  vi.setSystemTime(new Date('2026-10-17T10:09:20Z')) // 5 minutes after the last message
+  await open({ [`GET ${URL}`]: [200, detail({ messages: MESSAGES })] })
+  const times = [...document.querySelectorAll('main time')]
+  expect(times.map((t) => [t.getAttribute('datetime'), t.textContent, t.getAttribute('title')])).toEqual([
+    ['2026-10-17T10:04:11.500Z', '2026-10-17 19:04', null],
+    ['2026-10-17T10:04:12Z', '2026-10-17 19:04', null],
+    ['2026-10-17T10:04:20Z', '2026-10-17 19:04', null],
+  ])
+})
