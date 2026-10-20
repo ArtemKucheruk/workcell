@@ -214,3 +214,13 @@ test('043 FE17: docs/ui.md describes the pills and chips, and no old chip format
   expect(ui.match(/\b(?:sec|ux|ui|co|code)[✓✗·]|\bco [✓✗·]/g)).toBeNull()
   expect(ui).not.toContain('NEEDS YOU')
 })
+
+test('044 FE21: docs/ui.md item 3 has the Move menu, its popover, Up, Down, and aria-live; §8.1 draws [Move]', () => {
+  const ui = read('../../docs/ui.md')
+  const item = ui.slice(ui.indexOf('3. **Project board**'), ui.indexOf('4. **Task detail**'))
+  for (const text of ['**Move**', 'popover', 'Up', 'Down', 'aria-live']) expect(item).toContain(text)
+  for (const text of ['**Code**', 'Create factory', 'Project context', 'Import']) expect(item).not.toContain(text) // 042
+  const board = ui.slice(ui.indexOf('### 8.1'), ui.indexOf('### 8.2'))
+  expect(board).toContain('[Move')
+  expect(board).not.toContain('[Code]')
+})
