@@ -1,9 +1,12 @@
 import { NotFound } from '../components/NotFound.jsx'
 import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { CodePage } from '../pages/code/CodePage.jsx'
+import { ContextPage } from '../pages/context/ContextPage.jsx'
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
 import { FctlDocsPage } from '../pages/docs/FctlDocsPage.jsx'
+import { ProjectSettingsPage } from '../pages/project-settings/ProjectSettingsPage.jsx'
 import { ReviewPage } from '../pages/review/ReviewPage.jsx'
+import { ReviewsPage } from '../pages/reviews/ReviewsPage.jsx'
 import { SettingsPage } from '../pages/settings/SettingsPage.jsx'
 import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { TranscriptPage } from '../pages/transcript/TranscriptPage.jsx'
@@ -20,6 +23,10 @@ export const routes = [
       { path: '/workspaces/:id', element: <WorkspacePage /> },
       { path: '/projects/:id', element: <BoardPage />, handle: { wide: true } },
       { path: '/projects/:id/code', element: <CodePage />, handle: { wide: true } },
+      // 042 FE37: lists and forms, so main keeps its max width
+      { path: '/projects/:id/reviews', element: <ReviewsPage /> },
+      { path: '/projects/:id/context', element: <ContextPage /> },
+      { path: '/projects/:id/settings', element: <ProjectSettingsPage /> },
       { path: '/tasks/:id', element: <TaskPage /> },
       { path: '/tasks/:id/review', element: <ReviewPage />, handle: { wide: true } },
       { path: '/transcripts/:id', element: <TranscriptPage /> },

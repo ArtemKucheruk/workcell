@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, test } from 'vitest'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
@@ -29,7 +29,15 @@ async function open(responses, at = '/projects/3/code') {
 /** Opens `?path=<path>` with `page` as its view-model. */
 const openFile = (path, page) => open({ [`GET ${API}?${new URLSearchParams({ path })}`]: [200, page] }, `/projects/3/code?path=${path}`)
 
-const loads = (fetch) => fetched(fetch).filter((url) => url.startsWith('/api/pages/projects'))
+// 042 FE33: the code view-model's requests; the header's board view-model is counted apart
+const loads = (fetch) => fetched(fetch).filter((url) => /^\/api\/pages\/projects\/\d+\/code/.test(url))
+const BOARD = '/api/pages/projects/3'
+/** 042's board view-model, for the header. */
+const BOARD_PAGE = {
+  project: { ...PROJECT, default_branch: 'main', workspace_id: 2, workspace: 'personal', remote_url: null, test_cmd: null },
+  factory: 'ready', hint: null, can_run: true, workspaces: [{ id: 2, name: 'personal', projects: 1 }],
+  columns: { backlog: [], in_progress: [], review: [], done: [] },
+}
 const h1 = () => document.querySelector('main h1')
 const files = () => screen.queryByRole('navigation', { name: 'Files' })
 const link = (name) => within(files()).getByRole('link', { name })
@@ -48,13 +56,46 @@ const shape = (ul) =>
 
 // --- Route, header, URL ------------------------------------------------------------------
 
-test('AC1: the landing fetches once with no query; the h1 links the board; the page title', async () => {
-  const { fetch } = await open({ [`GET ${API}`]: [200, landing()] })
-  expect(h1().textContent).toBe('api · Code')
-  expect(within(h1()).getByRole('link', { name: 'api' }).getAttribute('href')).toBe('/projects/3')
+test('AC1, FE33: the landing fetches once with no query; the header is the project header; the page title', async () => {
+  const { fetch } = await open({ [`GET ${API}`]: [200, landing()], [`GET ${BOARD}`]: [200, BOARD_PAGE] })
+  const header = document.querySelector('main header')
+  await waitFor(() => expect(h1().textContent).toBe('api · personal'))
+  expect(h1().closest('header')).toBe(header)
+  expect(within(h1()).getByRole('link', { name: 'personal' }).getAttribute('href')).toBe('/workspaces/2')
+  expect(within(header).getByText('Factory: ready ✓')).toBeTruthy()
+  const branch = within(header).getByText(fullText('Branch main'))
+  expect(within(header).getByText('Factory: ready ✓').compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   await waitFor(() => expect(document.title).toBe('api · Code · Claude Factories'))
   await new Promise((r) => setTimeout(r, 50)) // Q1: no polling, so nothing more arrives
   expect(loads(fetch)).toEqual([API])
+  expect(fetched(fetch).filter((url) => url === BOARD)).toHaveLength(1)
+})
+
+test('FE33: a ?path= change refetches the code view-model, not the board one; a failed board one leaves the h1 api', async () => {
+  const { fetch, router, unmount } = await open({
+    [`GET ${API}`]: [200, landing()],
+    [`GET ${API}?path=src%2Fa.py`]: [200, file('src/a.py', text('x = 1\n'), 'py')],
+    [`GET ${BOARD}`]: [200, BOARD_PAGE],
+  })
+  await waitFor(() => expect(h1().textContent).toBe('api · personal'))
+  fireEvent.click(link('a.py'))
+  await waitFor(() => expect(fileHeader().textContent).toBe('src/a.py'))
+  await act(() => router.navigate('/projects/3/code'))
+  await waitFor(() => expect(loads(fetch)).toHaveLength(3))
+  expect(fetched(fetch).filter((url) => url === BOARD)).toHaveLength(1)
+  expect(h1().textContent).toBe('api · personal')
+  unmount()
+
+  for (const failure of [[500, { detail: 'boom' }], [404, { detail: 'Not Found' }]]) {
+    const failed = await open({ [`GET ${API}`]: [200, landing()], [`GET ${BOARD}`]: failure })
+    await waitFor(() => expect(fetched(failed.fetch)).toContain(BOARD))
+    await act(() => new Promise((r) => setTimeout(r, 20)))
+    expect(h1().textContent).toBe('api')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(document.querySelector('main').textContent).not.toContain('Factory:')
+    expect(files()).not.toBeNull()
+    failed.unmount()
+  }
 })
 
 test('AC2: the branch in a <code>, "detached HEAD" as is, and no Branch text without one', async () => {
@@ -244,7 +285,7 @@ test('AC18: a git failure shows the alert under the header, with no Files nav', 
   })
   await open({ [`GET ${API}`]: [200, page] })
   expect(screen.getByRole('alert').textContent).toBe("Can't list files in /Users/me/gone: fatal: not a git repository")
-  expect(h1().textContent).toBe('api · Code')
+  expect(h1().textContent).toBe('api') // FE4: no board view-model mocked
   expect(files()).toBeNull()
 })
 
@@ -264,6 +305,6 @@ test('AC20: a failed first load is an alert alone; a failed click keeps the page
   await open({ [`GET ${API}`]: [200, landing()], [`GET ${API}?path=src%2Fa.py`]: [500, { detail: 'boom' }] })
   fireEvent.click(link('a.py'))
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
-  expect(h1().textContent).toBe('api · Code')
+  expect(h1().textContent).toBe('api') // FE4: no board view-model mocked
   expect(files()).not.toBeNull()
 })

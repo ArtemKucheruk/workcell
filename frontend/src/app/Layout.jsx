@@ -15,7 +15,7 @@ function routeIds(pathname) {
   const transcript = id(/^\/transcripts\/(\d+)\/?$/)
   return {
     query: task ? { task } : transcript ? { transcript } : undefined,
-    project: id(/^\/projects\/(\d+)(?:\/code)?\/?$/),
+    project: id(/^\/projects\/(\d+)(?:\/(?:code|reviews|context|settings))?\/?$/),
     workspace: id(/^\/workspaces\/(\d+)\/?$/),
   }
 }

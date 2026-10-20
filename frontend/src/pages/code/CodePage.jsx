@@ -1,10 +1,11 @@
 import hljs from 'highlight.js/lib/common'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
-import { codePage } from '../../api/pages.js'
+import { boardPage, codePage } from '../../api/pages.js'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -83,6 +84,9 @@ export function CodePage() {
   // Q1: no polling; fetches on first load and on each path change
   const load = useCallback(() => codePage(id, path), [id, path])
   const { data: page, error } = usePoll(load)
+  // 042 Q2: the header's workspace and factory state come from the board view-model, once per project; until
+  // it arrives, or if it fails, the header is the code view-model's name alone
+  const { data: board } = usePoll(useCallback(() => boardPage(id), [id]))
   const name = page?.project.name
   useEffect(() => {
     if (name) document.title = `${path ? `${path} · ` : ''}${name} · Code · Claude Factories`
@@ -93,19 +97,18 @@ export function CodePage() {
   if (error?.status === 404) return <NotFound detail={error.message} />
   if (!page) return error ? <ErrorMessage error={error} /> : <p className={muted}>Loading…</p>
   const { project, branch, tree, shown } = page
+  // usePoll keeps the last data across a project change: only this project's board view-model counts
+  const head = board?.project.id === project.id ? board : { project }
 
   return (
     <>
-      <header className="mb-6">
-        <h1 className="wrap-anywhere">
-          <Link to={`/projects/${project.id}`}>{project.name}</Link> · Code
-        </h1>
+      <ProjectHeader project={head.project} factory={head.factory}>
         {branch && (
-          <p className="mt-1">
+          <p className="basis-full">
             Branch <code className="wrap-anywhere">{branch}</code>
           </p>
         )}
-      </header>
+      </ProjectHeader>
       {error && <ErrorMessage error={error} />}
       {page.error ? (
         <ErrorMessage error={{ message: `Can't list files in ${project.path}: ${page.error}` }} />

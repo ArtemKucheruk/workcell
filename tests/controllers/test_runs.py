@@ -391,7 +391,7 @@ def test_refused_without_factory(client, repo, fake, on_disk):  # AC19
     task = add_task(connect(client, repo))
     r = run(client, task)
     fix = ('on main, run git add .claude/skills/factory .claude/agents && git commit -m "Add factory"' if on_disk
-           else "Create factory on the project board, then commit it on main")  # 015 ux review
+           else "Create factory in the project's Settings, then commit it on main")  # 015 ux review, 042 BE5
     assert (r.status_code, r.json()) == (409, {"detail": f"factory isn't committed on main: {fix}"})
     assert not (repo / ".claude" / "worktrees").exists()
     assert not fake.invoked() and no_runs()

@@ -161,10 +161,10 @@ POST /api/projects/3/factory                                      (Create factor
 ← 200 {"written":[".claude/skills/factory/SKILL.md",".claude/agents/builder.md", "…"],
        "skipped":[], "commit_hint":"git add .claude/skills/factory .claude/agents && git commit -m \"Add factory\""}
 
-GET  /api/projects/3/context                                      (fctl context, board editor)
+GET  /api/projects/3/context                                      (fctl context, Context page)
 ← 200 {"context_md":"# Stack\n- Python 3.12\n","context_html":"<h1>Stack</h1>\n<ul>…","bytes":22,"max_bytes":16384}
 
-PUT  /api/projects/3/context                                      (fctl context set, board editor)
+PUT  /api/projects/3/context                                      (fctl context set, Context page)
 → {"context_md":"# Stack\n- Python 3.12\n"}
 ← 200 {"context_md":"…","context_html":"…","bytes":22,"max_bytes":16384}
   # 413 {"detail":"context over 16 KB"} over 16384 UTF-8 bytes; "" clears it
@@ -284,7 +284,8 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
-`/projects/{id}` board · `/projects/{id}/code?path=` · `/tasks/{id}` ·
+`/projects/{id}` board · `/projects/{id}/code?path=` · `/projects/{id}/reviews?tab=closed` ·
+`/projects/{id}/context` · `/projects/{id}/settings` · `/tasks/{id}` ·
 `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl` · `/settings`. Any
 other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}` loads
 `GET /api/transcripts/{id}` (§6.2).
@@ -312,7 +313,9 @@ POST /api/auth/login/code                                         (Settings: Sub
 
 GET  /api/pages/dashboard                       tiles, open tasks per workspace → project, rounds per task
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
-GET  /api/pages/projects/{id}                   board cards with stage, chips per round, +/−, waiting, escalated, stalled
+GET  /api/pages/projects/{id}                   the project (path, remote_url, default branch, test_cmd, workspace),
+                                                factory state and hint, board cards with stage, branch, chips per
+                                                round, +/−, waiting, escalated, stalled
 GET  /api/pages/tasks/{id}                      spec_html, rounds, decision, history, the active run and takeover command,
                                                 transcripts (as GET /api/tasks/{id}/transcripts)
 GET  /api/pages/tasks/{id}/review?round=        timeline; files with diff rows carrying side, old/new line, kind,

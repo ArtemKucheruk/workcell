@@ -75,15 +75,13 @@ function drag(id, label, clientY) {
 
 // --- Page and header -------------------------------------------------------------------
 
-test('AC1: /projects/3 shows the project, its workspace, path, title, and Code link', async () => {
+test('AC1: /projects/3 shows the project, its workspace, and the title', async () => {
   const { fetch } = await open(board())
   expect(fetched(fetch)).toContain(BOARD)
   const h1 = screen.getByRole('heading', { level: 1 })
   expect(h1.textContent).toBe('api · personal')
   expect(within(h1).getByRole('link', { name: 'personal' }).getAttribute('href')).toBe('/workspaces/2')
-  expect(screen.getByText('/Users/me/api')).toBeTruthy()
   await waitFor(() => expect(document.title).toBe('api · Claude Factories')) // the title is set in an effect, after the heading renders
-  expect(screen.getByRole('link', { name: 'Code' }).getAttribute('href')).toBe('/projects/3/code')
 })
 
 test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {
@@ -93,19 +91,35 @@ test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () =
   expect(main.queryByRole('link', { name: 'Claude Factories' })).toBeNull()
 })
 
-test('AC2: ready shows Factory: ready ✓ and no form; uncommitted and none show the Create factory form', async () => {
+test('AC2: the header shows Factory: ready ✓, or the uncommitted or none state', async () => {
   const ready = await open(board())
-  expect(screen.getByText('Factory: ready ✓')).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Create factory' })).toBeNull()
-  expect(screen.queryByRole('checkbox', { name: 'Overwrite existing files' })).toBeNull()
+  expect(within(header()).getByText('Factory: ready ✓')).toBeTruthy()
   ready.unmount()
   for (const factory of ['uncommitted', 'none']) {
     const { unmount } = await open(board({}, { factory, can_run: false }))
-    expect(screen.getByText(`Factory: ${factory}`)).toBeTruthy()
-    expect(screen.getByRole('checkbox', { name: 'Overwrite existing files' }).checked).toBe(false)
-    expect(screen.getByRole('button', { name: 'Create factory' })).toBeTruthy()
+    expect(within(header()).getByText(`Factory: ${factory}`)).toBeTruthy()
     unmount()
   }
+})
+
+test('FE6: the header holds the project header, + New task, Run next, and the hint; main has none of the moved parts', async () => {
+  await open(board({}, { factory: 'none', hint: HINT, can_run: false }))
+  const head = within(header())
+  expect(head.getByRole('heading', { level: 1 }).textContent).toBe('api · personal')
+  expect(head.getByRole('link', { name: 'Factory: none' })).toBeTruthy()
+  expect(head.getByText('+ New task')).toBeTruthy()
+  expect(head.getByRole('button', { name: 'Run next ▶' })).toBeTruthy()
+  expect(head.getByText(HINT)).toBeTruthy()
+  const main = screen.getByRole('main')
+  const inMain = within(main)
+  expect(main.textContent).not.toContain('/Users/me/api')
+  expect(inMain.queryByRole('link', { name: 'Code' })).toBeNull()
+  expect(inMain.queryByRole('button', { name: 'Create factory' })).toBeNull()
+  expect(inMain.queryByRole('checkbox', { name: 'Overwrite existing files' })).toBeNull()
+  expect(main.querySelector('input[type="file"]')).toBeNull()
+  expect(main.textContent).not.toContain('Project context')
+  expect(inMain.queryByRole('combobox', { name: 'Workspace' })).toBeNull()
+  expect(inMain.queryByRole('button', { name: 'Move' })).toBeNull()
 })
 
 test('AC3: a hint shows in the header; a null hint shows none', async () => {
@@ -410,87 +424,6 @@ test('AC23: a refused create shows its detail in the form and keeps it open', as
   expect(form.getByRole('textbox', { name: 'Title' }).value).toBe('x')
 })
 
-// --- Create factory --------------------------------------------------------------------
-
-const factoryOut = (written, skipped) => [200, { written, skipped, commit_hint: 'git add .claude && git commit -m "Add factory"' }]
-
-test('AC24: Create factory sends overwrite false, or true when ticked', async () => {
-  for (const overwrite of [false, true]) {
-    const { fetch, unmount } = await open(board({}, { factory: 'none', can_run: false }), {
-      'POST /api/projects/3/factory': factoryOut(['.claude/a.md'], []),
-    })
-    if (overwrite) fireEvent.click(screen.getByRole('checkbox', { name: 'Overwrite existing files' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Create factory' }))
-    await screen.findByText('Commit them so runs can see the factory:')
-    expect(sent(fetch, 'POST', '/api/projects/3/factory')).toEqual({ overwrite })
-    unmount()
-  }
-})
-
-test('AC25: the result lists what was written or skipped, the commit hint, and reloads', async () => {
-  const skipped8 = Array.from({ length: 8 }, (_, i) => `.claude/agents/s${i}.md`)
-  const cases = [
-    [['.claude/a.md', '.claude/b.md'], [], 'Wrote 2 files:', null],
-    [[], skipped8, null, 'Skipped 8 existing files (tick Overwrite to replace them):'],
-    [['.claude/a.md'], ['.claude/b.md'], 'Wrote 1 file:', 'Skipped 1 existing file (tick Overwrite to replace them):'],
-  ]
-  for (const [written, skipped, wrote, skip] of cases) {
-    const { fetch, unmount } = await open(board({}, { factory: 'uncommitted', can_run: false }), {
-      'POST /api/projects/3/factory': factoryOut(written, skipped),
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Create factory' }))
-    await screen.findByText('Commit them so runs can see the factory:')
-    if (wrote) expect(screen.getByText(wrote)).toBeTruthy()
-    else expect(screen.queryByText(/^Wrote/)).toBeNull()
-    if (skip) expect(screen.getByText(skip)).toBeTruthy()
-    else expect(screen.queryByText(/^Skipped/)).toBeNull()
-    const codes = [...header().querySelectorAll('li > code')].map((c) => c.textContent)
-    expect(codes).toEqual([...written, ...skipped])
-    const hint = header().querySelector('pre > code')
-    expect(hint.textContent).toBe('git add .claude && git commit -m "Add factory"')
-    await waitFor(() => expect(loads(fetch)).toBe(2))
-    unmount()
-  }
-})
-
-test('AC26: a refused Create factory shows its detail beside the form, with no file lists', async () => {
-  const { fetch } = await open(board({}, { factory: 'none', can_run: false }), {
-    'POST /api/projects/3/factory': [409, { detail: 'no test command: run fctl connect --test-cmd' }],
-  })
-  fireEvent.click(screen.getByRole('button', { name: 'Create factory' }))
-  const alert = await screen.findByRole('alert')
-  expect(alert.textContent).toBe('no test command: run fctl connect --test-cmd')
-  expect(alert.closest('header')).toBe(screen.getByRole('button', { name: 'Create factory' }).closest('header'))
-  expect(screen.queryByText(/^(Wrote|Skipped|Commit them)/)).toBeNull()
-  expect(header().querySelector('li > code, pre')).toBeNull()
-  expect(loads(fetch)).toBe(1)
-})
-
-// --- Move to another workspace ---------------------------------------------------------
-
-test('AC27: Move patches the workspace and the header follows the reloaded view-model', async () => {
-  const { fetch, responses } = await open(board(), { 'PATCH /api/projects/3': [200, { id: 3, workspace_id: 4 }] })
-  const select = screen.getByRole('combobox', { name: 'Workspace' })
-  expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['personal', true], ['work', false]])
-  responses[`GET ${BOARD}`] = [200, { ...board(), project: { ...PROJECT, workspace_id: 4, workspace: 'work' } }]
-  fireEvent.change(select, { target: { value: '4' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-  const h1 = await screen.findByRole('heading', { level: 1, name: 'api · work' })
-  expect(within(h1).getByRole('link', { name: 'work' }).getAttribute('href')).toBe('/workspaces/4')
-  expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ workspace_id: 4 })
-  expect(loads(fetch)).toBe(2)
-})
-
-test('AC28: a refused move shows its detail in the Move form', async () => {
-  await open(board(), { 'PATCH /api/projects/3': [404, { detail: 'Not Found' }] })
-  fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: '4' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Move' }))
-  const alert = await screen.findByRole('alert')
-  expect(alert.textContent).toBe('Not Found')
-  expect(alert.closest('form')).toBe(screen.getByRole('button', { name: 'Move' }).closest('form'))
-  expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('api · personal')
-})
-
 // --- Polling and states ----------------------------------------------------------------
 
 const advance = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
@@ -540,204 +473,4 @@ test('AC31: a failed first load shows only the alert; a failed later poll keeps 
   await advance(3000)
   expect(screen.queryByRole('alert')).toBeNull()
   expect(cardEl(14)).toBeTruthy()
-})
-
-// --- Project context (033) -------------------------------------------------------------
-
-const CONTEXT = '/api/projects/3/context'
-/** GET or PUT /api/projects/3/context's body; `bytes` counts `context_md` unless given. */
-const context = (context_md, extra = {}) => ({
-  context_md, context_html: '', bytes: new TextEncoder().encode(context_md).length, max_bytes: 16384, ...extra,
-})
-const contextLoads = (fetch) => fetched(fetch).filter((url) => url === CONTEXT).length
-const summary = () => screen.getByText('Project context', { selector: 'summary' })
-const contextBox = () => screen.getByRole('textbox', { name: 'Project context' })
-const typeContext = (value) => fireEvent.change(contextBox(), { target: { value } })
-
-/** Opens the collapsed section and waits for its textarea; the section's <details>. */
-async function openContext() {
-  fireEvent.click(summary())
-  await screen.findByRole('textbox', { name: 'Project context' })
-  return summary().closest('details')
-}
-
-test('033 AC23: loading the board fetches no project context until Project context is opened', async () => {
-  const { fetch } = await open(board(), { [`GET ${CONTEXT}`]: [200, context('')] })
-  await act(() => Promise.resolve())
-  expect(summary().closest('details').open).toBe(false)
-  expect(contextLoads(fetch)).toBe(0)
-  fireEvent.click(summary())
-  await waitFor(() => expect(contextLoads(fetch)).toBe(1))
-})
-
-test('033 AC24: opening fetches the context once and shows it in a labeled textarea with its size', async () => {
-  const { fetch } = await open(board(), { [`GET ${CONTEXT}`]: [200, context('# Stack\n- Python 3.12\n')] })
-  const details = await openContext()
-  expect(contextBox().tagName).toBe('TEXTAREA')
-  expect(contextBox().value).toBe('# Stack\n- Python 3.12\n')
-  expect(within(details).getByText('22 / 16384 bytes')).toBeTruthy()
-  for (let i = 0; i < 2; i++) { // close, then open again
-    fireEvent.click(summary())
-    await act(() => new Promise((resolve) => setTimeout(resolve, 10)))
-  }
-  expect(details.open).toBe(true)
-  expect(contextLoads(fetch)).toBe(1)
-  expect(sends(fetch, 'GET', CONTEXT)).toHaveLength(1)
-})
-
-test('033 AC25: the section never renders context_html', async () => {
-  await open(board(), { [`GET ${CONTEXT}`]: [200, context('# Stack', { context_html: '<h1>Stack</h1>\n' })] })
-  const details = await openContext()
-  expect(screen.queryByRole('heading', { name: 'Stack' })).toBeNull()
-  expect(details.querySelector('h1')).toBeNull()
-  expect(contextBox().value).toBe('# Stack')
-})
-
-test('033 AC26: typing updates the size live in UTF-8 bytes against the response max_bytes', async () => {
-  await open(board(), { [`GET ${CONTEXT}`]: [200, context('', { max_bytes: 10 })] })
-  const details = await openContext()
-  expect(within(details).getByText('0 / 10 bytes')).toBeTruthy()
-  typeContext('é')
-  expect(within(details).getByText('2 / 10 bytes')).toBeTruthy()
-  typeContext('aé')
-  expect(within(details).getByText('3 / 10 bytes')).toBeTruthy()
-})
-
-test('033 AC27: over max_bytes the size says over the limit and Save is disabled', async () => {
-  await open(board(), { [`GET ${CONTEXT}`]: [200, context('', { max_bytes: 4 })] })
-  const details = await openContext()
-  const save = within(details).getByRole('button', { name: 'Save' })
-  typeContext('ééé')
-  expect(within(details).getByText('6 / 4 bytes · over the limit')).toBeTruthy()
-  expect(save.disabled).toBe(true)
-  typeContext('éé')
-  expect(within(details).getByText('4 / 4 bytes')).toBeTruthy()
-  expect(save.disabled).toBe(false)
-})
-
-test('033 AC28: Save puts the draft; on 200 the size shows the response bytes and the text stays', async () => {
-  const { fetch } = await open(board(), {
-    [`GET ${CONTEXT}`]: [200, context('')],
-    [`PUT ${CONTEXT}`]: [200, context('# Stack\n', { bytes: 99 })],
-  })
-  const details = await openContext()
-  typeContext('# Stack\n')
-  fireEvent.click(within(details).getByRole('button', { name: 'Save' }))
-  expect(await within(details).findByText('99 / 16384 bytes')).toBeTruthy()
-  expect(sent(fetch, 'PUT', CONTEXT)).toEqual({ context_md: '# Stack\n' })
-  expect(contextBox().value).toBe('# Stack\n')
-  expect(within(details).queryByRole('alert')).toBeNull()
-})
-
-test('033 AC29: a refused Save shows its detail inside the section and keeps the draft', async () => {
-  for (const [status, detail] of [[413, 'context over 16 KB'], [404, 'Project #3 not found']]) {
-    const { unmount } = await open(board(), {
-      [`GET ${CONTEXT}`]: [200, context('old')],
-      [`PUT ${CONTEXT}`]: [status, { detail }],
-    })
-    const details = await openContext()
-    typeContext('draft é')
-    fireEvent.click(within(details).getByRole('button', { name: 'Save' }))
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toBe(detail)
-    expect(alert.closest('details')).toBe(details)
-    expect(contextBox().value).toBe('draft é')
-    expect(within(details).getByText('8 / 16384 bytes')).toBeTruthy()
-    unmount()
-  }
-})
-
-test('033 AC30: a failed load shows its detail inside the section', async () => {
-  await open(board(), { [`GET ${CONTEXT}`]: [500, { detail: 'boom' }] })
-  fireEvent.click(summary())
-  const alert = await screen.findByRole('alert')
-  expect(alert.textContent).toBe('boom')
-  expect(alert.closest('details')).toBe(summary().closest('details'))
-  expect(screen.queryByRole('textbox', { name: 'Project context' })).toBeNull()
-})
-
-test("033 AC31: the board's 3 s poll neither refetches the context nor touches an unsaved draft", async () => {
-  vi.useFakeTimers()
-  const fetch = mockFetch({ [`GET ${BOARD}`]: [200, board()], [`GET ${CONTEXT}`]: [200, context('# Stack\n')] })
-  renderAt('/projects/3')
-  await advance(0)
-  fireEvent.click(summary())
-  await advance(0)
-  typeContext('# Stack\n- unsaved é')
-  await advance(3000)
-  expect(loads(fetch)).toBe(2)
-  expect(contextLoads(fetch)).toBe(1)
-  expect(contextBox().value).toBe('# Stack\n- unsaved é')
-  expect(screen.getByText('20 / 16384 bytes')).toBeTruthy()
-})
-
-test('033 AC31: with project id = workspace id, two polls keep one Project context section that takes input', async () => {
-  vi.useFakeTimers()
-  const page = board({}, { project: { ...PROJECT, workspace_id: 3 }, workspaces: [{ id: 3, name: 'personal', projects: 1 }] })
-  const fetch = mockFetch({ [`GET ${BOARD}`]: [200, page], [`GET ${CONTEXT}`]: [200, context('# Stack\n')] })
-  renderAt('/projects/3')
-  await advance(0)
-  fireEvent.click(summary())
-  await advance(0)
-  await advance(6000)
-  expect(loads(fetch)).toBe(3)
-  expect(screen.getAllByText('Project context', { selector: 'summary' })).toHaveLength(1)
-  fireEvent.input(contextBox(), { target: { value: '# Stack\n- é' } })
-  expect(contextBox().value).toBe('# Stack\n- é')
-  expect(screen.getByText('12 / 16384 bytes')).toBeTruthy()
-})
-
-// --- 032: Import a task bundle -----------------------------------------------------------
-
-const IMPORT = '/api/projects/3/import'
-const IMPORTED = { task_id: 12, title: 'Rate-limit <login>', import_key: 'task:7@2026-10-17T10:03:00Z', created: true,
-  status: 'backlog', rounds: 2, transcripts: 0 }
-const bundleFile = () => new File(['PK\x05\x06'], 'task-12.zip', { type: 'application/zip' })
-
-/** Chooses `file` in the Import input and clicks Import. */
-function importFile(file) {
-  fireEvent.change(screen.getByLabelText('Task bundle (.zip)'), { target: { files: [file] } })
-  fireEvent.click(screen.getByRole('button', { name: 'Import' }))
-}
-
-test('032 AC47: Import is disabled until a file is chosen, then sends one POST with the File itself', async () => {
-  const { fetch } = await open(board(), { [`POST ${IMPORT}`]: [200, IMPORTED] })
-  const input = screen.getByLabelText('Task bundle (.zip)')
-  expect([input.type, input.getAttribute('accept')]).toEqual(['file', '.zip,application/zip'])
-  expect(input.closest('header')).toBe(header())
-  expect(screen.getByRole('button', { name: 'Import' }).disabled).toBe(true)
-  const file = bundleFile()
-  fireEvent.change(input, { target: { files: [file] } })
-  expect(screen.getByRole('button', { name: 'Import' }).disabled).toBe(false)
-  fireEvent.click(screen.getByRole('button', { name: 'Import' }))
-  await screen.findByText(fullText('Imported #12 Rate-limit <login>'))
-  const calls = sends(fetch, 'POST', IMPORT)
-  expect(calls).toHaveLength(1)
-  expect(calls[0][1].body).toBe(file)
-  expect(calls[0][1].headers).toEqual({ 'X-Requested-By': 'fctl' })
-  expect(fetch.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toHaveLength(1)
-})
-
-test('032 AC48: a 200 shows Imported #12 title linking to the task and reloads the board', async () => {
-  const { fetch } = await open(board(), { [`POST ${IMPORT}`]: [200, IMPORTED] })
-  importFile(bundleFile())
-  const line = await screen.findByText(fullText('Imported #12 Rate-limit <login>'))
-  expect(line.closest('[aria-live]')).toBeTruthy()
-  expect(within(line).getByRole('link').getAttribute('href')).toBe('/tasks/12')
-  await waitFor(() => expect(loads(fetch)).toBe(2))
-})
-
-test('032 AC49: a 413 or 422 shows its detail on the board, and the board stays', async () => {
-  for (const [status, detail] of [[413, 'bundle over 50 MB'], [422, 'unknown bundle entry "notes.txt"']]) {
-    const { fetch, unmount } = await open(board({ backlog: [card(1, 'backlog')] }), { [`POST ${IMPORT}`]: [status, { detail }] })
-    importFile(bundleFile())
-    const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toBe(detail)
-    expect(alert.closest('[aria-live]')).toBeTruthy()
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('api · personal')
-    expect(cardEl(1)).toBeTruthy()
-    expect(screen.queryByText(/^Imported/)).toBeNull()
-    expect(loads(fetch)).toBe(1)
-    unmount()
-  }
 })

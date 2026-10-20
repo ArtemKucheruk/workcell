@@ -57,7 +57,7 @@ class TasksRepo:
 
     def for_project(self, project_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT id, title, status, stage, position FROM tasks WHERE project_id = ?", (project_id,)
+            "SELECT id, title, status, stage, position, branch FROM tasks WHERE project_id = ?", (project_id,)
         ).fetchall()
 
     def bottom_position(self, project_id: int, status: str) -> float:

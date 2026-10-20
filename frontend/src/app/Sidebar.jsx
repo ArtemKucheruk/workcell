@@ -73,7 +73,27 @@ function AddWorkspace() {
   )
 }
 
-/** FE11, Q10: each project discloses Board and Code; the list stays in the DOM so aria-controls always resolves. */
+/** 042 FE34, FE35: a project's pages, in order; Reviews carries its count of tasks waiting on me or escalated, when above 0. */
+const pages = (project) => [
+  [`/projects/${project.id}`, 'Board'],
+  [`/projects/${project.id}/code`, 'Code'],
+  [
+    `/projects/${project.id}/reviews`,
+    <>
+      Reviews
+      {project.review > 0 && (
+        <>
+          {' '}
+          <span className="ml-auto rounded-full bg-line px-1.5 text-xs text-fg tabular-nums">{project.review}</span>
+        </>
+      )}
+    </>,
+  ],
+  [`/projects/${project.id}/context`, 'Context'],
+  [`/projects/${project.id}/settings`, 'Settings'],
+]
+
+/** FE11, Q10: each project discloses its pages; the list stays in the DOM so aria-controls always resolves. */
 function Projects({ workspace, open, onToggle }) {
   const id = useId()
   if (!workspace.projects.length) {
@@ -103,16 +123,13 @@ function Projects({ workspace, open, onToggle }) {
               <span className="truncate">{project.name}</span>
             </button>
             <ul id={links} hidden={!expanded} className="ml-5 grid gap-0.5 border-l border-line pl-1">
-              <li>
-                <NavLink to={`/projects/${project.id}`} end className={navLink}>
-                  Board
-                </NavLink>
-              </li>
-              <li>
-                <NavLink to={`/projects/${project.id}/code`} end className={navLink}>
-                  Code
-                </NavLink>
-              </li>
+              {pages(project).map(([to, label]) => (
+                <li key={to}>
+                  <NavLink to={to} end className={navLink}>
+                    {label}
+                  </NavLink>
+                </li>
+              ))}
             </ul>
           </li>
         )

@@ -149,7 +149,7 @@ test('040 FE9: @layer base sets the h1 and h2 scale, and no <h1 carries a size o
   expect(rule(base, 'h2')).toMatch(/(^|\s)mt-8 mb-2(\s)/)
   const jsx = sources.filter(([f]) => f.endsWith('.jsx'))
   const h1s = jsx.flatMap(([f, text]) => [...text.matchAll(/<h1\b[^>]*>/g)].map((m) => [f, m[0]]))
-  expect(h1s.length).toBeGreaterThanOrEqual(10)
+  expect(h1s.length).toBeGreaterThanOrEqual(9) // 042: the board and code h1s became ProjectHeader's one
   expect(h1s.filter(([, tag]) => SIZE.test(tag) || WEIGHT.test(tag))).toEqual([])
   expect(jsx.filter(([, text]) => text.includes('text-2xl font-semibold')).map(([f]) => f)).toEqual([])
 })

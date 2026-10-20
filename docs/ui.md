@@ -18,8 +18,9 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
 - Top: the app name linking to `/`, then the `Workspace` switcher (a native `<select>`) and
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
-  **Board** and **Code**, and the current page's project opens by itself with its current
-  link marked.
+  **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated,
+  shown when above 0), **Context**, and **Settings**, and the current page's project opens
+  by itself with its current link marked.
 - Bottom: **Dashboard**, the fctl reference (item 7), and the login runs will use, from
   `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
   subscription, or a red `API key — runs disabled` otherwise. The badge links to `/settings`
@@ -32,6 +33,10 @@ first. Below `md` the sidebar is a `<dialog>` drawer behind a **Menu** button: E
 backdrop close it, and focus returns to the button. The board, review, and code pages use
 the full width beside it, and the other pages keep a max width.
 
+The project pages (Board, Code, Reviews, Context, Settings) share one project header:
+`<name> · <workspace>`, with the workspace linking to `/workspaces/{id}`, then the factory
+state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Settings.
+
 1. **Dashboard** (`/`)
    - Tiles: tasks per status, waiting on me (`human_review`), escalated, running now, done
      this week, and runs this week.
@@ -40,17 +45,11 @@ the full width beside it, and the other pages keep a max width.
    - Each tile links to a filtered list.
 2. **Workspace** (`/workspaces/{id}`): one row per project with name, path, counts per
    status, factory state (none / uncommitted / ready), and last activity. **+ Workspace**
-   creates one, and a project's page can move it to another workspace.
-3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header has **Code**,
-   factory state or **Create factory**, **+ New task**, and **Run next**. Cards move between
-   columns by drag and drop (native HTML5, no library). Clicking a card opens the task detail.
-   Below the columns, a collapsed **Project context** section edits the project's context
-   (`GET`/`PUT /api/projects/{id}/context`): a textarea, a live UTF-8 byte count against the
-   16 KB cap (`over the limit` disables Save), and **Save**. It loads when first opened, so
-   the 3 s poll never touches a draft. A rendered preview of `context_html` is a follow-up.
-   After **+ New task**, **Import** takes a task bundle (a `.zip` from **Export**) from a file
-   input, disabled until a file is chosen, and posts it raw to `POST /api/projects/{id}/import`.
-   Below the toolbar, `Imported #12 <title>` links to the task, or the refusal's detail shows.
+   creates one. For each project, its Settings page (item 12) moves it to another workspace.
+3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header is the project
+   header plus **+ New task**, **Run next**, and the hint for why runs are off. Cards move
+   between columns by drag and drop (native HTML5, no library). Clicking a card opens the task
+   detail.
 4. **Task detail** (`/tasks/{id}`)
    - Header: title, status · stage, branch, Review, Run / Stop / Retry, run status. Next to
      Review, **Export** downloads the task bundle (`GET /api/tasks/{id}/export`, a plain
@@ -102,10 +101,30 @@ the full width beside it, and the other pages keep a max width.
      `POST /api/auth/login/code`, and on success the section shows the new login. The button
      then reads **Start over**, which begins a fresh login.
    - Subscription login only (§4.3): no API key field.
+10. **Reviews** (`/projects/{id}/reviews`, Closed at `?tab=closed`; wireframe §8.5)
+    - From the board view-model, polled every 3 s.
+    - **Open** is the Review column: escalated, then waiting on you, then the rest.
+      **Closed** is the Done column. The tabs show counts, and each tab has an empty state.
+    - Each row has `#id title` linking to `/tasks/{id}/review`, its state (Open rows only),
+      branch, round, verdict chips, and +/−.
+11. **Project context** (`/projects/{id}/context`)
+    - The editor, open on load (`GET`/`PUT /api/projects/{id}/context`): a textarea, a live
+      UTF-8 byte count against the 16 KB cap (`over the limit` disables Save), and **Save**.
+    - Beside it, a **Preview** of the saved `context_html`, refreshed by each Save.
+    - Loaded once, not polled.
+12. **Project settings** (`/projects/{id}/settings`)
+    - Path, remote, default branch, and test command, read-only.
+    - The factory state with its hint, plus **Create factory** (with *Overwrite*) unless
+      ready, and its written and skipped lists and commit hint (§3.2).
+    - **Import** takes a task bundle (a `.zip` from **Export**) from a file input, disabled
+      until a file is chosen, and posts it raw to `POST /api/projects/{id}/import`.
+      `Imported #12 <title>` links to the task, or the refusal's detail shows.
+    - **Move** to another workspace (`PATCH /api/projects/{id}`).
+    - Loaded once, and reloaded after each of these actions.
 
 ### 8.1 Board
 ```
-api-server · personal             [Code]  Factory: ready ✓   [+ New task]  [Run next ▶]
+api-server · personal              Factory: ready ✓   [+ New task]  [Run next ▶]
 ┌ Backlog 3 ──────────┐ ┌ In progress 1 ──────┐ ┌ Review 2 ────────────┐ ┌ Done 5 ─────┐
 │ #14 Export CSV      │ │ #13 Audit log       │ │ #12 Rate-limit login │ │ #9 Health   │
 │              [Run]  │ │ ● running · review  │ │ waiting on you       │ │ 1 round     │
@@ -169,6 +188,9 @@ stalled card: "stalled · build  [Retry]"
 │ ▾ api-server         │
 │     Board            │  ← current page: aria-current, accent
 │     Code             │
+│     Reviews        2 │  ← waiting on me or escalated, when above 0
+│     Context          │
+│     Settings         │
 │ ▸ web                │
 │                      │
 │ Dashboard            │
@@ -176,4 +198,15 @@ stalled card: "stalled · build  [Retry]"
 │ Claude: Pro ✓        │
 └──────────────────────┘
 below md: [☰ Menu] opens the same sidebar as a drawer (<dialog>)
+```
+
+### 8.5 Reviews
+```
+api-server · personal                                         Factory: ready ✓
+─ Open 2 ─┬─ Closed 5 ────────────────────────────────────────────────────────
+▌#11 Webhooks                         ⚠ NEEDS YOU — escalated
+▌factory/11-webhooks   round 2   sec ✗  ux ✓  ui ✓  code ✓   +88 −4
+ #12 Rate-limit login endpoint        waiting on you
+ factory/12-rate-limit-login   round 2   sec ✓  ux ✓  ui ✓  code ✓   +126 −9
+each row links to /tasks/{id}/review · Closed: the Done column, rows without the state
 ```
