@@ -13,14 +13,15 @@ import { Layout } from './Layout.jsx'
 // docs/data-model-and-api.md §6.4: the SPA's routes; anything else outside /api is the not-found page
 export const routes = [
   {
+    // 041 Q14: `wide` routes drop main's max width
     element: <Layout />,
     children: [
       { path: '/', element: <DashboardPage /> },
       { path: '/workspaces/:id', element: <WorkspacePage /> },
-      { path: '/projects/:id', element: <BoardPage /> },
-      { path: '/projects/:id/code', element: <CodePage /> },
+      { path: '/projects/:id', element: <BoardPage />, handle: { wide: true } },
+      { path: '/projects/:id/code', element: <CodePage />, handle: { wide: true } },
       { path: '/tasks/:id', element: <TaskPage /> },
-      { path: '/tasks/:id/review', element: <ReviewPage /> },
+      { path: '/tasks/:id/review', element: <ReviewPage />, handle: { wide: true } },
       { path: '/transcripts/:id', element: <TranscriptPage /> },
       { path: '/docs/fctl', element: <FctlDocsPage /> },
       { path: '/settings', element: <SettingsPage /> },

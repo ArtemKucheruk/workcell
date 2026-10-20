@@ -19,3 +19,6 @@ export const codePage = (id, path) =>
 
 /** 029: the fctl reference, pre-rendered with heading ids, and its headings for the Contents nav. */
 export const fctlDoc = () => api('/api/docs/fctl')
+
+/** 041 Q3: `?task=` or `?transcript=` only when the route has an all-digit id; otherwise no query. */
+export const sidebarPage = (query) => api(`/api/pages/sidebar${query ? `?${new URLSearchParams(query)}` : ''}`)

@@ -12,11 +12,25 @@ color tokens in `frontend/src/index.css`: `surface`, `raised`, `line`, `fg`, `mu
 that follow the system, and pages style with them (`bg-surface text-muted border-line`), not
 with Tailwind's palette. Text is set in IBM Plex Sans; code, diffs, paths, and the run log in
 JetBrains Mono. Both are self-hosted (§4.2). The browser tab shows an SVG favicon,
-`frontend/public/favicon.svg`. Every page header
-links to the fctl reference (item 7) and shows the login runs will use, from
-`GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
-subscription, or a red `API key — runs disabled` otherwise. The badge links to `/settings`
-(item 9).
+`frontend/public/favicon.svg`.
+
+Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no headings:
+- Top: the app name linking to `/`, then the `Workspace` switcher (a native `<select>`) and
+  **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
+- Then the selected workspace's projects. Each project is a disclosure button that opens
+  **Board** and **Code**, and the current page's project opens by itself with its current
+  link marked.
+- Bottom: **Dashboard**, the fctl reference (item 7), and the login runs will use, from
+  `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
+  subscription, or a red `API key — runs disabled` otherwise. The badge links to `/settings`
+  (item 9).
+
+The sidebar's data comes from `GET /api/pages/sidebar` (§6.4) on load and after each
+navigation, and is not polled. The selected workspace is the current page's project's (or
+the `/workspaces/{id}` page's), else the last one shown, kept in `localStorage`, else the
+first. Below `md` the sidebar is a `<dialog>` drawer behind a **Menu** button: Esc and the
+backdrop close it, and focus returns to the button. The board, review, and code pages use
+the full width beside it, and the other pages keep a max width.
 
 1. **Dashboard** (`/`)
    - Tiles: tasks per status, waiting on me (`human_review`), escalated, running now, done
@@ -66,7 +80,7 @@ subscription, or a red `API key — runs disabled` otherwise. The badge links to
    - Clicking a file opens a highlighted view with line numbers. Binary files and files
      over 1 MB show "not shown". The header shows the current branch.
 7. **fctl reference** (`/docs/fctl`)
-   - Linked from every page header. A table of contents is built from its headings.
+   - Linked from the sidebar. A table of contents is built from its headings.
    - One anchored section per §7.2 command: synopsis, arguments and flags, stdin, output,
      exit codes and errors, who calls it (me, a skill, or which agent), and an example.
    - Install (`uv tool install`, `fctl setup`), `FCTL_URL` and `FCTL_HOME`, and using
@@ -145,3 +159,21 @@ stalled card: "stalled · build  [Retry]"
                  │     42 +    if not user and limiter.hit(client_key(request)):
 ```
 
+### 8.4 Sidebar
+```
+┌──────────────────────┐
+│ Claude Factories     │
+│ Workspace [personal▾]│
+│ + New workspace      │
+│                      │
+│ ▾ api-server         │
+│     Board            │  ← current page: aria-current, accent
+│     Code             │
+│ ▸ web                │
+│                      │
+│ Dashboard            │
+│ fctl reference       │
+│ Claude: Pro ✓        │
+└──────────────────────┘
+below md: [☰ Menu] opens the same sidebar as a drawer (<dialog>)
+```

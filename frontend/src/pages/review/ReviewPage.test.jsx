@@ -98,7 +98,7 @@ function postedBeforeReload(fetch, url) {
 
 test('AC1: /tasks/12/review fetches the view-model with no query and shows the title, breadcrumb, and page title', async () => {
   const { fetch } = await open(reviewPage())
-  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages'))).toEqual([PAGE])
+  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages/tasks'))).toEqual([PAGE])
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
   const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
   expect(within(crumbs).getByRole('link', { name: 'api' }).getAttribute('href')).toBe('/projects/3')
@@ -143,7 +143,7 @@ test('AC3: the round <select> lists the rounds; picking 1 sets ?round=1 and show
 
 test('AC4: ?round=1&tab=files fetches round 1 and shows Files changed; the tab links keep round and mark the active one', async () => {
   const { fetch, unmount } = await open(reviewPage({}, { selected: summary(ROUND1), files: [appFile()] }), '/tasks/12/review?round=1&tab=files')
-  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages'))).toEqual([`${PAGE}?round=1`])
+  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages/tasks'))).toEqual([`${PAGE}?round=1`])
   expect(screen.getByRole('navigation', { name: 'Files' })).toBeTruthy()
   expect(tab('Conversation').getAttribute('href')).toBe('/tasks/12/review?round=1')
   expect(tab('Files changed 2').getAttribute('href')).toBe('/tasks/12/review?round=1&tab=files')
@@ -170,7 +170,7 @@ test('AC5: clicking between the tabs fetches nothing', async () => {
   expect(router.state.location.search).toBe('?tab=files')
   fireEvent.click(tab('Conversation'))
   expect(await screen.findByRole('region', { name: 'Description' })).toBeTruthy()
-  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages'))).toEqual([PAGE])
+  expect(fetched(fetch).filter((url) => url.startsWith('/api/pages/tasks'))).toEqual([PAGE])
 })
 
 test('AC6: a title with markup shows as text and adds no script', async () => {

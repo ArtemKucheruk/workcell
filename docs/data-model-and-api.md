@@ -289,10 +289,10 @@ The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces
 other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}` loads
 `GET /api/transcripts/{id}` (§6.2).
 
-Each page loads one view-model from the backend. Markdown fields arrive rendered as `*_html`
-(raw HTML off, §4.5). Unknown ids get a JSON 404.
+Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
+rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.
 ```
-GET  /api/auth                                                    (every page header, /settings)
+GET  /api/auth                                                    (the sidebar's badge, /settings)
 ← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true,"email":"artem@example.com"}
   # auth_method, plan, and email are null unless the login is claude.ai
 
@@ -319,6 +319,22 @@ GET  /api/pages/tasks/{id}/review?round=        timeline; files with diff rows c
                                                 text, and the path:side:line anchor; inline comments
 GET  /api/pages/projects/{id}/code?path=        tree, README or file, branch
 ← 404 {"detail":"Task #99 not found"}
+
+GET  /api/pages/sidebar                                           (every route but the two below)
+GET  /api/pages/sidebar?task=12                                   (/tasks/12, /tasks/12/review)
+GET  /api/pages/sidebar?transcript=5                              (/transcripts/5)
+← 200 {"workspaces":[{"id":2,"name":"personal","projects":[
+          {"id":3,"name":"api-server","review":2,"running":1,"escalated":1},
+          {"id":7,"name":"web","review":0,"running":0,"escalated":0}]},
+        {"id":4,"name":"work","projects":[]}],
+       "current":{"workspace_id":2,"project_id":3}}
+  # loaded on every page load and navigation, never polled
+  # every workspace by name, the empty ones too; projects by name, then id
+  # review: tasks at stage human_review or escalated · escalated: at escalated ·
+  #   running: tasks with a running run (§5.2)
+  # current: the workspace and project of the task (?task=) or of the transcript's task
+  #   (?transcript=); null with no query, and null (still 200, never 404) for an unknown id
+  # a non-integer id gets the 422; there is no ?project=: the SPA finds it in workspaces
 
 GET  /api/docs/fctl                                               (/docs/fctl)
 ← 200 {"body_html":"<h2 id=\"fctl-serve\">fctl serve</h2>…",

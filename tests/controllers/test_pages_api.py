@@ -1,4 +1,5 @@
 import ast
+import inspect
 import json
 import os
 import re
@@ -10,12 +11,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from conftest import commit, git, sql, write
 from controllers.test_runs import H, OLD, SKILL, add_task, connect, fake, project  # noqa: F401
+from controllers.test_transcripts import add_transcript
 from fastapi.testclient import TestClient
 from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, wrong_edges
 
 from claude_factories import db
 from claude_factories.handlers import pages
 from claude_factories.server.app import create_app
+from claude_factories.server.deps import get_git
 
 PRO = '{"authMethod":"claude.ai","subscriptionType":"pro"}'
 PRO_EMAIL = '{"authMethod":"claude.ai","subscriptionType":"pro","email":"artem@example.com"}'
@@ -452,6 +455,115 @@ def test_login_docs():  # 039 AC16
     assert ui.index("8. **Transcript**") < ui.index("9. **Settings** (`/settings`)")
     login_bullet = section("MVP.md", "### 4.6").split("- **Login.**")[1].split("\n- ")[0]
     assert "Settings page" in login_bullet
+
+
+# --- GET /api/pages/sidebar (041) ----------------------------------------------------
+
+
+def sidebar(client, query=""):
+    return api(client, f"/api/pages/sidebar{query}")
+
+
+def bare(client, workspace, name):
+    """A project with no repo behind it, in `workspace` (created if new)."""
+    r = client.post("/api/projects/connect", headers=H, json={
+        "path": f"/code/{name}", "workspace": workspace, "name": name, "default_branch": "main"})
+    assert r.status_code == 200, r.text
+    return r.json()["id"]
+
+
+def task_in_work(client):
+    """A task in project `w` of `work`, behind a workspace `aaa` that sorts first: (task, project)."""
+    bare(client, "aaa", "a")
+    p = bare(client, "work", "w")
+    return add_task(p), p
+
+
+def test_sidebar(client):  # 041 BE1
+    r = client.post("/api/workspaces", headers=H, json={"name": "aaa"})
+    assert r.status_code == 200, r.text
+    zeta, alpha = bare(client, "work", "zeta"), bare(client, "work", "alpha")
+    zero = {"review": 0, "running": 0, "escalated": 0}
+    page = sidebar(client)
+    assert page == {"workspaces": [  # dict equality: exactly these keys at every level
+        {"id": r.json()["id"], "name": "aaa", "projects": []},
+        {"id": ws_id("work"), "name": "work",
+         "projects": [{"id": alpha, "name": "alpha"} | zero, {"id": zeta, "name": "zeta"} | zero]},
+    ], "current": None}
+    assert list(page["workspaces"][1]["projects"][0]) == ["id", "name", "review", "running", "escalated"]
+
+
+def test_sidebar_counts(client, project):  # 041 BE2
+    for stage in ("human_review", "human_review", "escalated", None):  # None: a manual move to Review
+        add_task(project, status="review", stage=stage)
+    add_run(add_task(project, status="in_progress", stage="build"), "running")
+    add_run(add_task(project, status="in_progress", stage="build"), "failed")
+    add_task(project, status="done")
+    empty = bare(client, "personal", "zzz")
+    projects = sidebar(client)["workspaces"][0]["projects"]
+    assert projects == [{"id": project, "name": "repo", "review": 3, "running": 1, "escalated": 1},
+                        {"id": empty, "name": "zzz", "review": 0, "running": 0, "escalated": 0}]
+    assert all(type(v) is int for p in projects for k, v in p.items() if k != "name")
+
+
+def test_sidebar_current_task(client):  # 041 BE3
+    task, p = task_in_work(client)
+    page = sidebar(client, f"?task={task}")
+    assert page["current"] == {"workspace_id": ws_id("work"), "project_id": p}
+    assert page["workspaces"] == sidebar(client)["workspaces"]
+
+
+def test_sidebar_current_transcript(client):  # 041 BE4
+    task, p = task_in_work(client)
+    transcript = add_transcript(add_run(task, "succeeded"), task, "x/agent.jsonl")
+    assert sidebar(client, f"?transcript={transcript}")["current"] == {"workspace_id": ws_id("work"),
+                                                                       "project_id": p}
+
+
+@pytest.mark.parametrize("query", ["?task=999", "?transcript=999"])
+def test_sidebar_unknown_ids(client, query):  # 041 BE5: 200, never 404
+    task_in_work(client)
+    assert sidebar(client, query)["current"] is None
+
+
+@pytest.mark.parametrize("query", ["?task=abc", "?transcript=abc"])
+def test_sidebar_bad_id(client, query):  # 041 BE6
+    detail = api(client, f"/api/pages/sidebar{query}", 422)["detail"]
+    assert detail and all("msg" in e for e in detail)
+
+
+class Boom:
+    """A Git whose every attribute raises."""
+    def __getattr__(self, name):
+        raise AssertionError(f"git.{name} called")
+
+
+def test_sidebar_no_git(client):  # 041 BE7
+    task, p = task_in_work(client)
+    client.app.dependency_overrides[get_git] = Boom
+    page = sidebar(client, f"?task={task}")
+    assert page["current"] == {"workspace_id": ws_id("work"), "project_id": p}
+    assert page["workspaces"] == sidebar(client)["workspaces"]
+    assert {"git", "claude"}.isdisjoint(inspect.signature(pages.sidebar).parameters)
+    path = PKG / "handlers" / "pages.py"
+    assert sql_outside(ast.parse(path.read_text()), path) == []
+
+
+def test_sidebar_docs():  # 041 BE8
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    assert "plus the sidebar's" in api_doc[:api_doc.index("```")]
+    start = api_doc.index("GET  /api/pages/sidebar")
+    assert api_doc.index('← 404 {"detail":"Task #99 not found"}') < start
+    rows = api_doc[start:api_doc.index("GET  /api/docs/fctl")]
+    for text in ("GET  /api/pages/sidebar?task=", "GET  /api/pages/sidebar?transcript=", '{"workspaces":',
+                 '"current":', "# current: the workspace and project of the task", "for an unknown id"):
+        assert text in rows, text
+    ui = section("ui.md", "## 8.")
+    intro = ui[:ui.index("1. **Dashboard**")]
+    for text in ("left sidebar", "/api/pages/sidebar", "localStorage", "<dialog>", "/settings"):
+        assert text in intro, text
+    assert "Linked from the sidebar" in ui[ui.index("7. **fctl reference**"):ui.index("8. **Transcript**")]
+    assert ui.index("### 8.3") < ui.index("### 8.4 Sidebar")
 
 
 # --- GET /api/pages/dashboard --------------------------------------------------------

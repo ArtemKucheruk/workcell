@@ -29,7 +29,7 @@ async function open(responses, at = '/projects/3/code') {
 /** Opens `?path=<path>` with `page` as its view-model. */
 const openFile = (path, page) => open({ [`GET ${API}?${new URLSearchParams({ path })}`]: [200, page] }, `/projects/3/code?path=${path}`)
 
-const loads = (fetch) => fetched(fetch).filter((url) => url.startsWith('/api/pages'))
+const loads = (fetch) => fetched(fetch).filter((url) => url.startsWith('/api/pages/projects'))
 const h1 = () => document.querySelector('main h1')
 const files = () => screen.queryByRole('navigation', { name: 'Files' })
 const link = (name) => within(files()).getByRole('link', { name })
