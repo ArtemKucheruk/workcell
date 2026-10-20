@@ -14,12 +14,29 @@ with Tailwind's palette. Text is set in IBM Plex Sans; code, diffs, paths, and t
 JetBrains Mono. Both are self-hosted (§4.2). The browser tab shows an SVG favicon,
 `frontend/public/favicon.svg`.
 
+Task state is drawn as pills, and reviewer verdicts as chips, each from one component, so
+every page uses the same words and colors:
+- A status is an outlined pill, its border and text in one token: `Backlog` in `muted`,
+  `In progress` in `accent`, `Review` in `warning`, and `Done` in `success`.
+- A running task shows `● running`, an outlined `accent` pill, on its board card and in the
+  dashboard's runs list. Its dot pulses, and holds still under `prefers-reduced-motion`.
+- The two states that wait on me are filled pills with `surface` text: `waiting on you` on
+  `warning`, and `escalated` on `danger`. An escalated card or Reviews row also keeps the
+  red left bar, and the word itself says escalated, so color is never the only sign. Any
+  other stage is plain `muted` text after the status pill.
+- A verdict chip reads `sec ✓`, `ux ✓`, `ui ·`, or `code ✗`, colored by verdict: PASS in
+  `success`, CHANGES in `danger`, pending (and any other verdict, shown as it is) in `muted`.
+  Its `title` names the reviewer and the verdict (`security: PASS`).
+- Pills and chips use only `muted`, `accent`, `warning`, `success`, `danger`, and `surface`,
+  with no opacity tints, and every text-on-background pair they make clears 4.5:1, light and
+  dark. The wireframes draw a pill in parentheses, `(Review)`, and a button in brackets.
+
 Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no headings:
 - Top: the app name linking to `/`, then the `Workspace` switcher (a native `<select>`) and
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
-  **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated,
-  shown when above 0), **Context**, and **Settings**, and the current page's project opens
+  **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
+  `warning` pill shown when above 0), **Context**, and **Settings**, and the current page's project opens
   by itself with its current link marked.
 - Bottom: **Dashboard**, the fctl reference (item 7), and the login runs will use, from
   `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
@@ -42,7 +59,8 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
      this week, and runs this week.
    - A table of open tasks per workspace → project, by status.
    - Rounds per task for tasks done in the last 30 days: average, max, and the list.
-   - Each tile links to a filtered list.
+   - Each tile links to a filtered list. A listed task's Status is its status pill and
+     stage, and a running run's is `● running`; ended runs say how they ended.
 2. **Workspace** (`/workspaces/{id}`): one row per project with name, path, counts per
    status, factory state (none / uncommitted / ready), and last activity. **+ Workspace**
    creates one. For each project, its Settings page (item 12) moves it to another workspace.
@@ -51,10 +69,11 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
    between columns by drag and drop (native HTML5, no library). Clicking a card opens the task
    detail.
 4. **Task detail** (`/tasks/{id}`)
-   - Header: title, status · stage, branch, Review, Run / Stop / Retry, run status. Next to
-     Review, **Export** downloads the task bundle (`GET /api/tasks/{id}/export`, a plain
-     `<a download>`), and an **Include transcripts** checkbox adds them, labelled with the
-     warning that they can hold paths, env, and secrets.
+   - Header: title, the status pill and stage, branch, Review, Run / Stop / Retry, run
+     status. Next to Review, **Export** downloads the task bundle
+     (`GET /api/tasks/{id}/export`, a plain `<a download>`), and an **Include transcripts**
+     checkbox adds them, labelled with the warning that they can hold paths, env, and
+     secrets.
    - Spec (rendered markdown).
    - Rounds: build notes (collapsible), 4 chips that open the verdict, and +/−.
    - Agents per round: one row per transcript of that round, with its name (else agent type,
@@ -105,8 +124,8 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
     - From the board view-model, polled every 3 s.
     - **Open** is the Review column: escalated, then waiting on you, then the rest.
       **Closed** is the Done column. The tabs show counts, and each tab has an empty state.
-    - Each row has `#id title` linking to `/tasks/{id}/review`, its state (Open rows only),
-      branch, round, verdict chips, and +/−.
+    - Each row has `#id title` linking to `/tasks/{id}/review`, its state pill (Open rows
+      only), branch, round, verdict chips, and +/−.
 11. **Project context** (`/projects/{id}/context`)
     - The editor, open on load (`GET`/`PUT /api/projects/{id}/context`): a textarea, a live
       UTF-8 byte count against the 16 KB cap (`over the limit` disables Save), and **Save**.
@@ -125,24 +144,30 @@ state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Se
 ### 8.1 Board
 ```
 api-server · personal              Factory: ready ✓   [+ New task]  [Run next ▶]
-┌ Backlog 3 ──────────┐ ┌ In progress 1 ──────┐ ┌ Review 2 ────────────┐ ┌ Done 5 ─────┐
-│ #14 Export CSV      │ │ #13 Audit log       │ │ #12 Rate-limit login │ │ #9 Health   │
-│              [Run]  │ │ ● running · review  │ │ waiting on you       │ │ 1 round     │
-├─────────────────────┤ │ r1 sec✓ ux✓ ui· co✗ │ │ r2 sec✓ ux✓ ui✓ co✓  │ ├─────────────┤
-│ #15 Dark mode       │ │ started 10:02       │ │ +126 −9              │ │ #8 Login UX │
-│              [Run]  │ └─────────────────────┘ ├──────────────────────┤ │ 3 rounds    │
-├─────────────────────┤                         │▌#11 Webhooks  ⚠ NEEDS│ └─────────────┘
-│ #16 Rename env vars │                         │▌YOU — escalated      │
-│              [Run]  │                         │▌r2 sec✗ ux✓ ui✓ co✓  │
-└─────────────────────┘                         └──────────────────────┘
-chips: ✓ PASS  ✗ CHANGES  · pending      escalated cards: red left bar + badge
+┌ Backlog 3 ──────────┐ ┌ In progress 1 ─────────────┐ ┌ Review 2 ──────────────────┐ ┌ Done 5 ─────┐
+│ #14 Export CSV      │ │ #13 Audit log              │ │ #12 Rate-limit login       │ │ #9 Health   │
+│              [Run]  │ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round     │
+├─────────────────────┤ │ r1 sec ✓ ux ✓ ui · code ✗  │ │ r2 sec ✓ ux ✓ ui ✓ code ✓  │ ├─────────────┤
+│ #15 Dark mode       │ │ started 10:02              │ │ +126 −9                    │ │ #8 Login UX │
+│              [Run]  │ └────────────────────────────┘ ├────────────────────────────┤ │ 3 rounds    │
+├─────────────────────┤                                │▌#11 Webhooks               │ └─────────────┘
+│ #16 Rename env vars │                                │▌(escalated)                │
+│              [Run]  │                                │▌r2 sec ✗ ux ✓ ui ✓ code ✓  │
+└─────────────────────┘                                │▌+88 −4                     │
+                                                       └────────────────────────────┘
+pills, drawn ( ): a status is outlined in its token: Backlog muted, In progress accent,
+  Review warning, Done success. (● running) is outlined accent; its dot pulses, and holds
+  still under prefers-reduced-motion. (waiting on you) is filled warning, (escalated) filled
+  danger. Cards show no status pill: the column names it.
+escalated cards: red left bar ▌ + (escalated)
+chips: ✓ PASS in success, ✗ CHANGES in danger, · pending in muted; title "security: PASS"
 stalled card: "stalled · build  [Retry]"
 ```
 
 ### 8.2 Review — Conversation
 ```
 #12 Rate-limit login endpoint                          [Request changes]  [Approve]
-● Review · waiting on you   factory/12-rate-limit-login   round [2 ▾]   4 files  +126 −9
+(Review) (waiting on you)   factory/12-rate-limit-login   round [2 ▾]   4 files  +126 −9
 ─ Conversation ─┬─ Files changed 4 ─────────────────────────────────────────────────────
                 │
  Description    Max 5 failed logins/min per IP.  (spec ▸)
@@ -188,7 +213,7 @@ stalled card: "stalled · build  [Retry]"
 │ ▾ api-server         │
 │     Board            │  ← current page: aria-current, accent
 │     Code             │
-│     Reviews        2 │  ← waiting on me or escalated, when above 0
+│     Reviews      (2) │  ← waiting on me or escalated, when above 0: a warning pill
 │     Context          │
 │     Settings         │
 │ ▸ web                │
@@ -204,9 +229,9 @@ below md: [☰ Menu] opens the same sidebar as a drawer (<dialog>)
 ```
 api-server · personal                                         Factory: ready ✓
 ─ Open 2 ─┬─ Closed 5 ────────────────────────────────────────────────────────
-▌#11 Webhooks                         ⚠ NEEDS YOU — escalated
+▌#11 Webhooks                         (escalated)
 ▌factory/11-webhooks   round 2   sec ✗  ux ✓  ui ✓  code ✓   +88 −4
- #12 Rate-limit login endpoint        waiting on you
+ #12 Rate-limit login endpoint        (waiting on you)
  factory/12-rate-limit-login   round 2   sec ✓  ux ✓  ui ✓  code ✓   +126 −9
-each row links to /tasks/{id}/review · Closed: the Done column, rows without the state
+each row links to /tasks/{id}/review · Closed: the Done column, rows without the state pill
 ```

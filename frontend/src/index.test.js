@@ -182,3 +182,35 @@ test('040 FE12: docs/ui.md §8 and docs/MVP.md §4.2 name the tokens, fonts, fav
   expect(stack).toMatch(/offline/)
   expect(stack).toMatch(/CDN/)
 })
+
+test('043 FE6: one label set: StatusLine.jsx is gone, SHORT and SYMBOL live in Chip.jsx, In progress in Badge.jsx, no NEEDS YOU', () => {
+  expect(fs.existsSync(here('./components/StatusLine.jsx'))).toBe(false)
+  const where = (re) => sources.filter(([, text]) => re.test(text)).map(([f]) => f)
+  expect(where(/\b(?:const|let|var)\s+(?:SHORT|SYMBOL)\b/)).toEqual(['components/Chip.jsx'])
+  expect(where(/'In progress'/)).toEqual(['components/Badge.jsx'])
+  expect(where(/NEEDS YOU/)).toEqual([])
+})
+
+test('043 FE16: the pills\' pairs reach 4.5:1, light and dark: warning on surface and raised, surface on warning and danger', () => {
+  const ratios = []
+  for (const [scheme, t] of [['light', colors(theme)], ['dark', colors(dark)]]) {
+    for (const [text, bg] of [['warning', 'surface'], ['warning', 'raised'], ['surface', 'warning'], ['surface', 'danger']]) {
+      ratios.push([`${scheme} ${text} on ${bg}`, contrast(t[text][0], t[bg][0])])
+    }
+  }
+  expect(ratios).toHaveLength(8)
+  expect(ratios.filter(([, r]) => !(r >= 4.5))).toEqual([])
+})
+
+test('043 FE17: docs/ui.md describes the pills and chips, and no old chip format or NEEDS YOU is left', () => {
+  const ui = read('../../docs/ui.md')
+  const intro = ui.slice(ui.indexOf('## 8. UI'), ui.indexOf('\n1. **Dashboard**'))
+  for (const text of ['Backlog', 'In progress', 'Review', 'Done', '● running', 'prefers-reduced-motion', 'waiting on you', 'escalated', 'title', '4.5:1']) {
+    expect(intro).toContain(text)
+  }
+  const board = ui.slice(ui.indexOf('### 8.1'), ui.indexOf('### 8.2'))
+  expect(board).toContain('sec ✓')
+  expect(board).toContain('code ✗')
+  expect(ui.match(/\b(?:sec|ux|ui|co|code)[✓✗·]|\bco [✓✗·]/g)).toBeNull()
+  expect(ui).not.toContain('NEEDS YOU')
+})

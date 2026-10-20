@@ -73,7 +73,10 @@ function AddWorkspace() {
   )
 }
 
-/** 042 FE34, FE35: a project's pages, in order; Reviews carries its count of tasks waiting on me or escalated, when above 0. */
+/**
+ * 042 FE34, FE35: a project's pages, in order; Reviews carries its count of tasks waiting on me or escalated, when above 0.
+ * 043 Q7: the count is the filled warning pill, never danger, since every task it counts waits on me.
+ */
 const pages = (project) => [
   [`/projects/${project.id}`, 'Board'],
   [`/projects/${project.id}/code`, 'Code'],
@@ -84,7 +87,7 @@ const pages = (project) => [
       {project.review > 0 && (
         <>
           {' '}
-          <span className="ml-auto rounded-full bg-line px-1.5 text-xs text-fg tabular-nums">{project.review}</span>
+          <span className="ml-auto min-w-5 rounded-full bg-warning px-1.5 text-center text-xs/5 font-medium text-surface tabular-nums">{project.review}</span>
         </>
       )}
     </>,

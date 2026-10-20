@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
+import { EscalatedPill, WaitingPill } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
@@ -11,10 +12,10 @@ import { usePoll } from '../../hooks/usePoll.js'
 /** Q3: escalated, then waiting on me, then the rest (a manual move has no stage); sort is stable, so each group keeps the column's order. */
 const rank = (card) => (card.escalated ? 0 : card.waiting ? 1 : 2)
 
-/** Q4: the board's words for why an Open review waits; Closed rows and null stages have none. */
+/** Q4, 043: the board's pill for why an Open review waits; Closed rows and null stages have none. */
 function State({ card }) {
-  if (card.escalated) return <span className="text-sm font-semibold text-danger">⚠ NEEDS YOU — escalated</span>
-  if (card.waiting) return <span className="text-sm font-medium">waiting on you</span>
+  if (card.escalated) return <EscalatedPill />
+  if (card.waiting) return <WaitingPill />
   return null
 }
 

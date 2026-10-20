@@ -187,24 +187,29 @@ test('AC7: a card links #id title to the task, drags by the card not the link, a
   expect(document.querySelector('main script')).toBeNull()
 })
 
-test('AC8: a waiting card shows waiting on you', async () => {
+const cls = (re) => new RegExp(`(^|\\s)${re}(\\s|$)`)
+
+test('AC8, 043 FE7: a waiting card shows the waiting on you pill', async () => {
   await open(board({ review: [card(12, 'review', { stage: 'human_review', waiting: true })] }))
-  expect(within(cardEl(12)).getByText('waiting on you')).toBeTruthy()
+  expect(within(cardEl(12)).getByText('waiting on you').className).toMatch(cls('bg-warning'))
 })
 
-test('AC9: an escalated card has the red badge and left bar; no other card does', async () => {
+test('AC9, 043 FE7: an escalated card has the escalated pill and the red left bar; no other card has either', async () => {
   await open(board({
     backlog: [card(1, 'backlog')],
     review: [card(11, 'review', { stage: 'escalated', escalated: true }), card(12, 'review', { stage: 'human_review', waiting: true })],
   }))
-  const badge = within(cardEl(11)).getByText('⚠ NEEDS YOU — escalated')
-  expect(badge.className).toMatch(/(^|\s)text-danger(\s|$)/)
-  const bar = (li) => /(^|\s)border-l-4(\s|$)/.test(li.className) && /(^|\s)border-danger(\s|$)/.test(li.className)
-  expect(bar(cardEl(11))).toBe(true)
+  const pill = within(cardEl(11)).getByText('escalated')
+  expect(pill.className).toMatch(cls('bg-danger'))
+  expect(pill.className).toMatch(cls('text-surface'))
+  expect(cardEl(11).className).toMatch(cls('border-l-4'))
+  expect(cardEl(11).className).toMatch(cls('border-danger'))
   for (const id of [1, 12]) {
     expect(cardEl(id).className).not.toMatch(/(^|\s)(border-l-4|border-danger)(\s|$)/)
   }
-  expect(screen.getAllByText('⚠ NEEDS YOU — escalated')).toHaveLength(1)
+  expect(screen.getAllByText('escalated')).toHaveLength(1)
+  expect(within(cardEl(1)).queryByText('waiting on you')).toBeNull()
+  expect(screen.getAllByText('waiting on you')).toHaveLength(1)
 })
 
 test('AC10: a stage without a run shows the stage and no buttons; no stage shows no stage line', async () => {
@@ -214,20 +219,27 @@ test('AC10: a stage without a run shows the stage and no buttons; no stage shows
   expect([...cardEl(15).children].map((el) => el.textContent)).toEqual(['#15 Task 15'])
 })
 
-test('AC11: a running card shows ● running · stage and its local start time, and no buttons', async () => {
+test('AC11, 043 FE8: a running card shows the ● running badge, then its muted stage, its local start time, and no buttons', async () => {
   const running = (id, stage) =>
     card(id, 'in_progress', { stage, run: { id: 40 + id, status: 'running' }, started_at: '2026-10-18T01:02:00Z' })
   await open(board({ in_progress: [running(13, 'build'), running(16, null)] }))
   const li = cardEl(13)
-  expect(within(li).getByText('● running · build')).toBeTruthy()
+  const badge = within(li).getByText(fullText('● running'))
+  expect(badge.className).toMatch(cls('text-accent'))
+  const line = badge.parentElement
+  expect([...line.children].map((el) => el.textContent)).toEqual(['● running', 'build'])
+  expect(line.children[1].className).toMatch(cls('text-muted'))
   expect(within(li).getByText(fullText('started 10:02'))).toBeTruthy()
   expect(li.querySelector('time').getAttribute('datetime')).toBe('2026-10-18T01:02:00Z')
   expect(within(li).queryAllByRole('button')).toEqual([])
-  expect(within(cardEl(16)).getByText('● running')).toBeTruthy()
+  const bare = within(cardEl(16)).getByText(fullText('● running'))
+  expect([...bare.parentElement.children]).toEqual([bare])
+  expect(within(cardEl(16)).getByText(fullText('started 10:02'))).toBeTruthy()
   expect(within(cardEl(16)).queryAllByRole('button')).toEqual([])
+  for (const label of ['In progress', 'Backlog', 'Review', 'Done']) expect(within(li).queryByText(label)).toBeNull() // Q5: no status pill
 })
 
-test('AC12: a stalled card shows stalled · stage and Retry, which runs the task and reloads', async () => {
+test('AC12, 043 FE8: a stalled card shows stalled · stage and Retry, which runs the task and reloads; no card has a status pill', async () => {
   const stalled = (id, stage) => card(id, 'in_progress', { stage, run: { id: 40 + id, status: 'failed' }, stalled: true })
   const { fetch } = await open(board({ in_progress: [stalled(13, 'build'), stalled(16, null)] }), {
     'POST /api/tasks/13/run': [202, { run_id: 50, session_id: 's', worktree: '/w' }],
@@ -238,9 +250,10 @@ test('AC12: a stalled card shows stalled · stage and Retry, which runs the task
   fireEvent.click(within(cardEl(13)).getByRole('button', { name: 'Retry' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
   expect(sent(fetch, 'POST', '/api/tasks/13/run')).toBeUndefined()
+  expect(document.querySelectorAll('main li .rounded-full')).toHaveLength(0)
 })
 
-test('AC13: chips read r2 sec✓ ux✓ ui· co✗ with titles, then +126 −9; no round shows neither', async () => {
+test('AC13, 043 FE9: chips read r2 sec ✓ ux ✓ ui · code ✗ as colored Chips with titles, then +126 −9; no round shows neither', async () => {
   await open(board({
     in_progress: [card(13, 'in_progress', {
       stage: 'agent_review', round: 2, additions: 126, deletions: 9,
@@ -249,9 +262,13 @@ test('AC13: chips read r2 sec✓ ux✓ ui· co✗ with titles, then +126 −9; n
     backlog: [card(14, 'backlog')],
   }))
   const li = cardEl(13)
-  expect(within(li).getByText(fullText('r2 sec✓ ux✓ ui· co✗'))).toBeTruthy()
-  expect([...li.querySelectorAll('[title]')].map((s) => [s.textContent, s.title])).toEqual([
-    ['sec✓', 'security: PASS'], ['ux✓', 'ux: PASS'], ['ui·', 'ui: pending'], ['co✗', 'code: CHANGES'],
+  expect(within(li).getByText(fullText('r2 sec ✓ ux ✓ ui · code ✗'))).toBeTruthy()
+  const chips = [...li.querySelectorAll('[title]')]
+  expect(chips.map((s) => [s.tagName, s.textContent, s.title])).toEqual([
+    ['SPAN', 'sec ✓', 'security: PASS'], ['SPAN', 'ux ✓', 'ux: PASS'], ['SPAN', 'ui ·', 'ui: pending'], ['SPAN', 'code ✗', 'code: CHANGES'],
+  ])
+  expect(chips.map((s) => ['text-success', 'text-danger', 'text-muted'].find((c) => cls(c).test(s.className)))).toEqual([
+    'text-success', 'text-success', 'text-muted', 'text-danger',
   ])
   expect(within(li).getByText('+126 −9')).toBeTruthy()
   expect(cardEl(14).querySelectorAll('[title]')).toHaveLength(0)

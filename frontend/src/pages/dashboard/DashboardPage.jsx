@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router'
 import { dashboardPage } from '../../api/pages.js'
+import { RunningBadge, TaskState } from '../../components/Badge.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { muted } from '../../components/styles.js'
@@ -32,7 +33,7 @@ function Tiles({ tiles, counts, show }) {
 }
 
 function Listed({ page }) {
-  const { show, tiles, listed } = page
+  const { show, listed } = page
   if (show === 'runs_week') {
     if (!listed.length) return <p>No runs.</p>
     return (
@@ -46,7 +47,8 @@ function Listed({ page }) {
               <td>{`run #${r.id}`}</td>
               <td><TaskLink id={r.task_id} title={r.title} /></td>
               <td><ProjectLink id={r.project_id} name={r.project} /></td>
-              <td>{r.status}</td>
+              {/* 043 Q11: only a running run gets a badge; the outcomes stay plain text */}
+              <td>{r.status === 'running' ? <RunningBadge /> : r.status}</td>
               <td><Time iso={r.started_at} /></td>
             </tr>
           ))}
@@ -65,7 +67,7 @@ function Listed({ page }) {
           <tr key={t.id}>
             <td><TaskLink id={t.id} title={t.title} /></td>
             <td><ProjectLink id={t.project_id} name={t.project} /></td>
-            <td>{tiles[t.status] + (t.stage ? ` · ${t.stage}` : '')}</td>
+            <td><TaskState task={t} /></td>
           </tr>
         ))}
       </tbody>

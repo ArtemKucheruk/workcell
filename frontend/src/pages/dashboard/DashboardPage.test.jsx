@@ -43,7 +43,9 @@ test('AC20: / shows the 9 tiles in order with counts, each linking to its list',
   await waitFor(() => expect(document.title).toBe('Claude Factories')) // the title is set in an effect, after the heading renders
 })
 
-test('AC21: ?show=waiting lists tasks, marks its tile; another tile loads its own list', async () => {
+const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)
+
+test('AC21, 043 FE14: ?show=waiting lists tasks with their state pills, marks its tile; another tile loads its own list', async () => {
   const fetch = mockFetch({
     'GET /api/pages/dashboard?show=waiting': [200, page({ show: 'waiting', listed: WAITING })],
     'GET /api/pages/dashboard?show=escalated': [200, page({ show: 'escalated', listed: [] })],
@@ -57,8 +59,15 @@ test('AC21: ?show=waiting lists tasks, marks its tile; another tile loads its ow
   expect(href(task)).toBe('/tasks/12')
   const row = within(rowOf(task))
   expect(href(row.getByRole('link', { name: 'api' }))).toBe('/projects/3')
-  expect(row.getByText('Review · human_review')).toBeTruthy()
-  expect(within(rowOf(within(list).getByRole('link', { name: '#13 Fix typo' }))).getByText('Backlog')).toBeTruthy()
+  const status = (tr) => [...tr.querySelectorAll('td')][2]
+  const pills = (tr) => [...status(tr).firstElementChild.children]
+  const twelve = rowOf(task)
+  expect(pills(twelve).map((el) => el.textContent)).toEqual(['Review', 'waiting on you'])
+  expect(pills(twelve)[0].className).toMatch(cls('text-warning'))
+  expect(pills(twelve)[1].className).toMatch(cls('bg-warning'))
+  const thirteen = rowOf(within(list).getByRole('link', { name: '#13 Fix typo' }))
+  expect(pills(thirteen).map((el) => el.textContent)).toEqual(['Backlog'])
+  expect(status(thirteen).textContent).toBe('Backlog')
 
   fireEvent.click(screen.getByRole('link', { name: 'Escalated 15' }))
   expect(await screen.findByRole('heading', { name: 'Escalated' })).toBeTruthy()
@@ -66,15 +75,22 @@ test('AC21: ?show=waiting lists tasks, marks its tile; another tile loads its ow
   expect(screen.getByText('No tasks.')).toBeTruthy()
 })
 
-test('AC22: ?show=runs_week lists runs; an empty list says No runs.', async () => {
-  mockFetch({ 'GET /api/pages/dashboard?show=runs_week': [200, page({ show: 'runs_week', listed: RUNS })] })
+test('AC22, 043 FE14: ?show=runs_week lists runs, a running one as the ● running badge, the rest as text; an empty list says No runs.', async () => {
+  const ended = ['succeeded', 'failed', 'stopped'].map((status, i) => ({ ...RUNS[0], id: 42 + i, status }))
+  mockFetch({ 'GET /api/pages/dashboard?show=runs_week': [200, page({ show: 'runs_week', listed: [...RUNS, ...ended] })] })
   const { unmount } = renderAt('/?show=runs_week')
   const run = await screen.findByText('run #41')
   const row = within(rowOf(run))
   expect(href(row.getByRole('link', { name: '#12 Rate-limit login' }))).toBe('/tasks/12')
   expect(href(row.getByRole('link', { name: 'api' }))).toBe('/projects/3')
-  expect(row.getByText('running')).toBeTruthy()
+  const badge = row.getByText(fullText('● running'))
+  expect(badge.className).toMatch(cls('text-accent'))
+  expect(badge.parentElement.tagName).toBe('TD')
   expect(row.getByText('2026-10-18 18:05')).toBeTruthy()
+  for (const [i, status] of ['succeeded', 'failed', 'stopped'].entries()) {
+    const cell = [...rowOf(screen.getByText(`run #${42 + i}`)).querySelectorAll('td')][3]
+    expect([cell.textContent, cell.children.length]).toEqual([status, 0])
+  }
   unmount()
 
   mockFetch({ 'GET /api/pages/dashboard?show=runs_week': [200, page({ show: 'runs_week', listed: [] })] })
