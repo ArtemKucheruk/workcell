@@ -245,18 +245,30 @@ Loading, failures, times, and motion are the same on every page:
    - Tool results over 4096 characters arrive cut; **Show all** reloads with `?full=1`.
    - Loaded once, not polled (§6.2 `GET /api/transcripts/{id}`).
 9. **Settings** (`/settings`)
-   - A **Claude login** section: auth method, plan, account (the claude.ai email), and
-     whether runs are enabled, from `GET /api/auth`.
-   - **Log in with Claude** (**Log in again** when signed in) posts `POST /api/auth/login`
-     and shows **Open the Claude sign-in page**, which opens claude.ai in a new tab, and a
-     **Code** field. **Submit code** posts the pasted `<code>#<state>` to
-     `POST /api/auth/login/code`, and on success the section shows the new login. The button
-     then reads **Start over**, which begins a fresh login.
-   - While signed in (runs enabled), **Disconnect** opens a modal `<dialog>` like Delete's
-     (§8.4): **Cancel** first, then **Disconnect** filled `danger`. It posts
-     `POST /api/auth/logout`. A refusal (a run is active, or claude failed) shows its detail
-     inside the dialog, which stays open. On success the section shows the signed-out login and
-     **Log in with Claude**, and the sidebar badge follows on its next poll.
+   - A `Claude accounts` section, from `GET /api/auth/accounts`, loaded once and not polled. One
+     item per account, in the order received: its email as the title (`Not signed in` without
+     one), an outlined `accent` `active` pill on the active one, and Auth method, Plan (`—` when
+     signed out), and Folder (its `config_dir`, mono, muted). With none, `No Claude accounts yet.`
+   - Each item has **Make active** (inactive items only), **Log in again** (**Log in** when signed
+     out), and **Disconnect**. **+ Add account** sits below the list, and below that whether runs
+     are enabled: `Runs enabled`, else in `text-danger` `No active account — runs disabled`, or
+     `Not signed in with a Claude subscription — runs disabled` when the active one is signed out.
+   - **+ Add account**, **Log in**, and **Log in again** post `POST /api/auth/login`, with the
+     item's `account_id` (none for a new account), and show **Open the Claude sign-in page**,
+     which opens claude.ai in a new tab, and a **Code** field. **Submit code** posts the pasted
+     `<code>#<state>` with that `account_id` to `POST /api/auth/login/code`, and on success the
+     list reloads and shows `Logged in as <email>`. While a login is pending, its button reads
+     **Start over**, which begins a fresh login for the same account.
+   - **Make active** posts `POST /api/auth/accounts/{id}/activate` and reloads the list, and focus
+     goes to that item's login button. A refusal (a run is active) shows its detail in an alert.
+   - **Disconnect** opens a modal `<dialog>` like Delete's (§8.4), titled `Disconnect <email>?`
+     (`Disconnect this account?` without an email): `This signs the account out with claude auth
+     logout and removes it from the app, with its config folder if the app created it.`, plus
+     ` Runs stay disabled until you make another account active.` for the active one. **Cancel**
+     comes first and has focus, then **Disconnect** filled `danger`, which sends
+     `DELETE /api/auth/accounts/{id}`. A refusal (a run is active, or claude failed) shows its
+     detail inside the dialog, which stays open. On success the list reloads, focus goes to
+     **+ Add account**, and the sidebar badge follows on its next poll.
    - Subscription login only (§4.3): no API key field.
 10. **Reviews** (`/projects/{id}/reviews`, Closed at `?tab=closed`; wireframe §8.5)
     - From the board view-model, polled every 3 s.

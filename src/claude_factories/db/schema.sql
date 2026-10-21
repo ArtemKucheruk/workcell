@@ -106,3 +106,10 @@ CREATE TABLE IF NOT EXISTS factories (    -- 051: a project's named factory desi
   graph TEXT NOT NULL,                    -- the compact JSON of docs/data-model-and-api.md §6.1's <Graph>
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS factories_name ON factories(project_id, name);
+
+CREATE TABLE IF NOT EXISTS claude_accounts (  -- 056: Claude logins, each its own CLAUDE_CONFIG_DIR; runs use the active one
+  id INTEGER PRIMARY KEY,
+  config_dir TEXT NOT NULL UNIQUE,        -- absolute
+  active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
+  created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS one_active_account ON claude_accounts(active) WHERE active = 1;  -- at most one

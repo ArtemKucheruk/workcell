@@ -107,15 +107,16 @@ docker compose exec backend claude auth status   # check it: "authMethod": "clau
 
 Until you do, the header shows the red `Not signed in — runs disabled` and Run is refused. The
 login lives in the `backend-home` volume, the container's home, so restarts and rebuilds keep
-it, and `docker compose down -v` deletes it.
+it, and `docker compose down -v` deletes it. Settings (`/settings`) can also log in from the
+browser, and hold more Claude accounts, with one active for runs.
 
 Runs get git, uv, node, and npm. If a project's test command needs anything else, build your
 own image `FROM claude-factories-backend`. The steps are in the comments of
 `compose.override.example.yaml`.
 
 To take over a stopped run, the task page gives a command like
-`docker compose exec -w <worktree> backend claude --resume <session-id>`. Run it from this
-checkout, next to `compose.yaml`.
+`docker compose exec -w <worktree> -e CLAUDE_CONFIG_DIR=<account dir> backend claude --resume <session-id>`.
+Run it from this checkout, next to `compose.yaml`.
 
 ## Demo data
 

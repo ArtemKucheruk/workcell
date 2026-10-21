@@ -20,12 +20,29 @@ class AuthOut(BaseModel):
     email: str | None  # 039 Q3: the claude.ai login's account
 
 
+class LoginStart(BaseModel):
+    account_id: int | None = None  # 056 Q3: none is a new account, in a fresh config dir
+
+
 class LoginStarted(BaseModel):
     url: str  # 039 Q2: always https
+    account_id: int  # 056: the account this login is for, the new row's for a new account
 
 
 class LoginCode(BaseModel):
     code: str  # `<code>#<state>` from the sign-in page; handlers/pages.py checks its shape (039 AC12)
+    account_id: int | None = None  # 056 Q5: a guard; another account's id than the pending login's is a 409
+
+
+class AccountOut(BaseModel):
+    """056: GET /api/auth/accounts' item. signed_in, auth_method, plan, and email follow AuthOut's rules."""
+    id: int
+    config_dir: str
+    active: bool
+    signed_in: bool
+    auth_method: str | None
+    plan: str | None
+    email: str | None
 
 
 # --- GET /api/docs/fctl (docs/ui.md §8 item 7) -----------------------------------------

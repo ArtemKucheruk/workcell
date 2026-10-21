@@ -4,272 +4,388 @@ import { cls, expectSkeleton, mockFetch, renderAt } from '../../test/render.jsx'
 
 afterEach(() => vi.restoreAllMocks())
 
-const PRO = { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true, email: 'artem@example.com' }
-const OFF = { auth_method: null, plan: null, runs_enabled: false, email: null }
+const ONE = {
+  id: 1,
+  config_dir: '/home/me/.claude',
+  active: true,
+  signed_in: true,
+  auth_method: 'claude.ai',
+  plan: 'pro',
+  email: 'artem@example.com',
+}
+const TWO = {
+  id: 2,
+  config_dir: '/home/me/.claude-factories/claude-accounts/k3j2h1x9',
+  active: false,
+  signed_in: false,
+  auth_method: null,
+  plan: null,
+  email: null,
+}
+const THREE = {
+  id: 3,
+  config_dir: '/home/me/.claude-factories/claude-accounts/p9q8r7s6',
+  active: false,
+  signed_in: true,
+  auth_method: 'claude.ai',
+  plan: 'max',
+  email: 'second@example.com',
+}
+const AUTH = { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true, email: 'artem@example.com' }
 const SIGN_IN = 'https://claude.ai/oauth/authorize?code=true&state=abc'
+const ACCOUNTS = 'GET /api/auth/accounts'
 const LOGIN = 'POST /api/auth/login'
 const CODE = 'POST /api/auth/login/code'
-const LOGOUT = 'POST /api/auth/logout'
+const ACTIVATE_2 = 'POST /api/auth/accounts/2/activate'
+const DELETE_2 = 'DELETE /api/auth/accounts/2'
 const DISCONNECT_TEXT =
-  'This signs the app out of Claude with claude auth logout. Runs stay disabled until you log in again. Outside Docker, ' +
-  'this is also your own claude login on this machine.'
+  'This signs the account out with claude auth logout and removes it from the app, with its config folder if the app ' +
+  'created it.'
+const ACTIVE_TEXT = ' Runs stay disabled until you make another account active.'
 
-/** Renders /settings with /api/auth answering `auth`, and waits for the Claude login section. */
-async function open(auth, responses = {}) {
-  const fetch = mockFetch({ 'GET /api/auth': [200, auth], [LOGIN]: [200, { url: SIGN_IN }], ...responses })
+/**
+ * Renders /settings with the accounts list answering `accounts`, and waits for the Claude accounts region. `responses`
+ * is read on every call, so a test can change an answer between clicks.
+ */
+async function open(accounts, extra = {}) {
+  const responses = {
+    'GET /api/auth': [200, AUTH],
+    [ACCOUNTS]: [200, accounts],
+    [LOGIN]: [200, { url: SIGN_IN, account_id: 3 }],
+    ...extra,
+  }
+  const fetch = mockFetch(responses)
   const view = renderAt('/settings')
-  const section = await screen.findByRole('region', { name: 'Claude login' })
-  return { fetch, section, ...view }
+  const section = await screen.findByRole('region', { name: 'Claude accounts' })
+  return { fetch, responses, section, ...view }
 }
 /** The fetch calls to "METHOD url", as [url, init]. */
 const calls = (fetch, key) => fetch.mock.calls.filter(([url, init = {}]) => `${init.method ?? 'GET'} ${url}` === key)
-/** The <dd> beside the <dt> named `name`. */
-const row = (name) => screen.getByText(name, { selector: 'dt' }).nextElementSibling.textContent
+const sent = (call) => (call[1].body === undefined ? undefined : JSON.parse(call[1].body))
+const items = (section) => within(section).getAllByRole('listitem')
+/** The <dd> beside the <dt> named `name`, in `item`. */
+const dd = (item, name) => within(item).getByText(name, { selector: 'dt' }).nextElementSibling
+const row = (item, name) => dd(item, name).textContent
+const buttons = (item) => within(item).getAllByRole('button').map((b) => b.textContent)
+const pill = (item) => within(item).queryByText('active', { exact: true })
 const codeInput = () => screen.getByRole('textbox', { name: 'Code' })
 const submitButton = () => screen.getByRole('button', { name: 'Submit code' })
+const signInLink = () => screen.queryByRole('link', { name: 'Open the Claude sign-in page' })
+const follows = (a, b) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
 
-async function startLogin(name) {
-  fireEvent.click(screen.getByRole('button', { name }))
+/** Clicks `button`, then waits for the sign-in link. */
+async function startLogin(button) {
+  fireEvent.click(button)
   await screen.findByRole('link', { name: 'Open the Claude sign-in page' })
 }
 
-/** Disconnect, confirmed in its dialog; resolves once the section offers Log in with Claude again. */
-async function disconnect(section) {
-  fireEvent.click(within(section).getByRole('button', { name: 'Disconnect' }))
-  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' }))
-  return within(section).findByRole('button', { name: 'Log in with Claude' })
-}
-
-test('AC19: a claude.ai pro login shows its method, plan, account, and Log in again, with no textbox', async () => {
-  const { section } = await open(PRO)
+test('FE1: the list loads once, one item per account in order, with its email, pill, plan, method, and folder', async () => {
+  const { fetch, section } = await open([ONE, TWO])
   expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeTruthy()
   expect(document.title).toBe('Settings · Claude Factories')
-  expect(row('Auth method')).toBe('claude.ai')
-  expect(row('Plan')).toBe('Pro')
-  expect(row('Account')).toBe('artem@example.com')
-  expect(within(section).getByText('Runs enabled')).toBeTruthy()
-  expect(within(section).getByRole('button', { name: 'Log in again' })).toBeTruthy()
+  expect(calls(fetch, ACCOUNTS)).toHaveLength(1)
+  const [one, two] = items(section)
+  expect(items(section)).toHaveLength(2)
+
+  expect(within(one).getByRole('heading', { name: 'artem@example.com' })).toBeTruthy()
+  expect(pill(one).className).toMatch(cls('border-accent'))
+  expect(pill(one).className).toMatch(cls('text-accent'))
+  expect(row(one, 'Plan')).toBe('Pro')
+  expect(row(one, 'Auth method')).toBe('claude.ai')
+  expect(row(one, 'Folder')).toBe('/home/me/.claude')
+  expect(dd(one, 'Folder').className).toMatch(cls('font-mono'))
+  expect(dd(one, 'Folder').className).toMatch(cls('text-muted'))
+
+  expect(within(two).getByRole('heading', { name: 'Not signed in' })).toBeTruthy()
+  expect(pill(two)).toBeNull()
+  expect(row(two, 'Plan')).toBe('—')
+  expect(row(two, 'Auth method')).toBe('—')
+  expect(row(two, 'Folder')).toBe(TWO.config_dir)
   expect(screen.queryByRole('textbox')).toBeNull()
 })
 
-test('AC19: plan null reads subscription and email null reads —', async () => {
-  await open({ ...PRO, plan: null, email: null })
-  expect(row('Plan')).toBe('subscription')
-  expect(row('Account')).toBe('—')
+test('FE1, round 1 review-ui: a signed-in account with no email is titled Not signed in, as Q11 words it', async () => {
+  const { section } = await open([{ ...ONE, email: null }])
+  const [one] = items(section)
+  expect(within(one).getByRole('heading', { name: 'Not signed in' })).toBeTruthy()
+  expect(row(one, 'Plan')).toBe('Pro')
+  expect(buttons(one)).toEqual(['Log in again', 'Disconnect'])
 })
 
-test('AC20: runs disabled says so and offers Log in with Claude, with no API key field', async () => {
-  const { section } = await open(OFF)
-  expect(within(section).getByText('Not signed in with a Claude subscription — runs disabled')).toBeTruthy()
-  expect(within(section).getByRole('button', { name: 'Log in with Claude' })).toBeTruthy()
-  expect(screen.queryByRole('textbox')).toBeNull()
+test('FE2: Make active only on inactive items, Log in again or Log in by sign-in, Disconnect on all; + Add account below', async () => {
+  const { section } = await open([ONE, TWO, THREE])
+  const [one, two, three] = items(section)
+  expect(buttons(one)).toEqual(['Log in again', 'Disconnect'])
+  expect(buttons(two)).toEqual(['Make active', 'Log in', 'Disconnect'])
+  expect(buttons(three)).toEqual(['Make active', 'Log in again', 'Disconnect'])
+  const add = within(section).getByRole('button', { name: '+ Add account' })
+  expect(follows(within(section).getByRole('list'), add)).toBe(true)
 })
 
-test('AC21: Log in posts once and shows the sign-in link, the Code field, and Start over', async () => {
-  for (const [auth, name] of [[OFF, 'Log in with Claude'], [PRO, 'Log in again']]) {
-    const { fetch, section, unmount } = await open(auth)
-    await startLogin(name)
-    const posts = calls(fetch, LOGIN)
-    expect(posts).toHaveLength(1)
-    expect(posts[0][1].headers['X-Requested-By']).toBe('fctl')
-    const link = screen.getByRole('link', { name: 'Open the Claude sign-in page' })
-    expect(link.getAttribute('href')).toBe(SIGN_IN)
-    expect(link.getAttribute('target')).toBe('_blank')
-    expect(link.getAttribute('rel')).toBe('noopener noreferrer')
-    expect(submitButton().disabled).toBe(true)
-    fireEvent.change(codeInput(), { target: { value: '   ' } })
-    expect(submitButton().disabled).toBe(true)
-    fireEvent.change(codeInput(), { target: { value: 'good#state' } })
-    expect(submitButton().disabled).toBe(false)
-    expect(within(section).getByRole('button', { name: 'Start over' })).toBeTruthy()
-    expect(within(section).queryByRole('button', { name })).toBeNull()
+test('FE3: below the list, whether runs are enabled, from the active account', async () => {
+  for (const [accounts, text, red] of [
+    [[ONE, TWO], 'Runs enabled', false],
+    [[{ ...ONE, active: false }, TWO], 'No active account — runs disabled', true],
+    [[{ ...ONE, active: false }, { ...TWO, active: true }], 'Not signed in with a Claude subscription — runs disabled', true],
+  ]) {
+    const { section, unmount } = await open(accounts)
+    const line = within(section).getByText(text)
+    expect(follows(within(section).getByRole('list'), line)).toBe(true)
+    expect(cls('text-danger').test(line.className)).toBe(red)
     unmount()
   }
 })
 
-test('AC22: a code is sent trimmed; on 200 the page shows the new login and drops the form', async () => {
-  const { fetch } = await open(OFF, { [CODE]: [200, PRO] })
-  await startLogin('Log in with Claude')
-  fireEvent.change(codeInput(), { target: { value: ' good#state ' } })
-  fireEvent.click(submitButton())
-  expect((await screen.findByRole('status')).textContent).toBe('Logged in as artem@example.com')
-  const sent = calls(fetch, CODE)
-  expect(sent).toHaveLength(1)
-  expect(JSON.parse(sent[0][1].body)).toEqual({ code: 'good#state' })
-  expect(row('Plan')).toBe('Pro')
-  expect(screen.getByText('Runs enabled')).toBeTruthy()
-  expect(screen.queryByRole('textbox')).toBeNull()
-  expect(screen.getByRole('button', { name: 'Log in again' })).toBeTruthy()
+test('FE4: an empty list says so, with + Add account and no active account', async () => {
+  const { section } = await open([])
+  expect(within(section).getByText('No Claude accounts yet.')).toBeTruthy()
+  expect(within(section).queryAllByRole('listitem')).toEqual([])
+  expect(within(section).getByRole('button', { name: '+ Add account' })).toBeTruthy()
+  expect(within(section).getByText('No active account — runs disabled').className).toMatch(cls('text-danger'))
 })
 
-test('AC22: Enter submits too, and a null email reads Logged in', async () => {
-  const { fetch } = await open(OFF, { [CODE]: [200, { ...PRO, email: null }] })
-  await startLogin('Log in with Claude')
+test('FE5: Make active posts once, reloads the list, and moves the pill; focus goes to its login button', async () => {
+  const { fetch, responses, section } = await open([ONE, TWO], { [ACTIVATE_2]: [200, { ...AUTH, plan: null, email: null }] })
+  responses[ACCOUNTS] = [200, [{ ...ONE, active: false }, { ...TWO, active: true }]]
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Make active' }))
+  await waitFor(() => expect(pill(items(section)[1])).toBeTruthy())
+  const posts = calls(fetch, ACTIVATE_2)
+  expect(posts).toHaveLength(1)
+  expect(posts[0][1].headers['X-Requested-By']).toBe('fctl')
+  expect(calls(fetch, ACCOUNTS)).toHaveLength(2)
+  const [one, two] = items(section)
+  expect(pill(one)).toBeNull()
+  expect(buttons(one)).toEqual(['Make active', 'Log in again', 'Disconnect'])
+  expect(buttons(two)).toEqual(['Log in', 'Disconnect'])
+  await waitFor(() => expect(document.activeElement).toBe(within(two).getByRole('button', { name: 'Log in' })))
+})
+
+test('FE5, round 1 review-ui, review-ux: Make active clears a Logged in as status left by a code', async () => {
+  const { responses, section } = await open([ONE], { [CODE]: [200, AUTH], 'POST /api/auth/accounts/1/activate': [200, AUTH] })
+  await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+  responses[ACCOUNTS] = [200, [{ ...ONE, active: false }, { ...THREE, active: true }]]
   fireEvent.change(codeInput(), { target: { value: 'good#state' } })
-  fireEvent.submit(codeInput().form) // jsdom has no implicit submission; Enter in a form's field does this
-  expect((await screen.findByRole('status')).textContent).toBe('Logged in')
-  expect(calls(fetch, CODE)).toHaveLength(1)
+  fireEvent.click(submitButton())
+  expect((await within(section).findByRole('status')).textContent).toBe('Logged in as second@example.com')
+  responses[ACCOUNTS] = [200, [ONE, THREE]]
+  fireEvent.click(within(items(section)[0]).getByRole('button', { name: 'Make active' }))
+  await waitFor(() => expect(pill(items(section)[0])).toBeTruthy())
+  expect(within(section).queryByRole('status')).toBeNull()
 })
 
-test('AC23: a refused login start shows its detail in an alert', async () => {
-  const detail = 'claude auth login printed no sign-in URL: Error: managed settings forbid this'
-  await open(OFF, { [LOGIN]: [500, { detail }] })
-  fireEvent.click(screen.getByRole('button', { name: 'Log in with Claude' }))
-  expect((await screen.findByRole('alert')).textContent).toBe(detail)
-  expect(screen.queryByRole('textbox')).toBeNull()
+test('FE5: a refused Make active shows its detail in the region, reloads nothing, and leaves the pill', async () => {
+  const { fetch, section } = await open([ONE, TWO], { [ACTIVATE_2]: [409, { detail: 'a run is active' }] })
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Make active' }))
+  expect((await within(section).findByRole('alert')).textContent).toBe('a run is active')
+  expect(calls(fetch, ACCOUNTS)).toHaveLength(1)
+  expect(pill(items(section)[0])).toBeTruthy()
+  expect(pill(items(section)[1])).toBeNull()
 })
 
-test('AC23: a refused code shows its detail, and the form and typed code stay', async () => {
-  for (const [status, detail] of [[409, 'no login in progress'], [422, 'Login failed: Invalid code']]) {
-    const { unmount } = await open(OFF, { [CODE]: [status, { detail }] })
-    await startLogin('Log in with Claude')
-    fireEvent.change(codeInput(), { target: { value: 'good#state' } })
-    fireEvent.click(submitButton())
-    expect((await screen.findByRole('alert')).textContent).toBe(detail)
-    expect(codeInput().value).toBe('good#state')
-    await waitFor(() => expect(submitButton().disabled).toBe(false))
-    expect(screen.queryByRole('status')).toBeNull()
+test('FE6: + Add account posts with no account_id and shows the sign-in link and the Code field', async () => {
+  const { fetch, section } = await open([ONE])
+  await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+  const posts = calls(fetch, LOGIN)
+  expect(posts).toHaveLength(1)
+  expect(posts[0][1].headers['X-Requested-By']).toBe('fctl')
+  expect(sent(posts[0])).toBeUndefined()
+  const link = signInLink()
+  expect(link.getAttribute('href')).toBe(SIGN_IN)
+  expect(link.getAttribute('target')).toBe('_blank')
+  expect(link.getAttribute('rel')).toBe('noopener noreferrer')
+  expect(codeInput()).toBeTruthy()
+  expect(within(items(section)[0]).queryByRole('textbox')).toBeNull() // a new account's form isn't in another's item
+  expect(submitButton().disabled).toBe(true)
+  fireEvent.change(codeInput(), { target: { value: '   ' } })
+  expect(submitButton().disabled).toBe(true)
+})
+
+test("FE7: Submit code sends the trimmed code and the login's account_id; on 200 the list reloads and the form goes", async () => {
+  for (const [three, text] of [[THREE, 'Logged in as second@example.com'], [{ ...THREE, email: null }, 'Logged in']]) {
+    const { fetch, responses, section, unmount } = await open([ONE], { [CODE]: [200, AUTH] })
+    await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+    responses[ACCOUNTS] = [200, [ONE, three]]
+    fireEvent.change(codeInput(), { target: { value: ' good#state ' } })
+    fireEvent.submit(codeInput().form) // the button's click, or Enter in the field
+    expect((await within(section).findByRole('status')).textContent).toBe(text)
+    const codes = calls(fetch, CODE)
+    expect(codes).toHaveLength(1)
+    expect(codes[0][1].headers['X-Requested-By']).toBe('fctl')
+    expect(sent(codes[0])).toEqual({ code: 'good#state', account_id: 3 })
+    expect(calls(fetch, ACCOUNTS)).toHaveLength(2)
+    expect(items(section)).toHaveLength(2)
+    expect(signInLink()).toBeNull()
+    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(within(section).getByRole('button', { name: '+ Add account' })).toBeTruthy()
     unmount()
   }
 })
 
-test('AC24, 046 FE14: a skeleton until /api/auth answers, then its error in an alert', async () => {
-  mockFetch({ 'GET /api/auth': [500, { detail: 'boom' }] })
-  renderAt('/settings')
-  expectSkeleton(screen.getByRole('status'))
-  expect((await screen.findByRole('alert')).textContent).toBe('boom')
-  expect(screen.queryByRole('status')).toBeNull()
-  expect(screen.queryByRole('region', { name: 'Claude login' })).toBeNull()
+test('FE7: a refused code shows its detail, and the form and the typed code stay', async () => {
+  const { fetch, section } = await open([ONE], { [CODE]: [422, { detail: 'Login failed: Invalid code' }] })
+  await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+  fireEvent.change(codeInput(), { target: { value: 'bad#state' } })
+  fireEvent.click(submitButton())
+  expect((await within(section).findByRole('alert')).textContent).toBe('Login failed: Invalid code')
+  expect(codeInput().value).toBe('bad#state')
+  expect(signInLink()).toBeTruthy()
+  await waitFor(() => expect(submitButton().disabled).toBe(false))
+  expect(calls(fetch, ACCOUNTS)).toHaveLength(1)
+  expect(within(section).queryByRole('status')).toBeNull()
 })
 
-test('FE1: a claude.ai login shows Disconnect in the Claude login region; with runs disabled there is none', async () => {
-  const { section, unmount } = await open(PRO)
-  expect(within(section).getByRole('button', { name: 'Disconnect' })).toBeTruthy()
-  unmount()
-  const off = await open(OFF)
-  expect(within(off.section).getByRole('button', { name: 'Log in with Claude' })).toBeTruthy()
-  expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull()
+test("FE8: Log in again sends the item's account_id and becomes Start over, which resends it; an add's Start over resends 3", async () => {
+  const { fetch, section } = await open([ONE, TWO], { [LOGIN]: [200, { url: SIGN_IN, account_id: 1 }] })
+  const one = items(section)[0]
+  await startLogin(within(one).getByRole('button', { name: 'Log in again' }))
+  expect(within(one).getByRole('textbox', { name: 'Code' })).toBeTruthy() // the form sits in its account's item
+  const again = within(one).getByRole('button', { name: 'Start over' })
+  expect(within(section).getAllByRole('button', { name: 'Start over' })).toEqual([again])
+  fireEvent.click(again)
+  await waitFor(() => expect(calls(fetch, LOGIN)).toHaveLength(2))
+  expect(calls(fetch, LOGIN).map(sent)).toEqual([{ account_id: 1 }, { account_id: 1 }])
 })
 
-test('FE2: Disconnect opens a modal dialog naming the account, with the Q5 text, Cancel first and focused; nothing is posted', async () => {
+test('FE8: after + Add account answers account_id 3, its Start over sends account_id 3, not a new account', async () => {
+  const { fetch, section } = await open([ONE, TWO])
+  await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+  expect(within(section).queryByRole('button', { name: '+ Add account' })).toBeNull()
+  for (const item of items(section)) expect(within(item).queryByRole('button', { name: 'Start over' })).toBeNull()
+  fireEvent.click(within(section).getByRole('button', { name: 'Start over' }))
+  await waitFor(() => expect(calls(fetch, LOGIN)).toHaveLength(2))
+  expect(calls(fetch, LOGIN).map(sent)).toEqual([undefined, { account_id: 3 }])
+})
+
+test('FE8: a refused login start shows its detail in an alert, with no form', async () => {
+  const detail = 'claude auth login printed no sign-in URL: Error: managed settings forbid this'
+  const { section } = await open([ONE, TWO], { [LOGIN]: [500, { detail }] })
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Log in' }))
+  expect((await within(section).findByRole('alert')).textContent).toBe(detail)
+  expect(screen.queryByRole('textbox')).toBeNull()
+  expect(within(items(section)[1]).getByRole('button', { name: 'Log in' })).toBeTruthy()
+})
+
+test('FE9: Disconnect opens a modal dialog naming the account, with the Q11 text, Cancel first and focused; nothing is sent', async () => {
   const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function showModal() {
     this.open = true
     this.querySelector('button, a, input, [tabindex]').focus() // the dialog focusing steps: its first focusable element
   })
-  for (const [auth, name] of [[PRO, 'Disconnect artem@example.com?'], [{ ...PRO, email: null }, 'Disconnect Claude?']]) {
-    const { fetch, section, unmount } = await open(auth)
+  const { fetch, section } = await open([ONE, TWO])
+  for (const [index, name, text] of [
+    [1, 'Disconnect this account?', DISCONNECT_TEXT],
+    [0, 'Disconnect artem@example.com?', DISCONNECT_TEXT + ACTIVE_TEXT],
+  ]) {
     expect(screen.queryByRole('dialog')).toBeNull()
-    fireEvent.click(within(section).getByRole('button', { name: 'Disconnect' }))
+    fireEvent.click(within(items(section)[index]).getByRole('button', { name: 'Disconnect' }))
     expect(showModal).toHaveBeenCalledOnce()
     const dialog = screen.getByRole('dialog', { name })
     expect(dialog.tagName).toBe('DIALOG')
-    expect(document.getElementById(dialog.getAttribute('aria-describedby')).textContent).toBe(DISCONNECT_TEXT)
+    expect(document.getElementById(dialog.getAttribute('aria-describedby')).textContent).toBe(text)
     expect(within(dialog).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cancel', 'Disconnect'])
     expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: 'Cancel' }))
     const confirm = within(dialog).getByRole('button', { name: 'Disconnect' })
     expect(confirm.className).toMatch(cls('bg-danger'))
     expect(confirm.className).toMatch(cls('text-surface'))
-    expect(calls(fetch, LOGOUT)).toEqual([])
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
     showModal.mockClear()
-    unmount()
   }
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toEqual([])
 })
 
-test('FE3: Cancel, or Esc, closes the dialog with no request; the login and Disconnect stay, and focus returns to it', async () => {
-  const { fetch, section } = await open(PRO)
-  const opener = within(section).getByRole('button', { name: 'Disconnect' })
+test('FE9: Cancel, or Esc, closes the dialog with no DELETE; the list stays, and focus returns to Disconnect', async () => {
+  const { fetch, section } = await open([ONE, TWO])
+  const opener = within(items(section)[1]).getByRole('button', { name: 'Disconnect' })
   fireEvent.click(opener)
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(document.activeElement).toBe(opener)
   fireEvent.click(opener)
-  const dialog = screen.getByRole('dialog', { name: 'Disconnect artem@example.com?' })
+  const dialog = screen.getByRole('dialog', { name: 'Disconnect this account?' })
   act(() => dialog.close()) // what Esc does after its cancel event
   expect(screen.queryByRole('dialog')).toBeNull()
   expect(document.activeElement).toBe(opener)
   expect(fetch.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toEqual([])
-  expect(row('Plan')).toBe('Pro')
-  expect(within(section).getByRole('button', { name: 'Disconnect' })).toBe(opener)
+  expect(items(section)).toHaveLength(2)
 })
 
-test("FE4: the dialog's Disconnect posts once; on 200 the dialog closes, the section is signed out, and focus is on Log in with Claude", async () => {
-  const { fetch, section } = await open(PRO, { [LOGOUT]: [200, OFF] })
-  fireEvent.click(within(section).getByRole('button', { name: 'Disconnect' }))
+test("FE10: the dialog's Disconnect sends one DELETE; on 204 it closes, the list reloads without the item, and focus is on + Add account", async () => {
+  const { fetch, responses, section } = await open([ONE, TWO], { [DELETE_2]: [204] })
+  responses[ACCOUNTS] = [200, [ONE]]
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Disconnect' }))
   const dialog = screen.getByRole('dialog')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }))
-  const login = await within(section).findByRole('button', { name: 'Log in with Claude' })
+  await waitFor(() => expect(items(section)).toHaveLength(1))
   expect(dialog.open).toBe(false)
   expect(screen.queryByRole('dialog')).toBeNull()
-  const posts = calls(fetch, LOGOUT)
-  expect(posts).toHaveLength(1)
-  expect(posts[0][1].headers['X-Requested-By']).toBe('fctl')
-  expect(posts[0][1].body).toBeUndefined()
-  for (const name of ['Auth method', 'Plan', 'Account']) expect(row(name)).toBe('—')
-  expect(within(section).getByText('Not signed in with a Claude subscription — runs disabled')).toBeTruthy()
-  expect(within(section).queryByText('Runs enabled')).toBeNull()
-  expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull()
-  expect(document.activeElement).toBe(login)
+  const deletes = calls(fetch, DELETE_2)
+  expect(deletes).toHaveLength(1)
+  expect(deletes[0][1].headers['X-Requested-By']).toBe('fctl')
+  expect(calls(fetch, ACCOUNTS)).toHaveLength(2)
+  expect(within(items(section)[0]).getByRole('heading', { name: 'artem@example.com' })).toBeTruthy()
+  await waitFor(() => expect(document.activeElement).toBe(within(section).getByRole('button', { name: '+ Add account' })))
 })
 
-test('FE5: a 409 or a 500 shows its detail inside the dialog, which stays open over the signed-in login', async () => {
+test("FE10: Disconnecting the account whose login is pending drops its form; another account's stays (Q12)", async () => {
+  const { responses, section } = await open([ONE, TWO], {
+    [LOGIN]: [200, { url: SIGN_IN, account_id: 2 }],
+    [DELETE_2]: [204],
+    'DELETE /api/auth/accounts/1': [204],
+  })
+  await startLogin(within(items(section)[1]).getByRole('button', { name: 'Log in' }))
+  responses[ACCOUNTS] = [200, [TWO]]
+  fireEvent.click(within(items(section)[0]).getByRole('button', { name: 'Disconnect' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' }))
+  await waitFor(() => expect(items(section)).toHaveLength(1))
+  expect(within(items(section)[0]).getByRole('textbox', { name: 'Code' })).toBeTruthy()
+  responses[ACCOUNTS] = [200, []]
+  fireEvent.click(within(items(section)[0]).getByRole('button', { name: 'Disconnect' }))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' }))
+  expect(await within(section).findByText('No Claude accounts yet.')).toBeTruthy()
+  expect(signInLink()).toBeNull()
+  expect(screen.queryByRole('textbox')).toBeNull()
+})
+
+test('FE11: a 409 or a 500 shows its detail inside the dialog, which stays open over the unchanged list', async () => {
   for (const [status, detail] of [[409, 'a run is active'], [500, 'claude auth logout failed: Error: keychain locked']]) {
-    const { section, unmount } = await open(PRO, { [LOGOUT]: [status, { detail }] })
-    fireEvent.click(within(section).getByRole('button', { name: 'Disconnect' }))
-    const dialog = screen.getByRole('dialog', { name: 'Disconnect artem@example.com?' })
+    const { fetch, section, unmount } = await open([ONE, TWO], { [DELETE_2]: [status, { detail }] })
+    fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Disconnect' }))
+    const dialog = screen.getByRole('dialog', { name: 'Disconnect this account?' })
     const confirm = within(dialog).getByRole('button', { name: 'Disconnect' })
     fireEvent.click(confirm)
     expect((await within(dialog).findByRole('alert')).textContent).toBe(detail)
     await waitFor(() => expect(confirm.disabled).toBe(false))
     expect(dialog.open).toBe(true)
-    expect(row('Plan')).toBe('Pro')
-    expect(row('Account')).toBe('artem@example.com')
-    expect(within(section).getByText('Runs enabled')).toBeTruthy()
-    expect(within(section).getByRole('button', { name: 'Log in again' })).toBeTruthy()
+    expect(calls(fetch, ACCOUNTS)).toHaveLength(1)
+    expect(items(section)).toHaveLength(2)
+    expect(row(items(section)[1], 'Folder')).toBe(TWO.config_dir)
     unmount()
   }
 })
 
-test('FE6: after a login on the page, a Disconnect removes its Logged in as status', async () => {
-  const { section } = await open(OFF, { [CODE]: [200, PRO], [LOGOUT]: [200, OFF] })
-  await startLogin('Log in with Claude')
-  fireEvent.change(codeInput(), { target: { value: 'good#state' } })
-  fireEvent.click(submitButton())
-  expect((await screen.findByRole('status')).textContent).toBe('Logged in as artem@example.com')
-  await disconnect(section)
-  expect(screen.queryByText('Logged in as artem@example.com')).toBeNull()
-  expect(screen.queryByRole('status')).toBeNull()
-})
-
-test('FE7: with a login form pending, a Disconnect removes the link, the Code field, and its refusal', async () => {
-  const { section } = await open(PRO, { [CODE]: [422, { detail: 'Login failed: Invalid code' }], [LOGOUT]: [200, OFF] })
-  await startLogin('Log in again')
-  fireEvent.change(codeInput(), { target: { value: 'bad#state' } })
-  fireEvent.click(submitButton())
-  expect((await within(section).findByRole('alert')).textContent).toBe('Login failed: Invalid code')
-  await disconnect(section)
-  expect(screen.queryByRole('link', { name: 'Open the Claude sign-in page' })).toBeNull()
-  expect(screen.queryByRole('textbox', { name: 'Code' })).toBeNull()
-  expect(screen.queryByRole('alert')).toBeNull()
-  expect(within(section).queryByRole('button', { name: 'Start over' })).toBeNull()
-  expect(within(section).getByRole('button', { name: 'Log in with Claude' })).toBeTruthy()
-})
-
-test('round 2 (review-ui, review-ux): Esc while the logout is pending, then its 200, still signs the page out', async () => {
-  const { fetch, section } = await open(PRO)
+test('FE11, 055 round 2: Esc while the DELETE is pending, then its 204, still reloads the list', async () => {
+  const { fetch, responses, section } = await open([ONE, TWO])
   const answer = fetch.getMockImplementation()
   let reply
   fetch.mockImplementation((url, init) =>
-    url === '/api/auth/logout' ? new Promise((resolve) => (reply = resolve)) : answer(url, init),
+    init?.method === 'DELETE' ? new Promise((resolve) => (reply = resolve)) : answer(url, init),
   )
-  fireEvent.click(within(section).getByRole('button', { name: 'Disconnect' }))
+  responses[ACCOUNTS] = [200, [ONE]]
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Disconnect' }))
   const dialog = screen.getByRole('dialog')
   fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }))
-  await waitFor(() => expect(calls(fetch, LOGOUT)).toHaveLength(1))
+  await waitFor(() => expect(calls(fetch, DELETE_2)).toHaveLength(1))
   act(() => dialog.close()) // Esc, mid-request: the dialog unmounts
   expect(screen.queryByRole('dialog')).toBeNull()
-  await act(async () => reply(new Response(JSON.stringify(OFF), { status: 200 })))
-  const login = await within(section).findByRole('button', { name: 'Log in with Claude' })
-  expect(row('Auth method')).toBe('—')
-  expect(screen.queryByRole('button', { name: 'Disconnect' })).toBeNull()
-  expect(document.activeElement).toBe(login)
+  await act(async () => reply(new Response(null, { status: 204 })))
+  await waitFor(() => expect(items(section)).toHaveLength(1))
+  await waitFor(() => expect(document.activeElement).toBe(within(section).getByRole('button', { name: '+ Add account' })))
+})
+
+test('FE12, 046 FE14: a skeleton until the accounts list answers, then its error in an alert', async () => {
+  mockFetch({ 'GET /api/auth': [200, AUTH], [ACCOUNTS]: [500, { detail: 'boom' }] })
+  renderAt('/settings')
+  expectSkeleton(screen.getByRole('status'))
+  expect((await screen.findByRole('alert')).textContent).toBe('boom')
+  expect(screen.queryByRole('status')).toBeNull()
+  expect(screen.queryByRole('region', { name: 'Claude accounts' })).toBeNull()
 })

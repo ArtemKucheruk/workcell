@@ -11,6 +11,7 @@ from fastapi import Depends
 from .. import db
 from ..adapters.claude import Claude, SubprocessClaude
 from ..adapters.git import Git, SubprocessGit
+from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.factories import FactoriesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
@@ -67,6 +68,10 @@ def get_factories(conn: Conn) -> FactoriesRepo:
     return FactoriesRepo(conn)
 
 
+def get_claude_accounts(conn: Conn) -> ClaudeAccountsRepo:
+    return ClaudeAccountsRepo(conn)
+
+
 def get_git() -> Git:
     return SubprocessGit()
 
@@ -83,5 +88,6 @@ Reviews = Annotated[ReviewsRepo, Depends(get_reviews)]
 Runs = Annotated[RunsRepo, Depends(get_runs)]
 Transcripts = Annotated[TranscriptsRepo, Depends(get_transcripts)]
 Factories = Annotated[FactoriesRepo, Depends(get_factories)]
+ClaudeAccounts = Annotated[ClaudeAccountsRepo, Depends(get_claude_accounts)]
 GitAdapter = Annotated[Git, Depends(get_git)]
 ClaudeAdapter = Annotated[Claude, Depends(get_claude)]

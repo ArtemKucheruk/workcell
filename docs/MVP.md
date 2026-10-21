@@ -256,8 +256,9 @@ interactive sessions.
   provider variable from the run's environment. With any of them set, `claude -p` would
   quietly bill per token or route to Bedrock or Vertex.
 - Before every run, the app runs `claude auth status` with the same environment and working
-  directory. If the result is not `"authMethod": "claude.ai"`, the run is refused with
-  `409 not on subscription auth`. The app header shows the reported plan,
+  directory, which carries the active Claude account's `CLAUDE_CONFIG_DIR` (§4.6). If the result
+  is not `"authMethod": "claude.ai"`, or no account is active, the run is refused with
+  `409 not on subscription auth`. With no active account, claude isn't called at all. The app header shows the reported plan,
   `subscriptionType: "pro"`.
 - Runs never use `--bare`, which accepts only API keys, or the Agent SDK, which needs an API
   key. Headless `claude -p` is the only way a run starts.
@@ -297,6 +298,7 @@ is never touched. The branch is created but gets no commits.
 ```
 cd /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN FCTL_URL=http://127.0.0.1:4545 \
+    CLAUDE_CONFIG_DIR=~/.claude-factories/claude-accounts/… \
 claude -p "/factory 12" \
   --session-id 6f1c2e0a-…  --output-format stream-json --verbose --forward-subagent-text \
   --permission-mode acceptEdits --permission-prompts none \
@@ -310,6 +312,8 @@ claude -p "/factory 12" \
 ```
 - `env -u` stands for the app removing these variables from the run's environment. The app
   removes every `CLAUDE_CODE_USE_*` variable as well (§4.3).
+- `CLAUDE_CONFIG_DIR` is the active Claude account's config dir (§4.6), for the auth check and the
+  run alike, so the run bills to that account's subscription.
 - Only one run is active at a time, across all projects. While a run is going, starting
   another is refused with `409 run #41 active`. Pro limits are shared with my own sessions,
   and parallel opus runs would use them up quickly.
@@ -324,13 +328,14 @@ claude -p "/factory 12" \
   `fctl serve` stops every run, and at startup any run still marked `running` becomes
   `failed: app restarted`.
 - The task page shows a takeover command:
-  `cd <worktree> && claude --resume <session-id>`.
+  `cd <worktree> && CLAUDE_CONFIG_DIR=<account dir> claude --resume <session-id>`, with the active
+  account's dir, or without it when no account is active.
 - When a run ends, on exit, on **Stop**, and in the startup cleanup (`failed: app restarted`),
   the app copies the run's Claude Code transcripts into `FCTL_HOME/transcripts/<run-id>/` and
   indexes each in `transcripts`. Claude Code prunes old transcripts and the worktree gets
-  removed, so the copy is the record. They come from the worktree's folder under
-  `$CLAUDE_CONFIG_DIR/projects/` (default `~/.claude`): the run's own session, its teammates,
-  and their subagents. A failed copy leaves that file out and never fails the run.
+  removed, so the copy is the record. They come from the worktree's folder under the active
+  account's `<config dir>/projects/`: the run's own session, its teammates, and their subagents.
+  Make active and Disconnect are refused during a run, so that is the run's own account. A failed copy leaves that file out and never fails the run.
 
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.
@@ -385,14 +390,17 @@ Single user and no auth still need these, because the API can start processes th
 - **Login.** Runs need a one-time `docker compose exec backend claude auth login`, and the
   container's `~/.claude` sits on a named volume so the login survives restarts. My host
   login can't be reused: macOS keeps it in the Keychain, which the container can't read.
-  The Settings page (`/settings`) does the same login from the browser: it shows claude's
-  sign-in link and passes the pasted code to claude. Its **Disconnect** runs
-  `claude auth logout` the same way, and is refused while a run is active.
-  §4.3's env stripping and auth check are unchanged.
+  That `~/.claude` is the first Claude account, the one this command signs in. The Settings page
+  (`/settings`) lists the accounts and does the same login from the browser: it shows claude's
+  sign-in link and passes the pasted code to claude. **+ Add account** logs in to a fresh config
+  dir under `FCTL_HOME/claude-accounts/`. Runs use the one active account's `CLAUDE_CONFIG_DIR`,
+  and **Make active** picks it. **Disconnect** runs `claude auth logout` in the account's dir and
+  removes the account, deleting its dir only if it is under `claude-accounts/`. Make active and
+  Disconnect are refused while a run is active. §4.3's env stripping and auth check are unchanged.
 - **Image.** The backend image has git, uv, node, and the `claude` CLI. Anything else a
   project's test command needs goes in a custom image, set in compose.override.yaml.
 - **Takeover.** The session lives in the container, so §4.4's takeover command becomes
-  `docker compose exec -w <worktree> backend claude --resume <session-id>`.
+  `docker compose exec -w <worktree> -e CLAUDE_CONFIG_DIR=<account dir> backend claude --resume <session-id>`.
 
 ### 4.7 Code layout
 The backend under `src/claude_factories/` is split into layers:

@@ -252,6 +252,22 @@ def test_env_stripped(client, project, fake, monkeypatch):  # AC8
         assert env["FCTL_URL"] == "http://127.0.0.1:4545"
 
 
+def test_env_names_active_account(client, project, fake, monkeypatch, tmp_path):  # 056 BE18
+    two = str(tmp_path / "account-2")
+    sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?)", (two, OLD))
+    sql("UPDATE claude_accounts SET active = 0")
+    sql("UPDATE claude_accounts SET active = 1 WHERE config_dir = ?", (two,))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "third"))
+    for name in STRIPPED:
+        monkeypatch.setenv(name, "x")
+    started(client, add_task(project))
+    for name in ("auth", "run"):
+        env = fake.recorded(name)["env"]
+        assert env["CLAUDE_CONFIG_DIR"] == two
+        assert not set(STRIPPED) & set(env)
+        assert env["FCTL_URL"] == "http://127.0.0.1:4545"
+
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost:4545"])  # frontend/server.js sends the first
 @pytest.mark.parametrize("route", ["run", "run-next"])
 def test_fctl_url_ignores_host(client, project, fake, route, host):  # 028 AC4
@@ -413,6 +429,13 @@ def test_refused_without_subscription(client, project, repo, fake, auth, auth_co
     fake()
     assert started(client, task)["worktree"] == f".claude/worktrees/{task}-rate-limit-login"
     assert worktrees(repo) == listed
+
+
+def test_refused_without_active_account(client, project, fake):  # 056 BE15, Q7
+    sql("DELETE FROM claude_accounts")
+    r = run(client, add_task(project))
+    assert (r.status_code, r.json()) == (409, {"detail": "not on subscription auth"})
+    assert not fake.recorded("auth") and not fake.recorded("run") and no_runs()
 
 
 def test_refused_when_worktree_add_fails(client, project, repo, fake):  # AC21

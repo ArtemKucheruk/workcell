@@ -21,6 +21,9 @@ export function StatusPill({ status }) {
 export const WaitingPill = () => <span className={`${pill} border-warning bg-warning text-surface`}>waiting on you</span>
 export const EscalatedPill = () => <span className={`${pill} border-danger bg-danger text-surface`}>escalated</span>
 
+/** 056 Q11: the Claude account runs use, on Settings; outlined accent like the other state pills. */
+export const ActivePill = () => <span className={`${pill} border-accent text-accent`}>active</span>
+
 /** Q4: a kind of In progress, so accent. The dot pulses only when the system allows motion. */
 export function RunningBadge() {
   return (

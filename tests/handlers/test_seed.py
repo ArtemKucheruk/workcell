@@ -25,6 +25,7 @@ def seeded(tmp_path_factory):
     with pytest.MonkeyPatch.context() as mp:
         mp.setenv("FCTL_HOME", str(tmp / "fctl-home"))
         mp.setenv("HOME", str(tmp))
+        mp.setenv("CLAUDE_CONFIG_DIR", str(tmp / "claude-config"))  # 056: the seed's db.init() makes it account 1
         mp.setenv("GIT_CONFIG_GLOBAL", str(tmp / "gitconfig"))
         mp.setenv("GIT_CONFIG_NOSYSTEM", "1")
         main(["seed"])
@@ -331,8 +332,9 @@ def log_events(run: dict) -> list[dict]:
     return [json.loads(line) for line in Path(run["log_path"]).read_text().splitlines()]
 
 
-def test_run_statuses_and_takeover(client):  # AC32
+def test_run_statuses_and_takeover(client, seeded):  # AC32
     rows = runs()
+    named = shlex.quote(str(seeded.parent / "claude-config"))  # 056: the active account
     assert {r["status"] for r in rows} == {"succeeded", "failed", "stopped"}
     latest = {r["task_id"]: r for r in rows}  # by id, so the last one wins
     for status in ("succeeded", "failed", "stopped"):
@@ -340,7 +342,8 @@ def test_run_statuses_and_takeover(client):  # AC32
         t = task_page(client, run["task_id"])
         assert t["run"]["status"] == status
         wt = t["task"]["worktree_path"]
-        assert t["takeover"] == f"cd {shlex.quote(wt)} && claude --resume {shlex.quote(run['session_id'])}"
+        assert t["takeover"] == (f"cd {shlex.quote(wt)} && CLAUDE_CONFIG_DIR={named} claude"
+                                 f" --resume {shlex.quote(run['session_id'])}")
 
 
 def test_run_logs(client, seeded):  # AC33
