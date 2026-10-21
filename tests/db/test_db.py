@@ -35,7 +35,7 @@ def test_schema_has_every_table_and_index():  # AC10
     with closing(db.connect()) as conn:
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files",
-              "verdicts", "comments", "decisions", "events", "transcripts"}  # 030 AC15
+              "verdicts", "comments", "decisions", "events", "transcripts", "factories"}  # 030 AC15, 051 BE1
     assert {("table", t) for t in tables} <= rows
     assert ("index", "one_active_run") in rows
 
@@ -183,3 +183,35 @@ INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_
         conn.execute(TASK, (NOW, NOW, "factory:001-a"))
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(TASK, (NOW, NOW, "factory:001-a"))
+
+
+FACTORY_COLUMNS = [("id", "INTEGER", 0), ("project_id", "INTEGER", 1), ("name", "TEXT", 1), ("graph", "TEXT", 1),
+                   ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1)]  # 051 BE1: (name, type, notnull)
+
+
+def assert_factories_table():
+    with closing(db.connect()) as conn:
+        columns = conn.execute("PRAGMA table_info(factories)").fetchall()
+        assert [(name, kind, notnull) for _, name, kind, notnull, _, _ in columns] == FACTORY_COLUMNS
+        [unique] = [i for i in conn.execute("PRAGMA index_list(factories)") if i[2]]
+        assert [c[2] for c in conn.execute(f"PRAGMA index_info({unique[1]})")] == ["project_id", "name"]
+        [fk] = conn.execute("PRAGMA foreign_key_list(factories)").fetchall()
+        assert (fk[2], fk[3], fk[4], fk[6]) == ("projects", "project_id", "id", "CASCADE")
+
+
+def test_startup_creates_factories_table():  # 051 BE1
+    start_app()
+    assert_factories_table()
+
+
+def test_old_db_gets_factories_table():  # 051 BE1: a factory.db made before this job
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    start_app()
+    start_app()
+    assert_factories_table()
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]
+        assert conn.execute("SELECT id FROM workspaces").fetchall() == [(1,)]

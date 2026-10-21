@@ -14,9 +14,10 @@ from ..repositories.projects import ProjectsRepo
 SKILL = ".claude/skills/factory/SKILL.md"
 FACTORY_FILES = (SKILL, *(f".claude/agents/{a}.md" for a in (  # 011 Q6: written and listed in this order
     "spec-writer", "builder", "review-security", "review-ux", "review-ui", "review-code", "approver")))
+TEMPLATES = Path(__file__).parent.parent / "factory_templates"
 # 011 Q5: markdown, not HTML; values go in verbatim and are never evaluated as template code
 FACTORY_TEMPLATES = jinja2.Environment(
-    loader=jinja2.FileSystemLoader(Path(__file__).parent.parent / "factory_templates"),
+    loader=jinja2.FileSystemLoader(TEMPLATES),
     autoescape=False, keep_trailing_newline=True, undefined=jinja2.StrictUndefined,
 )
 COMMIT_HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'

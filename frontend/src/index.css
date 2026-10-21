@@ -6,6 +6,8 @@
 /* 024 Q10: highlight.js's themes by the system's scheme, as base.html loads them */
 @import "highlight.js/styles/github.css" (prefers-color-scheme: light);
 @import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);
+/* 051: React Flow's stylesheet, in the components layer, so the designer's utilities (a handle's bg-success) win over it */
+@import "@xyflow/react/dist/style.css" layer(components);
 
 /*
  * 040: the theme. Light values here, dark values below; not `inline`, so utilities read the variables and
@@ -87,4 +89,36 @@
   .diff-table tr.comments td { @apply border-y border-line p-2 font-sans whitespace-normal; }
   .diff-table tr.comments td > * { @apply sticky left-2 max-w-[min(48rem,80vw)]; }
   .diff-table .comment + .comment { @apply mt-3; }
+}
+
+/*
+ * 051 FE25: React Flow's colors on the tokens, so the designer follows the system's scheme, not React Flow's own. These beat
+ * the `-default` values its stylesheet sets. The selection box is the one wash, accent mixed into transparent.
+ */
+@layer components {
+  .react-flow {
+    --xy-background-color: var(--color-surface);
+    --xy-background-pattern-color: var(--color-muted);
+    --xy-node-color: var(--color-fg);
+    --xy-node-background-color: var(--color-raised);
+    --xy-node-border: 1px solid var(--color-line);
+    --xy-node-boxshadow-selected: 0 0 0 1px var(--color-accent);
+    --xy-edge-stroke: var(--color-muted);
+    --xy-edge-stroke-width: 1.5;
+    --xy-edge-stroke-selected: var(--color-accent);
+    --xy-connectionline-stroke: var(--color-accent);
+    --xy-connectionline-stroke-width: 1.5;
+    --xy-handle-background-color: var(--color-muted);
+    --xy-handle-border-color: var(--color-surface);
+    --xy-controls-button-background-color: var(--color-raised);
+    --xy-controls-button-background-color-hover: var(--color-line);
+    --xy-controls-button-color: var(--color-fg);
+    --xy-controls-button-color-hover: var(--color-fg);
+    --xy-controls-button-border-color: var(--color-line);
+    --xy-controls-box-shadow: 0 0 0 1px var(--color-line);
+    --xy-selection-background-color: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    --xy-selection-border: 1px dashed var(--color-accent);
+    --xy-attribution-background-color: transparent;
+  }
+  .react-flow__attribution a { color: var(--color-muted); }
 }

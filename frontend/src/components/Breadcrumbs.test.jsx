@@ -30,7 +30,7 @@ test('047 FE1: a Breadcrumb nav holding an <ol>; every item but the last links t
   expect(lis.map(shown)).toEqual(['personal', 'api', '#12', 'Review'])
 })
 
-test('047 FE17: only the task, review, code, and transcript pages render a Breadcrumb nav', () => {
+test('047 FE17, 051 FE9: only the task, review, code, transcript, and factory designer pages render a Breadcrumb nav', () => {
   const src = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
   const users = fs
     .readdirSync(src, { recursive: true })
@@ -40,6 +40,7 @@ test('047 FE17: only the task, review, code, and transcript pages render a Bread
   expect(users.sort()).toEqual([
     'components/Breadcrumbs.jsx',
     'pages/code/CodePage.jsx',
+    'pages/factory/FactoryPage.jsx',
     'pages/review/ReviewPage.jsx',
     'pages/task/TaskPage.jsx',
     'pages/transcript/TranscriptPage.jsx',

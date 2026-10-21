@@ -8,6 +8,7 @@ MAX_VIEW = 1024 * 1024  # 016 Q5: over this many bytes, the code page doesn't sh
 MAX_CONTEXT = 16 * 1024  # 033 Q4: UTF-8 bytes of a project's context_md
 MAX_BUNDLE = 50 * 1024 * 1024  # 032 Q7: the raw body of a task bundle import
 MAX_UNPACKED = 500 * 1024 * 1024  # 032 Q7: the sum of a bundle's declared file sizes
+MAX_GRAPH = 256 * 1024  # 051 rule 1: UTF-8 bytes of a factory graph's compact JSON as stored
 
 
 def data_dir() -> Path:

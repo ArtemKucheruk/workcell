@@ -3,6 +3,8 @@ import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { CodePage } from '../pages/code/CodePage.jsx'
 import { ContextPage } from '../pages/context/ContextPage.jsx'
 import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
+import { FactoriesPage } from '../pages/factories/FactoriesPage.jsx'
+import { FactoryPage } from '../pages/factory/FactoryPage.jsx'
 import { FctlDocsPage } from '../pages/docs/FctlDocsPage.jsx'
 import { ProjectSettingsPage } from '../pages/project-settings/ProjectSettingsPage.jsx'
 import { ReviewPage } from '../pages/review/ReviewPage.jsx'
@@ -29,6 +31,8 @@ export const routes = [
       { path: '/projects/:id/reviews', element: <ReviewsPage /> },
       { path: '/projects/:id/context', element: <ContextPage /> },
       { path: '/projects/:id/settings', element: <ProjectSettingsPage /> },
+      { path: '/projects/:id/factories', element: <FactoriesPage /> }, // 051: a list, not wide
+      { path: '/projects/:id/factories/:fid', element: <FactoryPage />, handle: { wide: true } },
       { path: '/tasks/:id', element: <TaskPage /> },
       { path: '/tasks/:id/review', element: <ReviewPage />, handle: { wide: true } },
       { path: '/transcripts/:id', element: <TranscriptPage /> },

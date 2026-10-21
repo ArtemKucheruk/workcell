@@ -46,8 +46,8 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
-  `warning` pill shown when above 0), **Context**, and **Settings**, and the current page's project opens
-  by itself with its current link marked.
+  `warning` pill shown when above 0), **Context**, **Factories**, and **Settings**, and the current page's
+  project opens by itself with its current link marked. **Factories** is also marked in the factory designer.
 - Each project row, at its right, and the workspace switcher, beside it, have a `⋯` button
   (`Actions for <project>`, `Actions for workspace <name>`) that opens a native popover menu.
   The project's holds **Rename**, a **Settings** link, a muted `Move to workspace` caption with
@@ -77,10 +77,10 @@ reloads it, with no navigation; other pages showing the old name catch up on the
 or poll. The selected workspace is the current page's project's (or
 the `/workspaces/{id}` page's), else the last one shown, kept in `localStorage`, else the
 first. Below `md` the sidebar is a `<dialog>` drawer behind a **Menu** button: Esc and the
-backdrop close it, and focus returns to the button. The board, review, and code pages use
-the full width beside it, and the other pages keep a max width.
+backdrop close it, and focus returns to the button. The board, review, code, and factory designer
+pages use the full width beside it, and the other pages keep a max width.
 
-The project pages (Board, Code, Reviews, Context, Settings) share one project header:
+The project pages (Board, Code, Reviews, Context, the Factories list, Settings) share one project header:
 `<name> · <workspace>`, with the workspace linking to `/workspaces/{id}`, then the factory
 state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Settings.
 
@@ -90,8 +90,10 @@ links to `/workspaces/{id}`, the project to `/projects/{id}`, and `#id` to `/tas
 last item is the current page, as plain text: `#12` on the task page, `Review` on the review
 page, the agent's label on the transcript page, and `Code` on the code page, which has no
 `#id`. The `›` separators are hidden from screen readers. Its names come from the page's own
-view-model, as the project and workspace are now. The other pages have no breadcrumb: the
-sidebar and the project header cover them.
+view-model, as the project and workspace are now. The factory designer opens with
+`workspace › project › Factories › <name>` instead, Factories linking to `/projects/{id}/factories` and the
+factory's name the current page. The other pages have no breadcrumb: the sidebar and the project header cover
+them.
 
 Loading, failures, times, and motion are the same on every page:
 - While a page's first view-model loads, it shows a skeleton: pulsing `line` blocks shaped and
@@ -105,8 +107,8 @@ Loading, failures, times, and motion are the same on every page:
   the bottom of the content column, without the error's detail. It is a polite status, shown
   once while the failures last, and the next good poll removes it. A 404 is still the
   not-found page, and refusals of actions stay red alerts.
-- Last activity, a running run's start, the status history, and the review timeline read as
-  relative times: `just now`, `5m ago`, `3h ago`, then by calendar day `yesterday` and `4d ago`,
+- Last activity, a running run's start, the status history, the review timeline, and a factory's
+  last update read as relative times: `just now`, `5m ago`, `3h ago`, then by calendar day `yesterday` and `4d ago`,
   and the date (`2026-10-13`) from a week back. The full local `YYYY-MM-DD HH:MM` is in the
   `title`, and the ISO time in `<time dateTime>`. They are worked out as the page renders, so
   the 3 s polls keep them current. Every other time is the absolute `YYYY-MM-DD HH:MM`.
@@ -287,6 +289,54 @@ Loading, failures, times, and motion are the same on every page:
     - **Danger zone**: **Delete workspace** opens the sidebar's workspace delete dialog (§8.4).
       On 204 the app goes to `/`; a workspace that still holds projects gets its 409 inside the
       dialog.
+14. **Factories** (`/projects/{id}/factories`, and the designer at `/projects/{id}/factories/{fid}`;
+    wireframe §8.7)
+    - A factory is a design: a graph of agents and conditions saved in the app
+      (`docs/data-model-and-api.md §6.1`). Runs still use the `.claude/` files that Create factory
+      wrote.
+    - The list loads `GET /api/pages/projects/{id}` (the project header) and
+      `GET /api/projects/{id}/factories` once each, with no polling, and again after each of its
+      actions. The title reads `<project> · Factories`. **+ New factory** sits in the header.
+    - Each row: the name, linking to the designer, the node count (`10 nodes`, `1 node`), and
+      Updated as a relative time. With none, `No factories yet.`
+    - **+ New factory** opens a native popover with a `Name` field and **Create**
+      (`POST /api/projects/{id}/factories`). On 201 the designer opens on the default loop. A
+      refusal (`factory default already exists`) shows inside the popover, which keeps the typed
+      name.
+    - **Rename** (`Rename <name>`) works in place, the sidebar's way: Enter sends
+      `PUT /api/factories/{fid}` `{"name"}`, Esc or blur cancels, and a refusal shows beside the
+      field, which stays. **Delete** (`Delete <name>`) opens the delete dialog titled
+      `Delete factory <name>?`: "This removes the factory's design from the app. Files in the
+      repo, such as the ones Create factory wrote, stay."
+    - The designer loads `GET /api/factories/{fid}` once, with no polling, and is a wide page. A
+      factory of another project at this URL is the not-found page. The title reads
+      `<name> · <project>`. The breadcrumb, then an `h1` with the name, and at its right a
+      `role="status"` reading `Unsaved changes` while unsaved, and **Save**.
+    - The palette (left) lists **Agents** (Spec writer, Builder, Reviewer, Approver, Custom agent)
+      and **Conditions** (All reviews PASS, Any review CHANGES, Rounds used < N, Decision
+      APPROVE). An item drags onto the flow, or a click (Enter, Space) adds it at the center. A new
+      agent is named after its kind (`spec-writer`, `builder`, `reviewer`, `approver`, `agent`),
+      with `-2`, `-3`… until unique, model `inherit`, no tools, and an empty description and
+      prompt; a builder gets side `both`, a reviewer focus `custom`, and Rounds used < N gets
+      `n` 2. The new node is selected. `«` collapses the palette to a rail.
+    - Each node is a card: an icon, its title (the agent's name, or the condition's question with
+      `n` filled in), and a one-line summary (`Reviewer · security · sonnet`, `Condition`). A
+      condition has a `yes` handle in `success` and a `no` handle in `danger`, each with its word.
+      An agent has one input and one output handle; start has only an output. Each edge has a `×`
+      at its midpoint (`Delete edge <source> → <target>`). React Flow's delete key removes
+      selected nodes and edges; start can't be deleted. Its stock zoom, fit, and lock controls sit
+      at the bottom left, over a dotted background.
+    - The **Node** panel (right) edits the one selected node: `Name` (`a-z, 0-9, and -`),
+      `Description`, `Model` (inherit, opus, sonnet, haiku), `Tools` (comma-separated), and
+      `Prompt` (monospace), plus `Side` for a builder and `Focus` for a reviewer. Rounds used < N
+      shows `N` (min 1); start and the other conditions say what they do. With none or several
+      selected, `Select a node to edit it.` Edits apply to the card at once.
+    - Any change to the graph, but not selecting or React Flow's own measuring, makes the page
+      unsaved. **Save**, or Ctrl/⌘+S, sends `PUT /api/factories/{fid}` `{"graph"}` with its
+      spinner, and is disabled while nothing is unsaved. A refusal (`two agents are named
+      builder`) shows as a red alert beside Save, and the graph stays unsaved. Leaving the page
+      while unsaved asks the browser to confirm (`beforeunload`); in-app links don't.
+    - Below `md` the palette starts collapsed and the Node panel moves under the flow.
 
 ### 8.1 Board
 ```
@@ -390,6 +440,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │     Code                 │
 │     Reviews          (2) │  ← waiting on me or escalated, when above 0: a warning pill
 │     Context              │
+│     Factories            │
 │     Settings             │
 │ ▸ web                  ⋯ │
 │                          │
@@ -461,4 +512,40 @@ tree: Preline Tree View's rows, as in §8.3. The file shown (app/limits.py) is t
   [+] opens a directory and [−] closes it; another file opens its own and leaves the rest as they were.
 viewer: the file's path, then a highlighted view with an aria-hidden gutter of line numbers; binary
   files and files over 1 MB show "not shown". The landing (no ?path=) renders README.md.
+```
+
+### 8.7 Factory designer
+```
+/projects/3/factories
+api-server · personal                                   Factory: ready ✓   [+ New factory]
+ Name        Nodes       Updated
+ default     10 nodes    5m ago        [Rename] [Delete]
+ nightly     12 nodes    yesterday     [Rename] [Delete]
+
+/projects/3/factories/7  (wide)
+personal › api-server › Factories › default
+default                                                        Unsaved changes   [Save]
+┌ [« Palette] ────┬─ dotted background ───────────────────────────────┬─ Node ─────────────────┐
+│ Agents          │ ┌─────────┐   ┌───────────────┐      ┌───────────┐ │ Name                   │
+│  Spec writer    │ │ Start   ●──►● spec-writer   ●──×──►● builder   │ │ [builder_____________] │
+│  Builder        │ └─────────┘   │ Spec writer · │      │ Builder · │ │ a-z, 0-9, and -        │
+│  Reviewer       │               │ opus          │      │ both ·    │ │ Description [________] │
+│  Approver       │               └───────────────┘      │ opus      │ │ Model [opus ▾]         │
+│  Custom agent   │                                      └───────────┘ │ Side [both ▾]          │
+│ Conditions      │ ┌───────────────────┐ yes ●────► approver          │ Tools [Read, Edit, …]  │
+│  All reviews    │ │ All reviews PASS? │                              │ Prompt                 │
+│   PASS          │ │ Condition         │ no  ●────► Rounds used < 2?  │ [Input: a task id …  ] │
+│  Any review     │ └───────────────────┘                              │                        │
+│   CHANGES       │                                                    │                        │
+│  Rounds used    │ [+] [−] [fit] [lock]                               │                        │
+│   < N           │                                                    │                        │
+│  Decision       │                                                    │                        │
+│   APPROVE       │                                                    │                        │
+└─────────────────┴────────────────────────────────────────────────────┴────────────────────────┘
+palette: « collapses it to a rail with »; an item drags onto the canvas, or a click (Enter, Space) adds it at the center
+cards: an icon (not drawn), the title, and a one-line summary; ● handles: yes in success, no in danger, each with its word
+×: at an edge's midpoint, deletes that edge · [+] [−] [fit] [lock]: React Flow's stock controls
+Node: the selected node's data; with none selected, "Select a node to edit it."
+[Save]: enabled while unsaved; Ctrl/⌘+S does the same; leaving the page warns while unsaved
+below md: the palette starts collapsed and the Node panel goes under the canvas
 ```

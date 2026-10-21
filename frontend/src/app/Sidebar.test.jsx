@@ -166,7 +166,7 @@ test('FE10 (Q8): Cancel or Esc hides the field and returns focus to + New worksp
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('FE11, 042 FE34: each project is a disclosure button for Board, Code, Reviews, Context, and Settings', async () => {
+test('FE11, 042 FE34, 051 FE6: each project is a disclosure button for Board, Code, Reviews, Context, Factories, and Settings', async () => {
   await open('/')
   const button = projectButton('api-server')
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -180,11 +180,22 @@ test('FE11, 042 FE34: each project is a disclosure button for Board, Code, Revie
     ['Code', '/projects/3/code'],
     ['Reviews', '/projects/3/reviews'],
     ['Context', '/projects/3/context'],
+    ['Factories', '/projects/3/factories'],
     ['Settings', '/projects/3/settings'],
   ])
   fireEvent.click(button)
   expect(button.getAttribute('aria-expanded')).toBe('false')
   expect(within(list).queryAllByRole('link')).toEqual([])
+})
+
+test('051 FE6: Factories is the current page on the list and in a factory\'s designer, and no other link is', async () => {
+  for (const path of ['/projects/3/factories', '/projects/3/factories/7']) {
+    const { unmount } = await open(path)
+    const links = linksOf('api-server').getAllByRole('link')
+    expect(links.filter((a) => a.getAttribute('aria-current') === 'page').map((a) => a.textContent)).toEqual(['Factories'])
+    expect(linksOf('api-server').getByRole('link', { name: 'Factories' }).className).toMatch(accent)
+    unmount()
+  }
 })
 
 test("042 FE35, 043 FE15: Reviews shows the project's review count above 0 as a warning pill, and no number at 0", async () => {

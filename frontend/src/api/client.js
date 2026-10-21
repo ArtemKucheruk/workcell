@@ -1,11 +1,21 @@
 // docs/MVP.md §4.5: mutating requests carry X-Requested-By, which the frontend server passes through.
 const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE'])
 
-/** Q4: the error's message from the API's `detail`: a string, or FastAPI's 422 list of `{msg}`. */
+/**
+ * 051 round-1 review-ux: where a 422 item points, as `nodes.1.rounds_below.data.n: `. The request part (`body`, `query`,
+ * `path`) goes, and so does the designer's `graph` wrapper when something follows it; nothing is left for a whole body.
+ */
+function where(loc = []) {
+  const path = loc.slice(['body', 'query', 'path'].includes(loc[0]) ? 1 : 0)
+  if (path[0] === 'graph' && path.length > 1) path.shift()
+  return path.length ? `${path.join('.')}: ` : ''
+}
+
+/** Q4: the error's message from the API's `detail`: a string, or FastAPI's 422 list of `{loc, msg}`. */
 function message(body, status) {
   const detail = body?.detail
   if (typeof detail === 'string') return detail
-  if (Array.isArray(detail)) return detail.map((d) => d.msg).join('; ')
+  if (Array.isArray(detail)) return detail.map((d) => `${where(d.loc)}${d.msg}`).join('; ')
   return `HTTP ${status}`
 }
 
