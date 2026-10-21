@@ -20,7 +20,14 @@ FACTORY_TEMPLATES = jinja2.Environment(
     loader=jinja2.FileSystemLoader(TEMPLATES),
     autoescape=False, keep_trailing_newline=True, undefined=jinja2.StrictUndefined,
 )
-COMMIT_HINT = 'git add .claude/skills/factory .claude/agents && git commit -m "Add factory"'
+
+
+def commit_hint(skill: str) -> str:
+    """052 Q9: 011's hint for `factory`."""
+    return f'git add .claude/skills/{skill} .claude/agents && git commit -m "Add factory"'
+
+
+COMMIT_HINT = commit_hint("factory")
 
 
 def factory_state(git: Git, path: str, default_branch: str) -> str:
@@ -41,32 +48,47 @@ def factory_hint(state: str, branch: str) -> str | None:
     return None
 
 
-def create_factory(projects: ProjectsRepo, project_id: int, overwrite: bool) -> FactoryOut:
-    """011 Q7, Q8: every check before any write; existing files (lexists) are skipped unless overwrite."""
-    p = projects.for_factory(project_id)
-    if p is None:
-        raise NotFound()
+def need_test_cmd(p) -> None:
+    """011: the templates render `{{ test_cmd }}`, so no test command, no files (052 Q8)."""
     if not (p["test_cmd"] or "").strip():
         raise Conflict("no test command: in the repo, run fctl connect --workspace"
                        f' {shlex.quote(p["workspace"])} --test-cmd "<your test command>"')
-    root = p["path"]
+
+
+def write_files(root: str, files: list[tuple[str, str]], overwrite: bool) -> tuple[list[str], list[str]]:
+    """011 Q7, Q8, 052 Q9: Create factory's and Write to repo's writer. Every check runs before any write;
+    existing files (lexists) are skipped unless overwrite. Returns (written, skipped), in the files' order."""
     if not os.path.isdir(root):
         raise Conflict(f"{root} is not a directory")
     real_root = Path(os.path.realpath(root))
-    for rel in FACTORY_FILES:
+    for rel, _ in files:
         if not Path(os.path.realpath(os.path.join(root, rel))).is_relative_to(real_root):
             raise Conflict(f"{rel} resolves outside the project")
-    values = {"name": p["name"], "default_branch": p["default_branch"], "test_cmd": p["test_cmd"]}
+        parts = rel.split("/")  # from .claude down to the target; islink also catches a broken link
+        for i in range(1, len(parts) + 1):
+            if os.path.islink(os.path.join(root, *parts[:i])):
+                raise Conflict(f"{'/'.join(parts[:i])} is a symlink")
     written, skipped = [], []
-    for rel in FACTORY_FILES:
+    for rel, content in files:
         target = Path(root, rel)
         if os.path.lexists(target) and not overwrite:
             skipped.append(rel)
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(FACTORY_TEMPLATES.get_template(rel.removeprefix(".claude/")).render(values),
-                          encoding="utf-8")
+        target.write_bytes(content.encode())
         written.append(rel)
+    return written, skipped
+
+
+def create_factory(projects: ProjectsRepo, project_id: int, overwrite: bool) -> FactoryOut:
+    p = projects.for_factory(project_id)
+    if p is None:
+        raise NotFound()
+    need_test_cmd(p)
+    values = {"name": p["name"], "default_branch": p["default_branch"], "test_cmd": p["test_cmd"], "skill": "factory"}
+    files = [(rel, FACTORY_TEMPLATES.get_template(rel.removeprefix(".claude/")).render(values))
+             for rel in FACTORY_FILES]
+    written, skipped = write_files(p["path"], files, overwrite)
     if written:  # 011 Q9
         projects.set_factory_version(project_id, 1)
     return FactoryOut(written=written, skipped=skipped, commit_hint=COMMIT_HINT)

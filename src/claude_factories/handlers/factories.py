@@ -1,16 +1,19 @@
-"""051: a project's named factory designs, their graph rules, and the default graph
-(docs/data-model-and-api.md §6.1)."""
+"""051: a project's named factory designs, their graph rules, and the default graph. 052: their compiled files,
+as a list, a zip, or written into the repo (docs/data-model-and-api.md §6.1)."""
 
 import json
 
 from .. import config
 from ..domain.errors import Conflict, Invalid, NotFound
-from ..dto.factories import FactoryDesign, FactoryItem, FactoryPatch, Graph
+from ..dto.factories import FactoryDesign, FactoryFile, FactoryItem, FactoryPatch, Graph
+from ..dto.factory import FactoryOut
+from ..lib.factory_compile import compile_files, slug
 from ..lib.factory_graph import check, frontmatter
 from ..repositories.factories import FactoriesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.tasks import TasksRepo
-from .factory import TEMPLATES
+from .bundles import zipped
+from .factory import TEMPLATES, commit_hint, need_test_cmd, write_files
 
 # Q8: the 011 loop, left to right. (id, type, extra data or None for an agent-less node, x, y)
 DEFAULT_NODES = (
@@ -118,3 +121,37 @@ def put_factory(factories: FactoriesRepo, tasks: TasksRepo, factory_id: int, bod
 def delete_factory(factories: FactoriesRepo, factory_id: int) -> None:
     if not factories.delete(factory_id):
         raise NotFound(f"Factory #{factory_id} not found")
+
+
+# --- 052: export -------------------------------------------------------------------------
+
+
+def compiled(factories: FactoriesRepo, projects: ProjectsRepo, factory_id: int):
+    """Q8: 404, then 409 no test command, then the compile's 422. (factory row, project row, [(path, content)])."""
+    row = factories.get(factory_id)
+    if row is None:
+        raise NotFound(f"Factory #{factory_id} not found")
+    p = projects.for_factory(row["project_id"])
+    need_test_cmd(p)
+    values = {"name": p["name"], "default_branch": p["default_branch"], "test_cmd": p["test_cmd"]}
+    template = (TEMPLATES / "skills" / "factory" / "SKILL.md").read_text(encoding="utf-8")
+    return row, p, compile_files(json.loads(row["graph"]), template, values, slug(row["name"]))
+
+
+def factory_files(factories: FactoriesRepo, projects: ProjectsRepo, factory_id: int) -> list[FactoryFile]:
+    _, _, files = compiled(factories, projects, factory_id)
+    return [FactoryFile(path=path, content=content) for path, content in files]
+
+
+def download(factories: FactoriesRepo, projects: ProjectsRepo, factory_id: int) -> tuple[str, bytes]:
+    """Q10: (`{project slug}-{factory slug}.zip`, the zip): the files deflated, in order, dated the last save."""
+    row, _, files = compiled(factories, projects, factory_id)
+    body = zipped([(path, row["updated_at"], content) for path, content in files])
+    return f"{slug(row['project'], 'project')}-{slug(row['name'])}.zip", body
+
+
+def write_factory(factories: FactoriesRepo, projects: ProjectsRepo, factory_id: int, overwrite: bool) -> FactoryOut:
+    """Write to repo: Create factory's writer and response (Q9). factory_version stays Create factory's."""
+    row, p, files = compiled(factories, projects, factory_id)
+    written, skipped = write_files(p["path"], files, overwrite)
+    return FactoryOut(written=written, skipped=skipped, commit_hint=commit_hint(slug(row["name"])))

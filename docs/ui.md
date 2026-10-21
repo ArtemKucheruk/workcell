@@ -293,7 +293,7 @@ Loading, failures, times, and motion are the same on every page:
     wireframe §8.7)
     - A factory is a design: a graph of agents and conditions saved in the app
       (`docs/data-model-and-api.md §6.1`). Runs still use the `.claude/` files that Create factory
-      wrote.
+      or a design's **Write to repo** wrote.
     - The list loads `GET /api/pages/projects/{id}` (the project header) and
       `GET /api/projects/{id}/factories` once each, with no polling, and again after each of its
       actions. The title reads `<project> · Factories`. **+ New factory** sits in the header.
@@ -311,7 +311,7 @@ Loading, failures, times, and motion are the same on every page:
     - The designer loads `GET /api/factories/{fid}` once, with no polling, and is a wide page. A
       factory of another project at this URL is the not-found page. The title reads
       `<name> · <project>`. The breadcrumb, then an `h1` with the name, and at its right a
-      `role="status"` reading `Unsaved changes` while unsaved, and **Save**.
+      `role="status"` reading `Unsaved changes` while unsaved, **Files**, and **Save**.
     - The palette (left) lists **Agents** (Spec writer, Builder, Reviewer, Approver, Custom agent)
       and **Conditions** (All reviews PASS, Any review CHANGES, Rounds used < N, Decision
       APPROVE). An item drags onto the flow, or a click (Enter, Space) adds it at the center. A new
@@ -337,6 +337,17 @@ Loading, failures, times, and motion are the same on every page:
       builder`) shows as a red alert beside Save, and the graph stays unsaved. Leaving the page
       while unsaved asks the browser to confirm (`beforeunload`); in-app links don't.
     - Below `md` the palette starts collapsed and the Node panel moves under the flow.
+    - **Files** opens a wide modal dialog (the delete dialog's kind, about `max-w-5xl`) headed
+      `Files`. Each time it opens it sends `GET /api/factories/{fid}/files`, showing a
+      `role="status"` `Loading…` meanwhile. The paths list as buttons beside the preview from `md`
+      up, and above it below `md`. The first is selected (`aria-current="true"`), and the preview
+      shows its content highlighted by highlight.js as markdown. While the page is unsaved, it says
+      `Showing the last saved design. Save to include your changes.` At the bottom: **Download
+      .zip** (a link to `GET /api/factories/{fid}/download` with `download`), *Overwrite existing
+      files*, and **Write to repo** (`POST /api/factories/{fid}/write`), whose 200 shows Create
+      factory's result view (item 12, one shared component). A refused GET (`agent linter needs a
+      description`) shows as a red alert with no list, link, or Write button; a refused write
+      shows as a red alert in the dialog, which keeps its list. **Close** or Esc closes it.
 
 ### 8.1 Board
 ```
@@ -524,7 +535,7 @@ api-server · personal                                   Factory: ready ✓   [+
 
 /projects/3/factories/7  (wide)
 personal › api-server › Factories › default
-default                                                        Unsaved changes   [Save]
+default                                                Unsaved changes   [Files] [Save]
 ┌ [« Palette] ────┬─ dotted background ───────────────────────────────┬─ Node ─────────────────┐
 │ Agents          │ ┌─────────┐   ┌───────────────┐      ┌───────────┐ │ Name                   │
 │  Spec writer    │ │ Start   ●──►● spec-writer   ●──×──►● builder   │ │ [builder_____________] │
@@ -548,4 +559,19 @@ cards: an icon (not drawn), the title, and a one-line summary; ● handles: yes 
 Node: the selected node's data; with none selected, "Select a node to edit it."
 [Save]: enabled while unsaved; Ctrl/⌘+S does the same; leaving the page warns while unsaved
 below md: the palette starts collapsed and the Node panel goes under the canvas
+
+[Files] → a modal dialog
+┌ Files ─────────────────────────────────────────────────────────────────────────── [Close] ┐
+│ Showing the last saved design. Save to include your changes.        (only while unsaved)  │
+│ ┌──────────────────────────────────┬──────────────────────────────────────────────────┐ │
+│ │▌.claude/skills/factory/SKILL.md  │ ---                                              │ │
+│ │ .claude/agents/spec-writer.md    │ name: factory                                    │ │
+│ │ .claude/agents/builder.md        │ description: Factory orchestrator. …             │ │
+│ │ …                                │ ---  (highlight.js, markdown)                    │ │
+│ └──────────────────────────────────┴──────────────────────────────────────────────────┘ │
+│ [Download .zip]   [ ] Overwrite existing files   [Write to repo]                          │
+│ Wrote 8 files: …   Skipped 0 existing files …   git add .claude/skills/factory …          │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+list: beside the preview from md up, above it below md; ▌ = the selected path (aria-current)
+a refused GET: a red alert instead of the list, link, and Write; a refused write: a red alert, the list stays
 ```

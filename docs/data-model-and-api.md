@@ -254,13 +254,40 @@ PUT  /api/factories/7                                             (designer Save
 DELETE /api/factories/7                                           (list Delete)
 ← 204, empty body · 404 {"detail":"Factory #99 not found"}
 
+GET  /api/factories/7/files                                       (designer Files)
+← 200 [{"path":".claude/skills/factory/SKILL.md","content":"---\nname: factory\n…"},
+       {"path":".claude/agents/spec-writer.md","content":"---\nname: spec-writer\n…"}, …]
+  # the stored graph compiled (docs/claude-code.md §7.3), never unsaved designer state. path: relative to the
+  #   repo root with "/". SKILL.md first, then one file per agent node in node order (reachable or not)
+  # 404 {"detail":"Factory #99 not found"}
+  # 409 {"detail":"no test command: in the repo, run fctl connect --workspace personal --test-cmd \"<your test command>\""}
+  # 422 {"detail":"agent linter needs a description"}, or another compile refusal (§7.3)
+  # checked in that order: 404, 409, 422
+
+GET  /api/factories/7/download                                    (Files → Download .zip, a plain link)
+← 200 application/zip, Content-Disposition: attachment; filename="api-server-default.zip"
+  # the files above as deflated entries, same paths and order; the name is {project slug}-{factory slug}.zip,
+  #   both slugged as §7.3 slugs a factory's name, with an empty project slug → project
+  # 404 / 409 / 422 as JSON, as above
+
+POST /api/factories/7/write                                       (Files → Write to repo)
+→ {"overwrite":false}                                             # {} means false
+← 200 {"written":[".claude/skills/factory/SKILL.md", …],"skipped":[…],
+       "commit_hint":"git add .claude/skills/factory .claude/agents && git commit -m \"Add factory\""}
+  # POST /api/projects/{id}/factory's writer and shape; written and skipped in the files' order, and the hint
+  #   names .claude/skills/{factory slug}. It doesn't set factory_version
+  # 404, 409 no test command, and 422 compile refusals as above, then the path checks, before any write:
+  # 409 {"detail":"/Users/artem/code/api-server is not a directory"}
+  # 409 {"detail":".claude/agents/spec-writer.md resolves outside the project"}
+  # 409 {"detail":".claude/skills is a symlink"}   (any component from .claude down; Create factory too)
+
 <Factory> = {"id":7,"project_id":3,"project":"api-server","workspace_id":2,"workspace":"personal",
              "name":"default","graph":<Graph>,"created_at":"…","updated_at":"…"}
              # project and workspace: the names as they are now (for the breadcrumb)
 ```
 
-**Factory graphs.** A factory is a design only: runs still use the `.claude/` files that Create factory wrote. The
-graph uses React Flow's shape. Only the keys below are stored and returned, and any others (`selected`, `measured`,
+**Factory graphs.** A factory is a design: it reaches `.claude/` only through Write to repo, and runs use
+`.claude/skills/factory/` (docs/MVP.md §3.2). The graph uses React Flow's shape. Only the keys below are stored and returned, and any others (`selected`, `measured`,
 `dragging`, an edge's `type` or `targetHandle`, extra `data` keys) are dropped:
 ```
 <Graph> = {"nodes":[<Node>…],"edges":[<Edge>…]}
@@ -303,8 +330,8 @@ Rules, checked after the shape, in this order. The first rule that fails answers
    - `edge e3 leaves condition all-pass from neither yes nor no` (a condition source whose sourceHandle is anything but `yes` or `no`, null included)
    - `edge e3 leaves builder from handle yes, but only conditions have handles` (a non-condition source with a non-null sourceHandle)
 
-Anything else is allowed and stored: orphans, cycles, a handle with two edges, a condition missing a branch. The later
-compile decides what it accepts.
+Anything else is allowed and stored: orphans, cycles, a handle with two edges, a condition missing a branch. What
+the compile accepts, and the 422 it answers otherwise, is in `docs/claude-code.md §7.3`.
 
 The default graph has 10 nodes. Node ids are `start`, the agent names, `all-pass`, and `rounds`. Each agent's
 `description`, `model`, `tools` (the frontmatter list split on `,`), and `prompt` (the text after the frontmatter,

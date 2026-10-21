@@ -1,5 +1,6 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
+import { FactoryResult } from '../../components/FactoryResult.jsx'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECT = {
@@ -204,6 +205,16 @@ test('FE28 (AC25): the result lists what was written or skipped, the commit hint
     await waitFor(() => expect(loads(fetch)).toBe(2))
     unmount()
   }
+})
+
+test('052 FE12: Create factory\'s result is the shared FactoryResult\'s markup', async () => {
+  const [, out] = factoryOut(['.claude/a.md'], ['.claude/b.md'])
+  await open(board({ factory: 'none', can_run: false }), { 'POST /api/projects/3/factory': [200, out] })
+  fireEvent.click(screen.getByRole('button', { name: 'Create factory' }))
+  await screen.findByText('Wrote 1 file:')
+  const result = section('Factory').querySelector('[aria-live="polite"]')
+  const { container } = render(<FactoryResult out={out} />)
+  expect(result.innerHTML).toBe(container.innerHTML)
 })
 
 test('FE29 (AC26): a refused Create factory shows its detail beside the form, with no file lists', async () => {

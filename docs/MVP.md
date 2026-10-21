@@ -107,8 +107,14 @@ node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run
 Design a factory: Project → **Factories** → **+ New factory** (a name) → the designer opens on the
 default loop → drag or click agents and conditions from the palette, connect handles, and edit the
 selected node in the side panel → **Save** or Ctrl/⌘+S. Save shows a refusal (a bad graph,
-`docs/data-model-and-api.md §6.1`) beside it, and the design stays unsaved. Runs still use the
-files in `.claude/`; a design is stored in the app only.
+`docs/data-model-and-api.md §6.1`) beside it, and the design stays unsaved. → **Files** shows the
+last saved design compiled into Claude Code files (`docs/claude-code.md §7.3`):
+`.claude/skills/<factory-slug>/SKILL.md` and one `.claude/agents/<name>.md` per agent node. A graph
+the compile refuses shows its detail instead. **Download .zip** saves them, and **Write to repo**
+writes them with step 2's writer: existing files skipped unless *Overwrite*, the same written and
+skipped lists, and a commit hint naming `.claude/skills/<factory-slug>`. A design reaches
+`.claude/` only through Write to repo, and runs use `.claude/skills/factory/`: only a factory
+whose name slugs to `factory` writes the skill runs start, and step 4 is unchanged.
 
 ### 3.3 Add a feature
 Board → **+ New task** → title and description (markdown) → the card lands at the bottom of
@@ -345,6 +351,9 @@ Single user and no auth still need these, because the API can start processes th
   Everything else renders as text, because React escapes it.
 - The code page resolves paths inside the project root only: no `..`, and no symlinks that
   point outside it.
+- Create factory and Write to repo write only under `<repo>/.claude/`. Before any write, every
+  target must resolve inside the project, and no path component from `.claude` down to it may be
+  a symlink (a broken one included), or the request is refused with `409` and nothing is written.
 - The server rejects patches over 5 MB and project context over 16 KB with `413`.
 - `fctl import-factory` reads only inside `<project>/factory/`, which must resolve inside the project
   root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as

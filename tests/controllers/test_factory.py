@@ -239,6 +239,17 @@ def test_symlink_out_refused(client, repo, tmp_path, overwrite):  # AC18
     assert not (repo / SKILL).exists()
 
 
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_symlink_inside_refused(client, repo, overwrite):  # 052 BE17
+    (repo / "elsewhere").mkdir()
+    (repo / ".claude").mkdir()
+    (repo / ".claude" / "skills").symlink_to(repo / "elsewhere")
+    r = create(client, connect(client, repo), {"overwrite": overwrite})
+    assert r.status_code == 409
+    assert r.json() == {"detail": ".claude/skills is a symlink"}
+    assert files_outside_git(repo) == set()
+
+
 def test_unknown_project_and_no_header(client, repo):  # AC19
     assert create(client, 999).status_code == 404
     assert create(client, connect(client, repo), headers={}).status_code == 403

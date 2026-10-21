@@ -121,3 +121,9 @@ class FactoryDesign(BaseModel):
     graph: Graph
     created_at: str
     updated_at: str
+
+
+class FactoryFile(BaseModel):
+    """052: one compiled file; path is relative to the repo root, with "/"."""
+    path: str
+    content: str
