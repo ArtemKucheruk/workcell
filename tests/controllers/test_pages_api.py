@@ -1500,15 +1500,21 @@ def test_code_branch_symlink_is_its_target(client, branched, tmp_path):  # 054 B
     assert SECRET not in r.text
 
 
-def test_code_branch_gitlink_not_shown(client, branched):  # 054 Q6 (round 2 security): never the commit it names
-    main = git(branched, "rev-parse", "main")
+@pytest.mark.parametrize("target", ["commit", "annotated tag"])
+def test_code_branch_gitlink_not_shown(client, branched, tmp_path, target):  # 054 Q5, Q6 (rounds 2-3 security)
+    """A gitlink naming a local commit, or a tag of a blob over 1 MB: never the object it names, never read."""
+    (tmp_path / "big").write_bytes(b"B" * (1024 * 1024 + 1))
+    git(branched, "tag", "-a", "-m", "t", "big", git(branched, "hash-object", "-w", str(tmp_path / "big")))
+    oid = git(branched, "rev-parse", "main" if target == "commit" else "big")
     git(branched, "checkout", "-q", "feature-x")
-    git(branched, "update-index", "--add", "--cacheinfo", f"160000,{main},sub")
+    git(branched, "update-index", "--add", "--cacheinfo", f"160000,{oid},sub")
     git(branched, "commit", "-q", "-m", "gitlink")
     git(branched, "checkout", "-q", "main")
-    r = browse(client, connect(client, branched), branch="feature-x", path="sub")
+    pid = connect(client, branched)
+    client.app.dependency_overrides[get_git] = SmallBlobsOnly
+    r = browse(client, pid, branch="feature-x", path="sub")
     assert r.json()["view"] == {"note": "Not shown: not a regular file."}
-    assert main not in r.text and "Main" not in r.text
+    assert oid not in r.text and "Main" not in r.text and "BBBB" not in r.text
 
 
 @pytest.mark.parametrize("kind", ["missing", "not a repo"])

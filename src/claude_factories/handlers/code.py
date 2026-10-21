@@ -33,17 +33,21 @@ def read_tracked(root: str, path: str) -> dict:
 def read_blob(git: Git, root: str, ref: str, path: str) -> dict:
     """054 Q5, Q6: a listed path's blob on the full refname `ref`, by read_tracked's rules. Nothing on disk is
     read; a symlink's blob is its target path."""
+    not_regular = {"note": "Not shown: not a regular file."}  # a gitlink's commit or tag, a timeout
     oid, error = git.object_id(root, ref, path)
-    if error is None:
-        oid = oid.decode().strip()
-        size, error = git.object_size(root, oid)
-    if error is None:
-        if int(size) > MAX_VIEW:
-            return {"note": "File over 1 MB not shown."}
-        data, error = git.blob(root, oid)
-    if error:  # a gitlink's commit (in this repo or not), a timeout
-        return {"note": "Not shown: not a regular file."}
-    return view_of(data)
+    if error:
+        return not_regular
+    oid = oid.decode().strip()
+    kind, error = git.object_type(root, oid)
+    if error or kind.strip() != b"blob":  # a tag would pass the size check and then be peeled by `cat-file blob`
+        return not_regular
+    size, error = git.object_size(root, oid)
+    if error:
+        return not_regular
+    if int(size) > MAX_VIEW:
+        return {"note": "File over 1 MB not shown."}
+    data, error = git.blob(root, oid)
+    return not_regular if error else view_of(data)
 
 
 def view_of(data: bytes) -> dict:

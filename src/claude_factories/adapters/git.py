@@ -47,6 +47,7 @@ class Git(Protocol):
     def branch_refs(self, root: str) -> tuple[bytes | None, str | None]: ...
     def ls_tree(self, root: str, ref: str) -> tuple[bytes | None, str | None]: ...
     def object_id(self, root: str, ref: str, path: str) -> tuple[bytes | None, str | None]: ...
+    def object_type(self, root: str, oid: str) -> tuple[bytes | None, str | None]: ...
     def object_size(self, root: str, oid: str) -> tuple[bytes | None, str | None]: ...
     def blob(self, root: str, oid: str) -> tuple[bytes | None, str | None]: ...
     def init(self, path: str) -> None: ...
@@ -97,13 +98,17 @@ class SubprocessGit:
         """054: the id of `path`'s object on `ref`, resolved once so a moving ref can't swap it between reads."""
         return git_stdout(root, "rev-parse", "--verify", "-q", f"{ref}:{path}")
 
+    def object_type(self, root: str, oid: str) -> tuple[bytes | None, str | None]:
+        """054 Q6: the object's own type (`blob`, `tag`, `commit`, ...), never peeled."""
+        return git_stdout(root, "cat-file", "-t", oid)
+
     def object_size(self, root: str, oid: str) -> tuple[bytes | None, str | None]:
         """054 Q5: the object's size in bytes, without reading it."""
         return git_stdout(root, "cat-file", "-s", oid)
 
     def blob(self, root: str, oid: str) -> tuple[bytes | None, str | None]:
-        """054 Q6: a blob's raw bytes (a symlink's is its target path). Anything but a blob, like a gitlink's
-        commit, fails, and no diff, textconv, or filter runs."""
+        """054 Q6: a blob's raw bytes (a symlink's is its target path), with no diff, textconv, or filter. It
+        peels an annotated tag to the blob it names, so check object_type first."""
         return git_stdout(root, "cat-file", "blob", oid)
 
     def init(self, path: str) -> None:
