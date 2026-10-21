@@ -175,18 +175,23 @@ def stop(tx, claude: Claude, run_id: int) -> StopOut:
     return StopOut(id=run_id, status="stopped")
 
 
+def log_lines(path: str) -> list[str]:
+    """013 Q6: the log's complete lines; a trailing partial line waits for its newline. Q9, 053 Q3: no
+    readable file is no lines."""
+    try:  # ponytail: the whole file per poll; keep a byte offset per cursor if logs get big
+        with open(path, encoding="utf-8", errors="replace", newline="") as f:
+            return f.read().split("\n")[:-1]
+    except OSError:
+        return []
+
+
 def log(tx, run_id: int, after: int) -> LogOut:
-    """013 Q6: `after` and `next` count complete lines; a trailing partial line waits for its newline.
-    Q9: no log file yet is an empty page, never an error."""
+    """013 Q6: `after` and `next` count complete lines. Q9: no log file yet is an empty page, never an error."""
     with tx() as conn:
         path = RunsRepo(conn).log_path(run_id)
     if path is None:
         raise NotFound(f"run #{run_id} not found")
-    try:  # ponytail: the whole file per poll; keep a byte offset per cursor if logs get big
-        with open(path, encoding="utf-8", errors="replace", newline="") as f:
-            lines = f.read().split("\n")[:-1]
-    except OSError:
-        return LogOut(next=0, lines=[])
+    lines = log_lines(path)
     return LogOut(next=len(lines), lines=log_items(lines, after))
 
 

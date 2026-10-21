@@ -1,6 +1,6 @@
-"""Page data for the dashboard, workspace, board, task, and review pages (docs/ui.md §8), the sidebar (041),
-its login badge, the Settings page's Claude login (§8 item 9), and the fctl reference (§8 item 7). Each page
-returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
+"""Page data for the dashboard, workspace, board, task, review, and agents pages (docs/ui.md §8), the sidebar
+(041), its login badge, the Settings page's Claude login (§8 item 9), and the fctl reference (§8 item 7). Each
+page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
 import re
 import shlex
@@ -17,6 +17,7 @@ from ..domain.enums import Reviewer, Status
 from ..domain.errors import Conflict, Failed, Invalid, NotFound
 from ..lib.diff import diff_rows, file_tree
 from ..lib.markdown import render_with_headings
+from ..lib.run_log import run_agents
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -27,6 +28,7 @@ from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_hint, factory_state
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
+from .runs import log_lines
 from .tasks import list_tasks
 from .transcripts import for_task
 
@@ -38,6 +40,7 @@ TILES = {
     "waiting": "Waiting on me", "escalated": "Escalated", "running": "Running now",
     "done_week": "Done this week", "runs_week": "Runs this week",
 }
+RECENT = 20  # 053: the Agents page's ended runs
 LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": auth_status()'s answer}
 # 039: the one `claude auth login` waiting for its code, {"proc", "url"}.
 # ponytail: no lock (Q9): one user, one pending login, and a new login stops the old one first
@@ -172,6 +175,16 @@ def dashboard(tasks: TasksRepo, runs: RunsRepo, show: str) -> dict:
         "waiting": tasks.needs_you("waiting"), "escalated": tasks.needs_you("escalated"),
         "open_tasks": open_tasks, "done": tasks.done_recently(),
     }
+
+
+def agents(runs: RunsRepo) -> dict:
+    """053, docs/ui.md §8 item 15: every running run with the agents its log names, then the last RECENT ended
+    runs. No git, no claude."""
+    # ponytail: each 3 s poll reads the running run's whole log, as handlers/runs.log does; keep a byte
+    # offset and the parsed agents per run if logs get big
+    return {"running": [dict(r) | {"kind": "factory", "agents": run_agents(log_lines(r["log_path"]))}
+                        for r in runs.running_rows()],
+            "recent": runs.recent(RECENT)}
 
 
 def sidebar(projects: ProjectsRepo, tasks: TasksRepo, transcripts: TranscriptsRepo, task: int | None,

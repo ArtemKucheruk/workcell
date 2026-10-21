@@ -637,7 +637,7 @@ test('030 AC24: null-round transcripts list under Other agents after Rounds with
   expect(screen.queryByRole('region', { name: 'Other agents' })).toBeNull()
   expect(screen.queryByText('Other agents')).toBeNull()
   expect(screen.queryAllByRole('list', { name: /agents$/ })).toEqual([])
-  expect(screen.queryByText('Agents')).toBeNull()
+  expect(within(screen.getByRole('main')).queryByText('Agents')).toBeNull() // 053: the sidebar has an Agents link
   none.unmount()
 })
 
@@ -700,4 +700,29 @@ test('047 FE8, 032 AC46: the Export popover holds Include transcripts and Downlo
   expect(download().getAttribute('href')).toBe('/api/tasks/12/export?transcripts=1')
   fireEvent.click(box)
   expect(download().getAttribute('href')).toBe('/api/tasks/12/export')
+})
+
+test('053 FE11 (Q7): at /tasks/12#run-log the run log <details id="run-log"> renders open and scrolls into view; at /tasks/12 closed', async () => {
+  const scroll = vi.fn()
+  Element.prototype.scrollIntoView = scroll // jsdom has none
+  try {
+    const responses = { [`GET ${PAGE}`]: [200, taskPage({}, { run: run(41, 'running') })], [`GET ${LOG(41, 0)}`]: log(0) }
+    mockFetch(responses)
+    const linked = renderAt('/tasks/12#run-log')
+    await screen.findByRole('heading', { level: 1 })
+    const details = document.getElementById('run-log')
+    expect(details).toBe(panel())
+    expect(details.open).toBe(true)
+    expect(scroll).toHaveBeenCalledTimes(1)
+    expect(scroll.mock.contexts[0]).toBe(details)
+    linked.unmount()
+
+    scroll.mockClear()
+    await open(taskPage({}, { run: run(41, 'running') }), { [`GET ${LOG(41, 0)}`]: log(0) })
+    expect(document.getElementById('run-log')).toBe(panel())
+    expect(panel().open).toBe(false)
+    expect(scroll).not.toHaveBeenCalled()
+  } finally {
+    delete Element.prototype.scrollIntoView
+  }
 })

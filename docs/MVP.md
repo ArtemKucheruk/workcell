@@ -472,6 +472,8 @@ Rules:
 - Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
 - Branch and worktree browsing on the code page.
+- Scheduled runs (cron checkup agents, other codebase automations), each a run of its own kind
+  beside `factory` on the Agents page.
 
 ---
 

@@ -619,3 +619,38 @@ test('049 FE15: the workspace Delete asks Delete workspace personal?; 204 opens 
     unmount()
   }
 })
+
+// --- 053: Agents -----------------------------------------------------------------------
+
+test('053 FE9: Agents links to /agents, after Dashboard and before fctl reference, and is the current page on /agents', async () => {
+  await open('/agents', body(), SIDEBAR, { 'GET /api/pages/agents': [200, { running: [], recent: [] }] })
+  const link = (name) => sidebar().getByRole('link', { name })
+  const agents = link('Agents')
+  expect(agents.getAttribute('href')).toBe('/agents')
+  expect(link('Dashboard').compareDocumentPosition(agents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(agents.compareDocumentPosition(link('fctl reference')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(agents.closest('li').previousElementSibling).toBe(link('Dashboard').closest('li'))
+  expect(agents.closest('li').nextElementSibling).toBe(link('fctl reference').closest('li'))
+  expect(agents.getAttribute('aria-current')).toBe('page')
+  expect(agents.className).toMatch(accent)
+  expect(link('Dashboard').hasAttribute('aria-current')).toBe(false)
+})
+
+test('053 FE10 (Q8): the Agents pill sums running over every workspace, the unselected one included; none at 0', async () => {
+  const running = (ws, counts) => ({ ...ws, projects: ws.projects.map((p, i) => ({ ...p, running: counts[i] ?? 0 })) })
+  const one = await open('/', body(null, [PERSONAL, running(WORK, [1])]))
+  expect(shown(one.select)).toBe('personal') // work, holding the run, isn't selected
+  const agents = sidebar().getByRole('link', { name: 'Agents 1' })
+  const pill = within(agents).getByText('1')
+  expect(pill.className.split(/\s+/)).toEqual(expect.arrayContaining(['rounded-full', 'bg-accent', 'text-surface']))
+  one.unmount()
+
+  const two = await open('/', body(null, [running(PERSONAL, [1, 0]), running(WORK, [1])]))
+  expect(within(sidebar().getByRole('link', { name: 'Agents 2' })).getByText('2')).toBeTruthy()
+  two.unmount()
+
+  await open('/')
+  const zero = sidebar().getByRole('link', { name: 'Agents' })
+  expect(zero.textContent).toBe('Agents')
+  expect(zero.querySelector('span')).toBeNull()
+})
