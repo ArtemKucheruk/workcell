@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useLocation, useParams } from 'react-router'
 import { taskPage } from '../../api/pages.js'
 import { runLog, runTask, stopRun } from '../../api/runs.js'
 import { exportUrl } from '../../api/tasks.js'
@@ -178,11 +178,18 @@ function Round({ round, standalone, agents }) {
  * Q5: the run's log as text, from `after=0`. usePoll fetches every 3 s while the run is running and once
  * otherwise, so the run stopping gives one last fetch. Keyed by run id, so a new run starts a fresh cursor.
  * ponytail: the whole log stays in memory and in the DOM; window it if logs get big.
+ * 053 Q7: `#run-log` (the Agents page's Run log link) opens it as it mounts and scrolls to it; jsdom has no scrollIntoView.
  */
 function RunLog({ run }) {
   const [lines, setLines] = useState([])
   const cursor = useRef(0)
   const box = useRef(null)
+  const panel = useRef(null)
+  const { hash } = useLocation()
+  const [linked] = useState(hash === '#run-log') // as it mounts only: a later toggle is mine
+  useEffect(() => {
+    if (linked) panel.current.scrollIntoView?.()
+  }, [linked])
   const load = useCallback(async () => {
     const after = cursor.current
     const reply = await runLog(run.id, after).catch(() => null) // a failed fetch shows nothing; the next poll retries
@@ -196,7 +203,7 @@ function RunLog({ run }) {
   }
   useEffect(end, [lines])
   return (
-    <details onToggle={end} className="mt-8">
+    <details ref={panel} id="run-log" open={linked} onToggle={end} className="mt-8 scroll-mt-6">
       <summary className="cursor-pointer font-semibold">{`Run log · run #${run.id}`}</summary>
       <div
         ref={box}

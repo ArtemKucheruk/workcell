@@ -25,6 +25,7 @@ class Claude(Protocol):
     def spawn(self, args: list[str], cwd: str, env: dict, log_path: str) -> subprocess.Popen: ...
     def stop(self, pid: int) -> None: ...
     def login(self, cwd: str, env: dict) -> tuple[subprocess.Popen, str | None, str]: ...
+    def logout(self, cwd: str, env: dict) -> tuple[int, str]: ...
 
 
 def read(pipe, timeout: float, done=lambda text: False) -> str:
@@ -83,3 +84,10 @@ class SubprocessClaude:
         out = read(proc.stdout, LOGIN_URL_TIMEOUT, lambda text: bool((m := URL.search(text)) and m.end() < len(text)))
         found = URL.search(out)
         return proc, found and found.group(), out
+
+    def logout(self, cwd: str, env: dict) -> tuple[int, str]:
+        """055: `claude auth logout`, stdin from /dev/null, stderr into stdout: (exit code, output).
+        Q3: 30 s, as `auth status`, then subprocess.TimeoutExpired. OSError propagates."""
+        r = subprocess.run(["claude", "auth", "logout"], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
+        return r.returncode, r.stdout

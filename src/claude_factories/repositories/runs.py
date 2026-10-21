@@ -117,3 +117,24 @@ class RunsRepo:
             " FROM runs r JOIN tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id"
             f" WHERE r.started_at >= {days_ago(7)} ORDER BY r.started_at DESC, r.id DESC"
         ).fetchall()
+
+    def running_rows(self) -> list[sqlite3.Row]:
+        """053: the Agents page's running runs (§4.4 allows one), newest first; round is the task's highest n
+        (Q4)."""
+        return self.conn.execute(
+            "SELECT r.id, t.id AS task_id, t.title, p.id AS project_id, p.name AS project, t.stage,"
+            " (SELECT MAX(n) FROM rounds WHERE task_id = t.id) AS round, r.started_at, r.log_path"
+            " FROM runs r JOIN tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id"
+            " WHERE r.status = 'running' ORDER BY r.started_at DESC, r.id DESC"
+        ).fetchall()
+
+    def recent(self, limit: int) -> list[sqlite3.Row]:
+        """053 Q5: ended runs by ended_at newest first (sqlite sorts a null ended_at last on DESC), then id; Q6:
+        each one's transcripts rows."""
+        return self.conn.execute(
+            "SELECT r.id, t.id AS task_id, t.title, p.id AS project_id, p.name AS project, r.status, r.error,"
+            " r.started_at, r.ended_at, (SELECT COUNT(*) FROM transcripts WHERE run_id = r.id) AS transcripts"
+            " FROM runs r JOIN tasks t ON t.id = r.task_id JOIN projects p ON p.id = t.project_id"
+            " WHERE r.status != 'running' ORDER BY r.ended_at DESC, r.id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()

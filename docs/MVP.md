@@ -386,7 +386,8 @@ Single user and no auth still need these, because the API can start processes th
   container's `~/.claude` sits on a named volume so the login survives restarts. My host
   login can't be reused: macOS keeps it in the Keychain, which the container can't read.
   The Settings page (`/settings`) does the same login from the browser: it shows claude's
-  sign-in link and passes the pasted code to claude.
+  sign-in link and passes the pasted code to claude. Its **Disconnect** runs
+  `claude auth logout` the same way, and is refused while a run is active.
   §4.3's env stripping and auth check are unchanged.
 - **Image.** The backend image has git, uv, node, and the `claude` CLI. Anything else a
   project's test command needs goes in a custom image, set in compose.override.yaml.
@@ -481,6 +482,8 @@ Rules:
 - Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
 - Branch and worktree browsing on the code page.
+- Scheduled runs (cron checkup agents, other codebase automations), each a run of its own kind
+  beside `factory` on the Agents page.
 
 ---
 

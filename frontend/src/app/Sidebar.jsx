@@ -15,12 +15,15 @@ const row = 'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left hov
 // Q9: NavLink marks the current page itself; the others drop the base `a` accent
 const navLink = ({ isActive }) => `${row} ${isActive ? 'bg-surface font-medium text-accent' : 'text-fg'}`
 
-/** docs/ui.md §8, Q8: the login runs will use, as handlers/pages.py claude_login words it; 039: a link to Settings. */
+/**
+ * docs/ui.md §8, Q8: the login runs will use, as handlers/pages.py claude_login words it; 039: a link to Settings.
+ * 055 Q1: /api/auth gives the same nulls for no login and a non-claude.ai one, so runs disabled reads Not signed in.
+ */
 function AuthBadge({ auth }) {
   if (!auth.runs_enabled) {
     return (
       <Link to="/settings" className="text-sm font-semibold text-danger">
-        API key — runs disabled
+        Not signed in — runs disabled
       </Link>
     )
   }
@@ -77,6 +80,9 @@ function AddWorkspace() {
   )
 }
 
+// 042 FE35: a count at a link's right, filled with surface text; each use adds its fill (053: Agents' bg-accent)
+const countPill = 'ml-auto min-w-5 rounded-full px-1.5 text-center text-xs/5 font-medium text-surface tabular-nums'
+
 /**
  * 042 FE34, FE35: a project's pages, in order; Reviews carries its count of tasks waiting on me or escalated, when above 0.
  * 051 FE6: each is `[to, label, end]`, with `end` true unless given.
@@ -92,7 +98,7 @@ const pages = (project) => [
       {project.review > 0 && (
         <>
           {' '}
-          <span className="ml-auto min-w-5 rounded-full bg-warning px-1.5 text-center text-xs/5 font-medium text-surface tabular-nums">{project.review}</span>
+          <span className={`${countPill} bg-warning`}>{project.review}</span>
         </>
       )}
     </>,
@@ -360,7 +366,7 @@ function WorkspaceRow({ workspaces, workspace, selected, onSelect, selectId, onR
 }
 
 /**
- * docs/ui.md §8.4: the app name, the workspace area, then Dashboard, the fctl reference, and the badge.
+ * docs/ui.md §8.4: the app name, the workspace area, then Dashboard, Agents, the fctl reference, and the badge.
  * Q15: one landmark with no headings. Layout owns the state, so the column and the drawer show the same thing.
  */
 export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onReload }) {
@@ -369,6 +375,7 @@ export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onR
   const { pathname } = useLocation()
   const { data, error } = sidebar
   const workspace = data?.workspaces.find((w) => w.id === selected)
+  const running = data?.workspaces.reduce((n, w) => w.projects.reduce((m, p) => m + p.running, n), 0) ?? 0
   // 049 FE10: a refused move; the next load of the sidebar (a navigation or reload) clears it
   const [refusal, setRefusal] = useState(null)
   useEffect(() => setRefusal(null), [sidebar])
@@ -428,6 +435,18 @@ export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onR
           <li>
             <NavLink to="/" end className={navLink}>
               Dashboard
+            </NavLink>
+          </li>
+          <li>
+            {/* 053 FE9, FE10, Q8: the running count over every workspace, refreshed with the sidebar on each navigation */}
+            <NavLink to="/agents" end className={navLink}>
+              Agents
+              {running > 0 && (
+                <>
+                  {' '}
+                  <span className={`${countPill} bg-accent`}>{running}</span>
+                </>
+              )}
             </NavLink>
           </li>
           <li>

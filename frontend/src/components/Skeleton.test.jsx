@@ -6,7 +6,7 @@ import { expectSkeleton, mockFetch, renderAt } from '../test/render.jsx'
 const ROUTES = [
   ['/'], ['/workspaces/2'], ['/projects/3'], ['/projects/3/reviews'], ['/projects/3/code'], ['/projects/3/context'],
   ['/projects/3/settings'], ['/tasks/12'], ['/tasks/12/review'], ['/transcripts/5'],
-  ['/docs/fctl', 'fctl reference'], ['/settings', 'Settings'],
+  ['/docs/fctl', 'fctl reference'], ['/settings', 'Settings'], ['/agents'], // 053
 ]
 
 test('046 FE14: while the first request is pending, each page is one skeleton status, alone in main but for a static h1', async () => {

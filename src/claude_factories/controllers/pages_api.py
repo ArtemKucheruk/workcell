@@ -83,6 +83,12 @@ def login_code(body: dto.LoginCode, claude: ClaudeAdapter) -> dto.AuthOut:
     return handler.login_code(claude, body.code)
 
 
+@router.post("/api/auth/logout")
+def logout(claude: ClaudeAdapter, runs: Runs) -> dto.AuthOut:
+    """055: Settings' Disconnect."""
+    return handler.logout(claude, runs)
+
+
 @router.get("/api/docs/fctl")
 def fctl_doc() -> dto.FctlDoc:
     """029 Q8: docs/ui.md §8 item 7's reference, next to the page view-models."""
@@ -95,6 +101,13 @@ def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, task: in
     """041: fetched on load and after each navigation, never polled. A non-integer id is FastAPI's 422 (Q3)."""
     page = handler.sidebar(projects, tasks, transcripts, task, transcript)
     return page | {"workspaces": [w | {"projects": objs(w["projects"])} for w in page["workspaces"]]}
+
+
+@router.get("/api/pages/agents")
+def agents(runs: Runs) -> dto.AgentsPage:
+    """053: polled every 3 s by the Agents page; no ids, so no error statuses."""
+    page = handler.agents(runs)
+    return page | {"recent": objs(page["recent"])}
 
 
 @router.get("/api/pages/dashboard")
