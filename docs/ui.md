@@ -66,10 +66,13 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   `danger` with `surface` text. It is never disabled ahead of time: the server decides, and its
   409 detail shows inside the dialog, which stays open. A deleted project's app goes to
   `/workspaces/{id}`, a deleted workspace's to `/`.
-- Bottom: **Dashboard**, the fctl reference (item 7), and the login runs will use, from
-  `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
-  subscription, or a red `Not signed in — runs disabled` otherwise. The badge links to `/settings`
-  (item 9).
+- Bottom: **Dashboard**, **Agents** (item 15), the fctl reference (item 7), and the login runs
+  will use, from `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓`
+  when it is a subscription, or a red `Not signed in — runs disabled` otherwise. The badge links
+  to `/settings` (item 9). **Agents** carries the count of running runs as a filled `accent` pill
+  with `surface` text when above 0: the sidebar view-model's `running` counts summed over every
+  workspace's projects, the unselected ones too. It updates when the sidebar loads, so it can
+  lag until the next navigation.
 
 The sidebar's data comes from `GET /api/pages/sidebar` (§6.4) on load and after each
 navigation, and is not polled. A rename or move, from the sidebar or a Settings page, also
@@ -102,7 +105,7 @@ Loading, failures, times, and motion are the same on every page:
   `Loading…`, with no headings, links, or buttons. Reloads (after an action, on a new round,
   file, or **Show all**) keep the last view until the new one arrives. A failed first load is
   the red alert.
-- On the pages polled every 3 s (Board, Task detail, Reviews), a failed poll over a page that
+- On the pages polled every 3 s (Board, Task detail, Reviews, Agents), a failed poll over a page that
   has loaded leaves the page as it was and shows a muted `Offline — retrying` banner, fixed at
   the bottom of the content column, without the error's detail. It is a polite status, shown
   once while the failures last, and the next good poll removes it. A 404 is still the
@@ -196,7 +199,7 @@ Loading, failures, times, and motion are the same on every page:
    - The approver's decision.
    - Status history (`events`): each entry's relative time, then its label
      (`5m ago created · backlog`).
-   - Run log tail (collapsed).
+   - Run log tail (collapsed; `/tasks/{id}#run-log` opens it and scrolls to it).
    - "Take over in terminal" command.
    - A link to Review.
 5. **Code review** (`/tasks/{id}/review`): GitHub-style (wireframes below).
@@ -342,6 +345,31 @@ Loading, failures, times, and motion are the same on every page:
       builder`) shows as a red alert beside Save, and the graph stays unsaved. Leaving the page
       while unsaved asks the browser to confirm (`beforeunload`); in-app links don't.
     - Below `md` the palette starts collapsed and the Node panel moves under the flow.
+15. **Agents** (`/agents`; wireframe §8.8)
+    - Loads `GET /api/pages/agents` (`docs/data-model-and-api.md §6.4`) and polls it every 3 s,
+      with the skeleton, the red alert for a failed first load, and the offline banner. The
+      title reads `Agents · Claude Factories`. Not a wide page. `h1` `Agents`, then `h2`s
+      **Running** and **Recent**.
+    - Each running run is a card: its kind (`factory`; scheduled runs join later), `#12 <title>`
+      linking to `/tasks/12`, the project linking to `/projects/{id}`, the stage (as the board
+      draws it) and `round <n>` (the task's highest round), each left out when null. Then
+      `started <relative time>`, `elapsed 5m 12s` (from its start to now, as the task page's
+      agent durations read), a **Run log** link to `/tasks/12#run-log`, and **Stop**.
+    - **Stop** sends `POST /api/runs/{id}/stop` with its spinner and no confirm, as on the task
+      page. A 200 reloads the page at once, before the next poll. A refusal (`run #41 is not
+      running`) is a red alert and the page stays; the next successful Stop clears it.
+    - Under the card, its agents from the run's log: the orchestrator first, then each spawned
+      agent in spawn order. Each shows its name, its type only when it differs from the name, and
+      `round <n>` when its prompt names one. A running agent shows the outlined accent
+      `● running` pill (the orchestrator always does); a finished one reads `finished · 12m 34s`,
+      or `finished` when the log gives no duration. Then its latest tool line (`Bash pytest -q`),
+      monospace, muted, one line, or nothing with none.
+    - With nothing running, `Nothing running.` under Running.
+    - **Recent** lists the last 20 ended runs, latest end first: `run #40`, `#11 <title>` linking
+      to `/tasks/11`, the project link, how it ended as plain text (`failed: exit code 1`,
+      `succeeded`, or `stopped`), its duration from start to end (`—` with no end), and
+      `2 transcripts` (`1 transcript`) linking to `/tasks/11`, where the task page lists them,
+      left out at 0. Ended runs carry no agents list. With none, `No runs yet.`
 
 ### 8.1 Board
 ```
@@ -450,6 +478,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │ ▸ web                  ⋯ │
 │                          │
 │ Dashboard                │
+│ Agents               (1) │  ← running runs, when above 0: an accent pill
 │ fctl reference           │
 │ Claude: Pro ✓            │
 └──────────────────────────┘
@@ -553,4 +582,26 @@ cards: an icon (not drawn), the title, and a one-line summary; ● handles: yes 
 Node: the selected node's data; with none selected, "Select a node to edit it."
 [Save]: enabled while unsaved; Ctrl/⌘+S does the same; leaving the page warns while unsaved
 below md: the palette starts collapsed and the Node panel goes under the canvas
+```
+
+### 8.8 Agents
+```
+Agents
+Running
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ factory  #12 Rate-limit login endpoint   api-server   agent_review · round 1      │
+│ started 5m ago · elapsed 5m 12s                                Run log   [Stop]   │
+│   orchestrator                        (● running)          Agent review-code      │
+│   builder-12   builder     round 1    finished · 12m 34s   Bash pytest -q         │
+│   review-code              round 2    (● running)          Bash fctl verdict 12 … │
+└───────────────────────────────────────────────────────────────────────────────────┘
+Recent
+ run #40   #11 Webhooks    api-server   failed: exit code 1   12m 3s   2 transcripts
+ run #39   #9 Health       web          succeeded             8m 41s   5 transcripts
+ run #38   #10 Audit log   api-server   stopped               1m 2s
+nothing running: "Nothing running." under Running, then Recent · no ended runs: "No runs yet."
+agents: the orchestrator first, then each spawned agent in spawn order; the type only when it differs from the name
+(● running): the outlined accent pill; "finished · <duration>", or "finished" when the log gives no duration
+the latest tool line: monospace, muted, one line
+Run log → /tasks/12#run-log · N transcripts → /tasks/11, left out at 0 · [Stop] with its spinner; a refusal is a red alert
 ```

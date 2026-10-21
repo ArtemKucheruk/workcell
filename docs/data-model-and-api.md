@@ -436,9 +436,9 @@ The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces
 `/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=` ·
 `/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
 `/projects/{id}/factories/{fid}` · `/projects/{id}/settings` ·
-`/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl` ·
-`/settings`. Any other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}`
-loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
+`/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` ·
+`/docs/fctl` · `/settings`. Any other path outside `/api` gets the SPA's not-found page.
+`/agents` loads `GET /api/pages/agents`. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
 `GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does. `/projects/{id}/factories` loads
 `GET /api/projects/{id}/factories` (§6.1), plus `GET /api/pages/projects/{id}` for its header, and the designer at
 `/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1).
@@ -505,6 +505,36 @@ GET  /api/pages/sidebar?transcript=5                              (/transcripts/
   # current: the workspace and project of the task (?task=) or of the transcript's task
   #   (?transcript=); null with no query, and null (still 200, never 404) for an unknown id
   # a non-integer id gets the 422; there is no ?project=: the SPA finds it in workspaces
+
+GET  /api/pages/agents                                            (/agents, polled)
+← 200 {"running":[{"id":41,"kind":"factory","task_id":12,"title":"Rate-limit login endpoint",
+         "project_id":3,"project":"api-server","stage":"agent_review","round":1,
+         "started_at":"2026-10-21T10:04:11Z",
+         "agents":[
+           {"name":"orchestrator","type":null,"round":null,"running":true,"duration_ms":null,
+            "last_tool":"Agent review-code"},
+           {"name":"builder-12","type":"builder","round":1,"running":false,"duration_ms":754000,
+            "last_tool":"Bash pytest -q"},
+           {"name":"review-code","type":"review-code","round":2,"running":true,"duration_ms":null,
+            "last_tool":"Bash fctl verdict 12 code PASS"}]}],
+       "recent":[{"id":40,"task_id":11,"title":"Webhooks","project_id":3,"project":"api-server",
+         "status":"failed","error":"exit code 1","started_at":"2026-10-21T09:40:00Z",
+         "ended_at":"2026-10-21T09:52:03Z","transcripts":2}]}
+  # read-only, no ids or query, so no error statuses; Stop is POST /api/runs/{id}/stop (§6.2)
+  # running: every running run (§4.4 allows one), newest started_at first, then id descending
+  #   kind: always "factory" today (scheduled runs, §9 Later) · stage: the task's, or null ·
+  #   round: the task's highest rounds.n, or null with no rounds
+  # agents: from the run's stream-json log, read as GET /api/runs/{id}/log reads it (complete lines,
+  #   anything not a JSON object skipped, no readable file = the orchestrator alone): the orchestrator
+  #   first, then one per `Agent` tool_use in log order (no other tool name counts)
+  #   name: the Agent input's name, else its subagent_type, else "agent" · type: subagent_type or null ·
+  #   round: n from "Job|Task <id>, round <n>." in its prompt, else null
+  #   running: until a tool_result answers its tool_use id; the orchestrator always ·
+  #   duration_ms: the answering user line's int tool_use_result.totalDurationMs, else null
+  #   last_tool: its latest own tool line (parent_tool_use_id = its tool_use id, or null for the
+  #   orchestrator), as the run log writes it without the "<who> · " prefix; null with none
+  # recent: the last 20 runs that aren't running, ended_at newest first with nulls last, then id
+  #   descending; error is null unless failed · transcripts: this run's rows in `transcripts`
 
 GET  /api/docs/fctl                                               (/docs/fctl)
 ← 200 {"body_html":"<h2 id=\"fctl-serve\">fctl serve</h2>…",
