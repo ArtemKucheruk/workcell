@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import subprocess
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -240,7 +241,8 @@ def test_auth_cached_60s(client, tmp_path, monkeypatch):  # AC3, 026 AC13
 # --- POST /api/auth/login, /api/auth/login/code (039) ---------------------------------
 
 SIGN_IN = "https://claude.ai/oauth/authorize?code=true&client_id=c&state=abc"
-# 039 Q1: claude 2.1.304's `auth login`, acted out per the `mode` file; `auth status` prints the `status` file
+# 039 Q1: claude 2.1.304's `auth login`, acted out per the `mode` file; `auth status` prints the `status` file.
+# 055: `auth logout` follows the `logout` file: ok logs out, fail / fail-stderr print an error, silent prints nothing
 LOGIN_FAKE = r'''
 import json, os, sys, time
 d = os.environ["FAKE_LOGIN_DIR"]
@@ -250,6 +252,17 @@ def put(name, text, how="w"):
 if sys.argv[1:] == ["auth", "status"]:
     print(open(os.path.join(d, "status")).read())
     sys.exit(0)
+if "logout" in sys.argv:
+    put("logouts", json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ)}) + "\n", "a")
+    how = open(os.path.join(d, "logout")).read()
+    if how == "ok":
+        put("status", '{"loggedIn":false}')
+        print("Successfully logged out from your Anthropic account.")
+        sys.exit(0)
+    if how != "silent":
+        print("Logging out…", flush=True)
+        print("Error: keychain locked", file=sys.stderr if how == "fail-stderr" else sys.stdout)
+    sys.exit(1)
 put("starts", json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ),
                           "pgid": os.getpgrp()}) + "\n", "a")
 mode = open(os.path.join(d, "mode")).read()
@@ -292,9 +305,10 @@ def fake_login(tmp_path, monkeypatch):
     claude.write_text(f"#!{sys.executable}{LOGIN_FAKE}")
     claude.chmod(0o755)
 
-    def install(mode="ok", status=CONSOLE):
+    def install(mode="ok", status=CONSOLE, logout="ok"):
         (d / "mode").write_text(mode)
         (d / "status").write_text(status)
+        (d / "logout").write_text(logout)
 
     def lines(name):
         return (d / name).read_text().splitlines() if (d / name).exists() else []
@@ -302,6 +316,7 @@ def fake_login(tmp_path, monkeypatch):
     install()
     install.starts = lambda: [json.loads(line) for line in lines("starts")]
     install.stdin = lambda: lines("stdin")
+    install.logouts = lambda: [json.loads(line) for line in lines("logouts")]
     return install
 
 
@@ -430,6 +445,76 @@ def test_login_stopped_on_shutdown(fake_login):  # 039 AC15
     assert gone(pgid)
 
 
+# --- POST /api/auth/logout (055) -----------------------------------------------------
+
+SIGNED_OUT = {"auth_method": None, "plan": None, "runs_enabled": False, "email": None}
+
+
+def logout(client, status=200):
+    r = client.post("/api/auth/logout", headers=H)
+    assert r.status_code == status, r.text
+    return r.json()
+
+
+def test_logout(client, fake_login, monkeypatch):  # 055 BE1
+    monkeypatch.setattr(pages, "monotonic", lambda: 1000.0)  # every check well within the 60 s cache
+    fake_login(status=PRO_EMAIL)
+    assert api(client, "/api/auth")["runs_enabled"] is True  # primes the cache
+    assert logout(client) == SIGNED_OUT
+    assert len(fake_login.logouts()) == 1
+    assert api(client, "/api/auth") == SIGNED_OUT
+
+
+def test_logout_env_and_cwd(client, fake_login, monkeypatch):  # 055 BE2
+    for name in STRIPPED + ("CLAUDE_CODE_USE_VERTEX",):
+        monkeypatch.setenv(name, "x")
+    calls, real = [], subprocess.run
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append((args, kw)) or real(args, **kw))
+    logout(client)
+    [seen] = fake_login.logouts()
+    assert seen["argv"] == ["auth", "logout"]
+    assert os.path.realpath(seen["cwd"]) == os.path.realpath(os.environ["FCTL_HOME"])
+    assert [k for k in seen["env"] if k in STRIPPED or k.startswith("CLAUDE_CODE_USE_")] == []
+    [(args, kw)] = [c for c in calls if "logout" in c[0]]
+    assert args == ["claude", "auth", "logout"] and not kw.get("shell")
+
+
+@pytest.mark.parametrize("mode, detail", [
+    ("fail", "claude auth logout failed: Error: keychain locked"),
+    ("fail-stderr", "claude auth logout failed: Error: keychain locked"),
+    ("silent", "claude auth logout exited with code 1"),
+])
+def test_logout_fails(client, fake_login, mode, detail):  # 055 BE3
+    fake_login(status=PRO_EMAIL, logout=mode)
+    assert api(client, "/api/auth")["runs_enabled"] is True  # primes the 60 s cache
+    assert logout(client, 500) == {"detail": detail}
+    fake_login(status=CONSOLE, logout=mode)
+    assert api(client, "/api/auth")["runs_enabled"] is False  # Q4: cleared on failure too
+
+
+def test_logout_refused_while_running(client, project, fake_login):  # 055 BE4
+    start(client)
+    pgid = fake_login.starts()[0]["pgid"]
+    add_run(add_task(project, status="in_progress"), "running")
+    assert logout(client, 409) == {"detail": "a run is active"}
+    assert fake_login.logouts() == []
+    os.killpg(pgid, 0)  # Q2: the login is still alive (ProcessLookupError if not)
+    assert send(client, "good#state")["runs_enabled"] is True
+
+
+def test_logout_stops_pending_login(client, fake_login):  # 055 BE5
+    start(client)
+    pgid = fake_login.starts()[0]["pgid"]
+    assert logout(client) == SIGNED_OUT
+    assert gone(pgid)
+    assert send(client, "good#state", 409) == NO_LOGIN
+
+
+def test_logout_needs_header(client, fake_login):  # 055 BE6
+    assert client.post("/api/auth/logout").status_code == 403
+    assert fake_login.logouts() == []
+
+
 def section(name, heading):
     """docs/<name>'s section from `heading` up to the next heading of the same or a higher level."""
     text = (REPO / "docs" / name).read_text(encoding="utf-8")
@@ -455,6 +540,21 @@ def test_login_docs():  # 039 AC16
     assert ui.index("8. **Transcript**") < ui.index("9. **Settings** (`/settings`)")
     login_bullet = section("MVP.md", "### 4.6").split("- **Login.**")[1].split("\n- ")[0]
     assert "Settings page" in login_bullet
+
+
+def test_logout_docs():  # 055 BE7
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    at = api_doc.index("POST /api/auth/logout")
+    assert api_doc.index("POST /api/auth/login/code") < at < api_doc.index("GET  /api/pages/dashboard")
+    row = api_doc[at:api_doc.index("GET  /api/pages/dashboard")]
+    assert '← 200 {"auth_method":null,"plan":null,"runs_enabled":false,"email":null}' in row
+    assert '# 409 {"detail":"a run is active"}' in row and '# 500 {"detail":' in row
+    ui = section("ui.md", "## 8.")
+    assert "**Disconnect**" in ui[ui.index("9. **Settings** (`/settings`)"):ui.index("10. **Reviews**")]
+    bottom = ui.split("- Bottom:")[1].split("\n\n")[0]
+    assert "`Not signed in — runs disabled`" in bottom and "API key — runs disabled" not in ui
+    login_bullet = section("MVP.md", "### 4.6").split("- **Login.**")[1].split("\n- ")[0]
+    assert "claude auth logout" in login_bullet and "Settings page" in login_bullet
 
 
 # --- GET /api/pages/sidebar (041) ----------------------------------------------------

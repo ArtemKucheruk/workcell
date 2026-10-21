@@ -1,6 +1,6 @@
 """Page data for the dashboard, workspace, board, task, review, and agents pages (docs/ui.md §8), the sidebar
-(041), its login badge, the Settings page's Claude login (§8 item 9), and the fctl reference (§8 item 7). Each
-page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
+(041), its login badge, the Settings page's Claude login and Disconnect (§8 item 9), and the fctl reference
+(§8 item 7). Each page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
 import re
 import shlex
@@ -78,6 +78,28 @@ def login_stop(claude: Claude) -> None:
         PENDING.clear()
 
 
+def logout(claude: Claude, runs: RunsRepo) -> dict:
+    """055: `claude auth logout` with the runs' stripped env from the data dir (MVP §4.3), stopping a pending
+    login first. Q2: refused while a run is active (§4.4), changing nothing. Q4: the auth cache is cleared
+    either way, since claude may have logged out partway. Answers /api/auth afresh."""
+    if runs.any_running():
+        raise Conflict("a run is active")
+    login_stop(claude)
+    try:
+        returncode, out = claude.logout(str(config.data_dir()), stripped_env())
+    except OSError as e:
+        raise Failed(f"claude auth logout didn't start: {e}") from None
+    except subprocess.TimeoutExpired:
+        raise Failed("claude auth logout didn't finish") from None
+    finally:
+        LOGIN.clear()
+    if returncode:
+        line = last_line(out)
+        raise Failed(f"claude auth logout failed: {line}" if line
+                     else f"claude auth logout exited with code {returncode}")
+    return auth(claude)
+
+
 def login_start(claude: Claude) -> dict:
     """039 Q1: `claude auth login --claudeai` with the runs' stripped env from the data dir (MVP §4.3), and
     its sign-in URL. Q5: allowed while runs are active."""
@@ -136,7 +158,7 @@ def claude_login(claude: Claude) -> tuple[str, bool]:
     """docs/ui.md §8: the header's login and whether runs are allowed. 014 Q2: the plan capitalized."""
     info = auth_status(claude)
     if info is None:
-        return "API key — runs disabled", False
+        return "Not signed in — runs disabled", False  # 055 Q1: the sidebar badge's wording
     plan = info.get("subscriptionType")
     return f"Claude: {plan.capitalize() if isinstance(plan, str) and plan else 'subscription'} ✓", True
 

@@ -83,6 +83,12 @@ def login_code(body: dto.LoginCode, claude: ClaudeAdapter) -> dto.AuthOut:
     return handler.login_code(claude, body.code)
 
 
+@router.post("/api/auth/logout")
+def logout(claude: ClaudeAdapter, runs: Runs) -> dto.AuthOut:
+    """055: Settings' Disconnect."""
+    return handler.logout(claude, runs)
+
+
 @router.get("/api/docs/fctl")
 def fctl_doc() -> dto.FctlDoc:
     """029 Q8: docs/ui.md §8 item 7's reference, next to the page view-models."""

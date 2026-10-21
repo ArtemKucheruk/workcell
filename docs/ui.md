@@ -68,8 +68,8 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   `/workspaces/{id}`, a deleted workspace's to `/`.
 - Bottom: **Dashboard**, **Agents** (item 15), the fctl reference (item 7), and the login runs
   will use, from `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓`
-  when it is a subscription, or a red `API key — runs disabled` otherwise. The badge links to
-  `/settings` (item 9). **Agents** carries the count of running runs as a filled `accent` pill
+  when it is a subscription, or a red `Not signed in — runs disabled` otherwise. The badge links
+  to `/settings` (item 9). **Agents** carries the count of running runs as a filled `accent` pill
   with `surface` text when above 0: the sidebar view-model's `running` counts summed over every
   workspace's projects, the unselected ones too. It updates when the sidebar loads, so it can
   lag until the next navigation.
@@ -252,6 +252,11 @@ Loading, failures, times, and motion are the same on every page:
      **Code** field. **Submit code** posts the pasted `<code>#<state>` to
      `POST /api/auth/login/code`, and on success the section shows the new login. The button
      then reads **Start over**, which begins a fresh login.
+   - While signed in (runs enabled), **Disconnect** opens a modal `<dialog>` like Delete's
+     (§8.4): **Cancel** first, then **Disconnect** filled `danger`. It posts
+     `POST /api/auth/logout`. A refusal (a run is active, or claude failed) shows its detail
+     inside the dialog, which stays open. On success the section shows the signed-out login and
+     **Log in with Claude**, and the sidebar badge follows on its next poll.
    - Subscription login only (§4.3): no API key field.
 10. **Reviews** (`/projects/{id}/reviews`, Closed at `?tab=closed`; wireframe §8.5)
     - From the board view-model, polled every 3 s.

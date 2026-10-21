@@ -105,7 +105,7 @@ docker compose exec backend claude auth login    # sign in with your Claude subs
 docker compose exec backend claude auth status   # check it: "authMethod": "claude.ai"
 ```
 
-Until you do, the header shows the red `API key — runs disabled` and Run is refused. The
+Until you do, the header shows the red `Not signed in — runs disabled` and Run is refused. The
 login lives in the `backend-home` volume, the container's home, so restarts and rebuilds keep
 it, and `docker compose down -v` deletes it.
 
@@ -145,7 +145,7 @@ docker compose -p claude-factories-demo exec backend fctl seed
 ```
 
 Open http://127.0.0.1:3000. The demo container has no Claude login, so its header shows
-`API key — runs disabled`. When you're done, `docker compose -p claude-factories-demo down -v`
+`Not signed in — runs disabled`. When you're done, `docker compose -p claude-factories-demo down -v`
 deletes the demo, and `docker compose up` brings your own app back.
 
 ## The factory loop

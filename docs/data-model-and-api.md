@@ -464,6 +464,15 @@ POST /api/auth/login/code                                         (Settings: Sub
   #     <code>#<state>, and the login stays pending
   # 500 {"detail":"claude auth login didn't finish"}: no exit within 60 s, so the login is stopped
 
+POST /api/auth/logout                                             (Settings: Disconnect)
+← 200 {"auth_method":null,"plan":null,"runs_enabled":false,"email":null}
+  # stops a pending login, then runs `claude auth logout` (§4.3); the 200 is GET /api/auth's body,
+  # checked afresh (the 60 s cache is cleared, after a failed logout too)
+  # 409 {"detail":"a run is active"}: a run has status running (§4.4), and nothing else happens
+  # 500 {"detail":"claude auth logout failed: Error: …"} with claude's last line, or
+  #     "claude auth logout exited with code <n>" when it printed nothing
+  # 500 {"detail":"claude auth logout didn't start: …"} / "claude auth logout didn't finish" (30 s)
+
 GET  /api/pages/dashboard                       tiles, the waiting and escalated lists ({id, title, project_id,
                                                 project, round, since}, newest since first), open tasks per
                                                 workspace → project, rounds per task

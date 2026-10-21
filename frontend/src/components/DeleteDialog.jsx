@@ -13,8 +13,9 @@ export const WORKSPACE_TEXT = 'This removes the workspace from the app. It must 
  * 049 FE11–FE15, Q11, Q12: a modal confirm, shown through showModal as it mounts, so Cancel, first, takes focus.
  * `remove` is the delete call; a refusal shows inside and the dialog stays. On success it closes, then `onDeleted`
  * runs (a navigation). `onClose` follows every close, Cancel and Esc included, so the opener can unmount it.
+ * 055 Q5: `confirmLabel` names the danger button, Settings' Disconnect.
  */
-export function DeleteDialog({ title, text, remove, onDeleted, onClose }) {
+export function DeleteDialog({ title, text, remove, onDeleted, onClose, confirmLabel = 'Delete' }) {
   const id = useId()
   const dialog = useRef(null)
   const [error, setError] = useState(null)
@@ -32,7 +33,7 @@ export function DeleteDialog({ title, text, remove, onDeleted, onClose }) {
       setError(err)
       return
     }
-    dialog.current.close('deleted')
+    dialog.current?.close('deleted') // 055 round 2: null once Esc or Cancel unmounted it mid-request; onDeleted still runs
     onDeleted()
   }
 
@@ -60,7 +61,7 @@ export function DeleteDialog({ title, text, remove, onDeleted, onClose }) {
             Cancel
           </button>
           <ActionButton action={confirm} className={danger}>
-            Delete
+            {confirmLabel}
           </ActionButton>
         </div>
       </div>
