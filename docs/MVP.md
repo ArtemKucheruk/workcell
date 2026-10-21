@@ -39,7 +39,6 @@ and what is waiting on me.
 - Claude committing, pushing, merging, or opening GitHub PRs.
 - Any GitHub API integration.
 - Editing code in the browser.
-- Editing the loop from the UI. To change the loop, edit `.claude/skills/factory/SKILL.md`.
 
 ---
 
@@ -56,7 +55,7 @@ and what is waiting on me.
 | **Review** | The app's "PR": the review page of a task. It shows every round, the latest snapshot's files and diff with +/− counts, the agent verdicts, the inline comments, the approver's decision, and mine. |
 | **Verdict** | A reviewer agent's `PASS` or `CHANGES` on a round, plus a markdown body. |
 | **Decision** | The approver's `APPROVE`/`ESCALATE`, or my own `APPROVE`/`CHANGES_REQUESTED`. |
-| **Factory** | The `/factory` orchestrator skill plus 7 subagents. The app writes them into `<repo>/.claude/` from its templates. |
+| **Factory** | The `/factory` orchestrator skill plus 7 subagents, which Create factory writes into `<repo>/.claude/` from the app's templates. A project can also hold named factory designs: graphs of agents and conditions edited on a canvas and saved in the app (§3.2). |
 | **Agent** | One subagent file: `spec-writer`, `builder`, `review-security`, `review-ux`, `review-ui`, `review-code`, `approver`. |
 | **Worktree** | A git worktree at `<repo>/.claude/worktrees/<id>-<slug>` on branch `factory/<id>-<slug>`. The builder edits only this directory. |
 | **fctl** | The app's CLI. Agents use it to talk to the API, and I use it to start the server. |
@@ -104,6 +103,12 @@ node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run
 4. **Run** stays disabled, with that same hint, until
    `git cat-file -e main:.claude/skills/factory/SKILL.md` succeeds. Worktrees are created
    from `main`, so the factory has to be committed there before a run can see it.
+
+Design a factory: Project → **Factories** → **+ New factory** (a name) → the designer opens on the
+default loop → drag or click agents and conditions from the palette, connect handles, and edit the
+selected node in the side panel → **Save** or Ctrl/⌘+S. Save shows a refusal (a bad graph,
+`docs/data-model-and-api.md §6.1`) beside it, and the design stays unsaved. Runs still use the
+files in `.claude/`; a design is stored in the app only.
 
 ### 3.3 Add a feature
 Board → **+ New task** → title and description (markdown) → the card lands at the bottom of
@@ -395,7 +400,7 @@ src/claude_factories/
 ├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge / Failed
 ├── lib/            pure parsers and renderers: patch split, diff rows, run log, transcripts, markdown, slug
 ├── db/             connection, now(), and schema.sql, applied at startup
-├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT, MAX_BUNDLE, MAX_UNPACKED
+├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT, MAX_BUNDLE, MAX_UNPACKED, MAX_GRAPH
 └── cli/            fctl, stdlib only (§4.2)
 ```
 
@@ -439,6 +444,7 @@ Rules:
 - `fctl serve`, `fctl setup`, and the CLI in §7.2.
 - Workspaces, projects, and `/factory-connect`.
 - Create factory (templates → `.claude/`).
+- Factory designer: named factories per project, designed on a canvas, with any reviewer set (§3.2).
 - Tasks, the board with drag and drop, Run / Run next / Stop / Retry, and run logs.
 - Subscription-only runs with the auth check (§4.3), one run at a time.
 - Headless runs in worktrees, rework on Request changes, and takeover by
@@ -463,8 +469,7 @@ Rules:
 - A worktree cleanup button that checks the branch is committed first, push / open a GitHub
   PR from the app, and commit from the app.
 - SSE instead of polling, and desktop notifications when a review is waiting.
-- Factory template upgrades with a 3-way merge, a configurable reviewer set, and editing the
-  loop in the UI.
+- Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
 - Branch and worktree browsing on the code page.
 
@@ -491,8 +496,8 @@ Rules:
    interactive sessions.
 8. One run is active at a time, across all projects. Stopping the app stops
    all runs.
-9. Task ids are global integers, the reviewer set is fixed (security, ux, ui, code), and the
-   port is 4545.
+9. Task ids are global integers, the runs' reviewer set is fixed (security, ux, ui, code), and
+   the port is 4545. A factory design's reviewers are stored in its graph only.
 10. Approve means done, whether or not I have committed yet.
 11. The app runs on macOS or Linux. `git`, `claude`, and `uv` are on PATH.
 12. Reviewer agents may leave inline comments, and they render like mine.

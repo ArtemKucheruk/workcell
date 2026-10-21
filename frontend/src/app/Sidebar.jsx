@@ -6,6 +6,7 @@ import { deleteWorkspace, renameWorkspace } from '../api/workspaces.js'
 import { DeleteDialog, PROJECT_TEXT, WORKSPACE_TEXT } from '../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../components/ErrorMessage.jsx'
 import { useNewWorkspace, WorkspaceNameField } from '../components/NewWorkspace.jsx'
+import { Rename } from '../components/Rename.jsx'
 import { field, muted, popover, smallButton } from '../components/styles.js'
 
 // 041: a row of the sidebar, a link or a button; it hovers on `surface`, the column being `raised`
@@ -78,6 +79,7 @@ function AddWorkspace() {
 
 /**
  * 042 FE34, FE35: a project's pages, in order; Reviews carries its count of tasks waiting on me or escalated, when above 0.
+ * 051 FE6: each is `[to, label, end]`, with `end` true unless given.
  * 043 Q7: the count is the filled warning pill, never danger, since every task it counts waits on me.
  */
 const pages = (project) => [
@@ -96,6 +98,8 @@ const pages = (project) => [
     </>,
   ],
   [`/projects/${project.id}/context`, 'Context'],
+  // 051 FE6: no `end`, so it stays current inside a factory's designer
+  [`/projects/${project.id}/factories`, 'Factories', false],
   [`/projects/${project.id}/settings`, 'Settings'],
 ]
 
@@ -145,55 +149,6 @@ function SettingsItem({ to }) {
     <Link to={to} onClick={(event) => event.currentTarget.closest('[popover]').hidePopover?.()} className={`${menuItem} text-fg`}>
       Settings
     </Link>
-  )
-}
-
-/**
- * 049 FE5–FE9, Q10: a name edited in place, focused with all of it selected. Enter sends `save` even unchanged; a refusal
- * shows under the input, which keeps the text. Esc or blur cancels with no request. `onClose(focus)` asks the row to
- * put focus on its `⋯` (after a save or Esc).
- */
-function Rename({ label, name, save, onClose }) {
-  const input = useRef(null)
-  const busy = useRef(false)
-  const [error, setError] = useState(null)
-  useEffect(() => {
-    input.current.focus()
-    input.current.select()
-  }, [])
-
-  async function submit(event) {
-    event.preventDefault()
-    if (busy.current) return
-    busy.current = true
-    try {
-      await save(input.current.value)
-    } catch (err) {
-      setError(err)
-      return
-    } finally {
-      busy.current = false
-    }
-    onClose(true)
-  }
-
-  return (
-    <form onSubmit={submit} className="grid min-w-0 flex-1 gap-1">
-      <input
-        ref={input}
-        type="text"
-        aria-label={label}
-        defaultValue={name}
-        onKeyDown={(event) => {
-          if (event.key !== 'Escape') return
-          event.preventDefault() // else the same Esc also closes a modal drawer
-          onClose(true)
-        }}
-        onBlur={() => onClose(false)}
-        className={`${field} w-full`}
-      />
-      {error && <ErrorMessage error={error} />}
-    </form>
   )
 }
 
@@ -283,9 +238,9 @@ function ProjectRow({ project, menu, links, expanded, onToggle, workspace, other
         </Actions>
       </div>
       <ul id={links} hidden={!expanded} className="ml-5 grid gap-0.5 border-l border-line pl-1">
-        {pages(project).map(([to, label]) => (
+        {pages(project).map(([to, label, end = true]) => (
           <li key={to}>
-            <NavLink to={to} end className={navLink}>
+            <NavLink to={to} end={end} className={navLink}>
               {label}
             </NavLink>
           </li>

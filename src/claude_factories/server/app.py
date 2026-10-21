@@ -11,7 +11,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .. import db
-from ..controllers import bundles, factory, pages_api, projects, reviews, rounds, runs, tasks, transcripts, workspaces
+from ..controllers import (bundles, factories, factory, pages_api, projects, reviews, rounds, runs, tasks, transcripts,
+                           workspaces)
 from ..domain.errors import Conflict, DomainError, Failed, Invalid, NotFound, TooLarge
 
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -59,6 +60,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_error)
     app.add_exception_handler(UnicodeEncodeError, unencodable)
     app.add_exception_handler(DomainError, domain_error)
-    for module in (workspaces, projects, factory, tasks, rounds, reviews, runs, transcripts, bundles, pages_api):
+    for module in (workspaces, projects, factory, factories, tasks, rounds, reviews, runs, transcripts, bundles,
+                   pages_api):
         app.include_router(module.router)
     return app

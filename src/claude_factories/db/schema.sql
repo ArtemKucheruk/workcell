@@ -98,3 +98,11 @@ CREATE TABLE IF NOT EXISTS transcripts (  -- 030: a run's copied Claude Code tra
   input_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
   started_at TEXT, ended_at TEXT,
   UNIQUE (run_id, path));                 -- a re-copy updates the row
+
+CREATE TABLE IF NOT EXISTS factories (    -- 051: a project's named factory designs; IF NOT EXISTS covers old DBs
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  graph TEXT NOT NULL,                    -- the compact JSON of docs/data-model-and-api.md §6.1's <Graph>
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS factories_name ON factories(project_id, name);

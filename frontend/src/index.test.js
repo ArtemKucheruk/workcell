@@ -119,7 +119,7 @@ const families = Object.fromEntries(
 test('040 FE8: two self-hosted variable fonts, imported in main.jsx, head --font-sans and --font-mono', () => {
   expect(fonts).toHaveLength(2)
   expect(Object.keys(pkg.dependencies).filter((name) => !fonts.includes(name))).toEqual([
-    'highlight.js', 'preline', 'react', 'react-dom', 'react-router',
+    '@xyflow/react', 'highlight.js', 'preline', 'react', 'react-dom', 'react-router', // 051 FE24: @xyflow/react
   ])
   expect(Object.keys(families).sort()).toEqual(['monospace', 'sans-serif'])
   const main = read('./main.jsx')
@@ -270,9 +270,10 @@ test('046 FE22: docs/ui.md §8 has skeletons, the offline banner, relative times
   expect(review).not.toContain('10:02 created')
 })
 
-test('050 FE15: dependencies are the two fonts, highlight.js, preline, and React; preline is installed with MIT and variants.css', () => {
+test('050 FE15, 051 FE24: dependencies are the two fonts, @xyflow/react, highlight.js, preline, and React; preline is installed with MIT and variants.css', () => {
   expect(Object.keys(pkg.dependencies)).toEqual([
-    '@fontsource-variable/ibm-plex-sans', '@fontsource-variable/jetbrains-mono', 'highlight.js', 'preline', 'react', 'react-dom', 'react-router',
+    '@fontsource-variable/ibm-plex-sans', '@fontsource-variable/jetbrains-mono', '@xyflow/react', 'highlight.js', 'preline', 'react',
+    'react-dom', 'react-router',
   ])
   expect(Object.keys(pkg.devDependencies)).toEqual([
     '@tailwindcss/vite', '@testing-library/react', '@vitejs/plugin-react', 'jsdom', 'tailwindcss', 'vite', 'vitest',
@@ -328,4 +329,36 @@ test('050 FE21: docs/ui.md names Preline in §8, draws the tree in §8.3 and §8
   }
   const mvp = read('../../docs/MVP.md')
   expect(mvp.slice(mvp.indexOf('### 4.2 Stack'), mvp.indexOf('### 4.3'))).toContain('`preline`')
+})
+
+test('051 FE24: @xyflow/react is a dependency, installed with an MIT license; devDependencies are unchanged', () => {
+  expect(pkg.dependencies['@xyflow/react']).toMatch(/^\^12\./)
+  expect(Object.keys(pkg.devDependencies)).toEqual([
+    '@tailwindcss/vite', '@testing-library/react', '@vitejs/plugin-react', 'jsdom', 'tailwindcss', 'vite', 'vitest',
+  ])
+  expect(JSON.parse(read('../node_modules/@xyflow/react/package.json')).license).toBe('MIT')
+})
+
+test('051 FE25: index.css imports React Flow\'s stylesheet after the pinned first three lines and maps its --xy-* colors onto the tokens', () => {
+  const lines = css.split('\n')
+  expect(lines.slice(0, 3)).toEqual(['@import "tailwindcss";', '@import "preline/variants.css";', '@source "../node_modules/preline/dist/*.js";'])
+  const sheet = lines.findIndex((line) => line.startsWith('@import "@xyflow/react/dist/style.css"'))
+  expect(sheet).toBeGreaterThan(2)
+  expect(fs.existsSync(here('../node_modules/@xyflow/react/dist/style.css'))).toBe(true)
+  const vars = Object.fromEntries([...block(css, '.react-flow {').matchAll(/(--xy-[\w-]+)\s*:\s*([^;]+);/g)].map(([, k, v]) => [k, v.trim()]))
+  const token = new RegExp(`^var\\(--color-(?:${NAMES.join('|')})\\)$`)
+  // background and its dots, node, edge, handle, and controls: each exactly a token
+  for (const name of [
+    '--xy-background-color', '--xy-background-pattern-color', '--xy-node-color', '--xy-node-background-color', '--xy-edge-stroke',
+    '--xy-edge-stroke-selected', '--xy-handle-background-color', '--xy-handle-border-color', '--xy-controls-button-background-color',
+    '--xy-controls-button-background-color-hover', '--xy-controls-button-color', '--xy-controls-button-color-hover',
+    '--xy-controls-button-border-color',
+  ]) {
+    expect([name, vars[name]]).toEqual([name, expect.stringMatching(token)])
+  }
+  // any other color in the block is a token too: no literal color
+  for (const value of Object.values(vars)) expect(value).not.toMatch(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|lab)\(|\b(?:white|black)\b/i)
+  for (const [, ref] of Object.values(vars).join(' ').matchAll(/var\(--color-([\w-]+)\)/g)) expect(NAMES).toContain(ref)
+  // light and dark follow the tokens: no colorMode anywhere in the sources
+  expect(sources.filter(([, text]) => /\bcolorMode\b/.test(text)).map(([f]) => f)).toEqual([])
 })

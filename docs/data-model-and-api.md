@@ -106,8 +106,17 @@ CREATE TABLE transcripts (                -- a run's Claude Code transcripts, co
   input_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
   started_at TEXT, ended_at TEXT,
   UNIQUE (run_id, path));                 -- a re-copy updates the row
+
+CREATE TABLE factories (                  -- a project's named factory designs (§6.1), edited on the canvas
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  graph TEXT NOT NULL,                    -- the compact JSON of §6.1's <Graph>
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE UNIQUE INDEX factories_name ON factories(project_id, name);  -- a name once per project
 ```
-Relations: workspace 1–n project 1–n task. A task has 1–n runs and 1–n rounds. A run has 0–n
+Relations: workspace 1–n project 1–n task. A project has 0–n factories, removed with it (ON DELETE CASCADE).
+A task has 1–n runs and 1–n rounds. A run has 0–n
 transcripts. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
@@ -173,8 +182,8 @@ PATCH /api/projects/3                                             (Settings, sid
 
 DELETE /api/projects/3                                            (sidebar Delete, project Settings Danger zone)
 ← 204, empty body
-  # one transaction removes the project, its tasks, and each task's runs, rounds, round_files, verdicts,
-  #   comments, decisions, events, and transcripts rows
+  # one transaction removes the project, its factories, its tasks, and each task's runs, rounds, round_files,
+  #   verdicts, comments, decisions, events, and transcripts rows
   # on disk, the repo, its worktrees and branches, run logs, and transcript copies stay
   # 409 {"detail":"run #41 active"} while one of its tasks has a running run
   # 404 {"detail":"Project #99 not found"}
@@ -214,7 +223,101 @@ POST /api/projects/3/import                                       (Import, fctl 
   # a second import updates that task. done and review land as they are; anything else lands in backlog (§5.2)
   # 413 a body over 50 MB, over 500 MB unpacked, or a file over 5 MB · 422 not a zip, a refused entry, bad task.json
   # 409 the import_key is another project's task, or that task has a run going · 404 unknown project
+
+GET  /api/projects/3/factories                                    (Factories list)
+← 200 [{"id":7,"name":"default","nodes":10,"created_at":"2026-10-21T08:00:00Z","updated_at":"2026-10-21T09:30:00Z"}]
+  # by name, then id; [] with none. nodes = len(graph.nodes), start and conditions included. No graph here.
+  # 404 {"detail":"Project #99 not found"}
+
+POST /api/projects/3/factories                                    (+ New factory)
+→ {"name":"default"}
+← 201 <Factory>, whose graph is the default graph (below), with created_at = updated_at
+  # name is trimmed: 422 {"detail":"name must not be blank"}; missing, null, or not a string → 422 FastAPI's list detail
+  # 409 {"detail":"factory default already exists"} when this project has a factory by that name (exact match after trim)
+  # 404 {"detail":"Project #99 not found"}
+
+GET  /api/factories/7                                             (designer)
+← 200 <Factory>
+  # 404 {"detail":"Factory #99 not found"}
+
+PUT  /api/factories/7                                             (designer Save, list Rename)
+→ {"graph":<Graph>}  |  {"name":"nightly"}  |  both, applied together
+← 200 <Factory> after the update; updated_at is now, created_at unchanged
+  # 422 {"detail":"send at least one of: name, graph"} for {} or only unknown keys
+  # name or graph sent as null or the wrong type → 422 FastAPI's list detail
+  # name: trimmed, blank → 422 as POST; 409 {"detail":"factory nightly already exists"} when another factory of the
+  #   same project has it; its own name → 200
+  # graph: shape errors → 422 FastAPI's list detail, then the rules below → 422 with a string detail
+  # every 4xx writes nothing
+  # 404 {"detail":"Factory #99 not found"}
+
+DELETE /api/factories/7                                           (list Delete)
+← 204, empty body · 404 {"detail":"Factory #99 not found"}
+
+<Factory> = {"id":7,"project_id":3,"project":"api-server","workspace_id":2,"workspace":"personal",
+             "name":"default","graph":<Graph>,"created_at":"…","updated_at":"…"}
+             # project and workspace: the names as they are now (for the breadcrumb)
 ```
+
+**Factory graphs.** A factory is a design only: runs still use the `.claude/` files that Create factory wrote. The
+graph uses React Flow's shape. Only the keys below are stored and returned, and any others (`selected`, `measured`,
+`dragging`, an edge's `type` or `targetHandle`, extra `data` keys) are dropped:
+```
+<Graph> = {"nodes":[<Node>…],"edges":[<Edge>…]}
+<Node>  = {"id":"builder","type":"builder","position":{"x":500,"y":0},"data":{…}}
+          # id: a non-empty string; position.x, position.y: finite numbers
+<Edge>  = {"id":"e3","source":"builder","sourceHandle":null,"target":"review-security"}
+          # id, source, target: non-empty strings; sourceHandle: "yes" or "no" when it leaves a condition, else null
+          #   (left out = null)
+
+type          data                                                  palette label        card title
+start         {}                                                    (none)               Start
+spec_writer   <Agent>                                               Spec writer          data.name
+builder       <Agent> + "side": "backend" | "frontend" | "both"     Builder              data.name
+reviewer      <Agent> + "focus": "security"|"ux"|"ui"|"code"|"custom"  Reviewer          data.name
+approver      <Agent>                                               Approver             data.name
+custom_agent  <Agent>                                               Custom agent         data.name
+all_pass      {}       yes: every verdict on the latest round is PASS   All reviews PASS     All reviews PASS?
+any_changes   {}       yes: any verdict on the latest round is CHANGES  Any review CHANGES   Any review CHANGES?
+rounds_below  {"n":2}  yes: this run has used fewer than n rounds; n an integer ≥ 1
+                                                                    Rounds used < N      Rounds used < 2?
+approved      {}       yes: the approver's decision is APPROVE          Decision APPROVE     Decision APPROVE?
+
+<Agent> = {"name":"builder","description":"…","model":"inherit"|"opus"|"sonnet"|"haiku",
+           "tools":["Read","Edit"],"prompt":"…markdown…"}        # all five keys required
+```
+The five agent types are spec_writer, builder, reviewer, approver, and custom_agent. Conditions have two source
+handles, `yes` and `no`. Agents have one target and one unnamed source handle, and start has only an unnamed source
+handle.
+
+Rules, checked after the shape, in this order. The first rule that fails answers with its 422 detail:
+1. The compact UTF-8 JSON of the graph as stored is over 262144 bytes (`MAX_GRAPH`) → `graph over 256 KB`.
+2. The start node count isn't 1 → `graph needs exactly one start node, not 2` (or `not 0`).
+3. A repeated node id → `two nodes have id builder`. A repeated edge id → `two edges have id e3`.
+4. An agent name that doesn't match `^[a-z0-9]+(-[a-z0-9]+)*$` → `agent name "Spec Writer" must be a slug: a-z, 0-9, and single hyphens`.
+5. Two agents with the same name → `two agents are named builder`.
+6. Each edge, in list order:
+   - `edge e3 starts at no node x9`
+   - `edge e3 ends at no node x9`
+   - `edge e3 leads into start, which takes no input`
+   - `edge e3 leaves condition all-pass from neither yes nor no` (a condition source whose sourceHandle is anything but `yes` or `no`, null included)
+   - `edge e3 leaves builder from handle yes, but only conditions have handles` (a non-condition source with a non-null sourceHandle)
+
+Anything else is allowed and stored: orphans, cycles, a handle with two edges, a condition missing a branch. The later
+compile decides what it accepts.
+
+The default graph has 10 nodes. Node ids are `start`, the agent names, `all-pass`, and `rounds`. Each agent's
+`description`, `model`, `tools` (the frontmatter list split on `,`), and `prompt` (the text after the frontmatter,
+unrendered, so `{{ test_cmd }}` stays) come from its template in `factory_templates/agents/`. It is laid out left to
+right in loop order:
+```
+start → spec-writer (spec_writer) → builder (builder, side both)
+builder → review-security, review-ux, review-ui, review-code (reviewer, focus security / ux / ui / code)
+each reviewer → all-pass (all_pass)
+all-pass yes → approver (approver)          all-pass no → rounds (rounds_below, n 2)
+rounds yes → builder                        rounds no → approver
+```
+That makes 14 edges.
 
 ### 6.2 Tasks & runs
 ```
@@ -331,11 +434,14 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
 `/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=` ·
-`/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/settings` ·
+`/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
+`/projects/{id}/factories/{fid}` · `/projects/{id}/settings` ·
 `/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl` ·
 `/settings`. Any other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}`
 loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
-`GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does.
+`GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does. `/projects/{id}/factories` loads
+`GET /api/projects/{id}/factories` (§6.1), plus `GET /api/pages/projects/{id}` for its header, and the designer at
+`/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1).
 
 Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
 rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.
