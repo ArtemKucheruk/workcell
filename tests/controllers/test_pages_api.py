@@ -823,7 +823,7 @@ def test_board_card(client, project):  # AC9
         "id": tid, "title": "t", "status": "in_progress", "stage": "build", "position": 1.0, "round": 1,
         "verdicts": {"security": "PASS", "ux": "CHANGES", "ui": "pending", "code": "pending"},
         "additions": 5, "deletions": 2, "run": {"id": run, "status": "running"}, "started_at": STARTED,
-        "waiting": False, "escalated": False, "stalled": False, "branch": None,
+        "waiting": False, "escalated": False, "stalled": False, "branch": None, "description_md": "",
     }
     assert [found[bare][k] for k in ("round", "verdicts", "additions", "deletions", "run", "started_at")] == [None] * 6
 
@@ -848,6 +848,12 @@ def test_card_branch(client, project):  # 042 BE3
     branched, plain = review_task(project, branch="factory/12-x"), add_task(project)
     found = cards(client, project)
     assert (found[branched]["branch"], found[plain]["branch"]) == ("factory/12-x", None)
+
+
+def test_card_description(client, project):  # 048 BE12
+    described, plain = review_task(project, description="Columns: *id*"), add_task(project)
+    found = cards(client, project)
+    assert (found[described]["description_md"], found[plain]["description_md"]) == ("Columns: *id*", "")
 
 
 def test_task_list_keys(client, project):  # 042 BE4: the card's branch and position stay off §6.2's list

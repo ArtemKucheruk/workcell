@@ -1,8 +1,9 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Link, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
 import { runNext, runTask } from '../../api/runs.js'
-import { createTask, moveTask } from '../../api/tasks.js'
+import { createTask, deleteTask, editTask, moveTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { LABELS, RunningBadge, Stage } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
@@ -69,17 +70,21 @@ const cardLook = [
   'data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-1.25 data-[drop=after]:after:h-0.5 data-[drop=after]:after:bg-accent',
 ].join(' ')
 
-/** Q4: a native popover of plain buttons; each hides it natively as it's chosen (FE10). `nudges` are Up and Down. */
-function MoveMenu({ card, moves, nudges }) {
+/**
+ * Q4: a native popover of plain buttons; each hides it natively as it's chosen (FE10). `nudges` are Up and Down.
+ * 048 FE1, FE12: then a divider, Edit, and Delete, which a running card disables (Q10).
+ */
+function MoveMenu({ card, moves, nudges, running, onEdit, onDelete }) {
   const id = `move-${card.id}`
-  const item = (label, pick) => (
+  const item = (label, pick, { className = '', ...more } = {}) => (
     <button
       key={label}
       type="button"
       popoverTarget={id}
       popoverTargetAction="hide"
       onClick={pick}
-      className="cursor-pointer rounded px-2 py-1 text-left text-sm hover:bg-raised"
+      className={`cursor-pointer rounded px-2 py-1 text-left text-sm enabled:hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      {...more}
     >
       {label}
     </button>
@@ -106,12 +111,19 @@ function MoveMenu({ card, moves, nudges }) {
         {moves.map(([label, pick]) => item(label, pick))}
         {nudges.length > 0 && <hr className="my-1 border-line" />}
         {nudges.map(([label, pick]) => item(label, pick))}
+        <hr className="my-1 border-line" />
+        {item('Edit', () => onEdit(card))}
+        {item('Delete', () => onDelete(card), {
+          disabled: running,
+          title: running ? 'Stop the run to delete this task' : undefined,
+          className: 'text-danger',
+        })}
       </div>
     </>
   )
 }
 
-function Card({ card, canRun, onRun, moves, nudges, dragging, drop, onDragStart, onDragEnd }) {
+function Card({ card, canRun, onRun, moves, nudges, onEdit, onDelete, dragging, drop, onDragStart, onDragEnd }) {
   const running = card.status === 'in_progress' && card.run?.status === 'running'
   const runButton = (label) => (
     <ActionButton action={() => onRun(card.id)} disabled={!canRun} className={smallButton} aria-describedby={`task-${card.id}`}>
@@ -139,28 +151,36 @@ function Card({ card, canRun, onRun, moves, nudges, dragging, drop, onDragStart,
         </p>
       )}
       <div className="flex justify-end gap-2">
-        <MoveMenu card={card} moves={moves} nudges={nudges} />
+        <MoveMenu card={card} moves={moves} nudges={nudges} running={running} onEdit={onEdit} onDelete={onDelete} />
         {card.status === 'backlog' && runButton('Run')}
       </div>
     </li>
   )
 }
 
-/** Q10, Q11: + New task opens its form in a popover; a 201 resets and hides it, an error keeps it open with the input. */
-function NewTask({ projectId, onDone }) {
+/** The selector of card `id`'s Move button, not its menu's items. */
+const moveButton = (id) => `[popovertarget="move-${id}"]:not([popovertargetaction])`
+
+/**
+ * Q10, Q11: the + New task form; a success resets and hides its popover, an error keeps it open with the input.
+ * 048 Q5, Q6: given `card`, the same form edits it: labelled `Edit #id`, filled from the card, and sent with Save.
+ * The inputs are uncontrolled, so a poll never refills them (FE6). `onDone` gets the title as stored, trimmed.
+ */
+function TaskForm({ projectId, card, onDone }) {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   async function submit(event) {
     event.preventDefault()
     const form = event.currentTarget
     const data = new FormData(form)
+    const fields = { title: data.get('title'), description_md: data.get('description_md') }
     setBusy(true)
     try {
-      await createTask(projectId, { title: data.get('title'), description_md: data.get('description_md') })
+      await (card ? editTask(card.id, fields) : createTask(projectId, fields))
       setError(null)
       form.reset()
       form.closest('[popover]').hidePopover?.() // Q12: jsdom has no Popover API
-      onDone()
+      onDone(fields.title.trim())
     } catch (err) {
       setError(err)
     } finally {
@@ -168,40 +188,112 @@ function NewTask({ projectId, onDone }) {
     }
   }
   return (
+    <form onSubmit={submit} aria-labelledby={card ? 'task-form-label' : undefined} className="grid gap-2">
+      {card && <p id="task-form-label" className={`text-xs ${muted}`}>{`Edit #${card.id}`}</p>}
+      <label className="grid gap-1">
+        Title
+        <input
+          // Q10: the autofocus attribute, which the popover focuses as it opens; React's autoFocus only focuses on mount
+          ref={(el) => el?.setAttribute('autofocus', '')}
+          type="text"
+          name="title"
+          defaultValue={card?.title}
+          required
+          pattern=".*\S.*"
+          title="A title that isn't blank"
+          className={field}
+        />
+      </label>
+      <label className="grid gap-1">
+        Description
+        <textarea name="description_md" defaultValue={card?.description_md} rows={4} placeholder="Markdown" className={field} />
+      </label>
+      <button disabled={busy} className={`${button} justify-self-start`}>
+        {card ? 'Save' : 'Add task'}
+      </button>
+      {error && <ErrorMessage error={error} />}
+    </form>
+  )
+}
+
+/**
+ * Q10: + New task opens the form in a native popover. 048 Q6: `editing` is the card Edit was chosen on, as it was then;
+ * the form remounts, empty or filled, only when that changes. + New task always opens it empty, even over an open Edit.
+ * Q9: closed by Esc or a click outside with focus lost (on body or in the hidden popover), focus goes to the card's
+ * Move button for an Edit, else to + New task. The browser does that itself only for a popover its invoker opened, and
+ * + New task over an Edit cancels that invoker (round-1 review-ui).
+ */
+function NewTask({ projectId, editing, setEditing, onCreated, onSaved }) {
+  function create(event) {
+    if (!editing) return
+    event.preventDefault() // the popover is open on the Edit: keep it open, in create mode
+    flushSync(() => setEditing(null))
+    document.querySelector('#new-task [name="title"]').focus()
+  }
+  function toggled(event) {
+    if (event.newState !== 'closed') return
+    const lost = document.activeElement
+    if (!lost || lost === document.body || event.currentTarget.contains(lost)) {
+      document.querySelector(editing ? moveButton(editing.id) : '[popovertarget="new-task"]')?.focus()
+    }
+    if (editing) setEditing(null)
+  }
+  return (
     <>
-      <button type="button" popoverTarget="new-task" className={`${button} [anchor-name:--new-task]`}>
+      <button type="button" popoverTarget="new-task" onClick={create} className={`${button} [anchor-name:--new-task]`}>
         + New task
       </button>
       <div
         id="new-task"
         popover="auto"
+        onToggle={toggled}
         className={`${popover} w-96 max-w-[90vw] p-3 [position-anchor:--new-task] [position-area:bottom_span-right]`}
       >
-        <form onSubmit={submit} className="grid gap-2">
-          <label className="grid gap-1">
-            Title
-            <input
-              // Q10: the autofocus attribute, which the popover focuses as it opens; React's autoFocus only focuses on mount
-              ref={(el) => el?.setAttribute('autofocus', '')}
-              type="text"
-              name="title"
-              required
-              pattern=".*\S.*"
-              title="A title that isn't blank"
-              className={field}
-            />
-          </label>
-          <label className="grid gap-1">
-            Description
-            <textarea name="description_md" rows={4} placeholder="Markdown" className={field} />
-          </label>
-          <button disabled={busy} className={`${button} justify-self-start`}>
-            Add task
-          </button>
-          {error && <ErrorMessage error={error} />}
-        </form>
+        <TaskForm
+          key={editing ? `edit-${editing.id}` : 'new'}
+          projectId={projectId}
+          card={editing}
+          onDone={editing ? (title) => onSaved(editing, title) : onCreated}
+        />
       </div>
     </>
+  )
+}
+
+const danger =
+  'cursor-pointer rounded-md border border-danger bg-danger px-3 py-1 font-medium text-surface hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+
+/** 048 FE8, FE9, FE11, Q8: the delete dialog's body; a refusal shows inside it, which stays open. */
+function DeleteTask({ card, onCancel, onDeleted }) {
+  const [error, setError] = useState(null)
+  async function remove() {
+    setError(null)
+    try {
+      await deleteTask(card.id)
+    } catch (err) {
+      setError(err)
+      return
+    }
+    onDeleted(card)
+  }
+  return (
+    <div className="grid gap-3">
+      <h2 id="delete-task" className="m-0">{`Delete #${card.id} ${card.title}?`}</h2>
+      <p id="delete-task-text">
+        This removes its runs, rounds and their files, verdicts, comments, decisions, status history, and transcript records
+        from the app. Its worktree, branch, run logs, and copied transcript files stay on disk.
+      </p>
+      {error && <ErrorMessage error={error} />}
+      {/* Cancel first, so showModal focuses it */}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className={button}>
+          Cancel
+        </button>
+        <ActionButton action={remove} className={danger}>
+          Delete
+        </ActionButton>
+      </div>
+    </div>
   )
 }
 
@@ -262,6 +354,9 @@ export function BoardPage() {
   const dragged = useRef(null)
   const [drag, setDrag] = useState(null)
   const refocus = useRef(null)
+  const [editing, setEditing] = useState(null) // 048: the card the + New task form edits, else null
+  const [doomed, setDoomed] = useState(null) // 048: the card the delete dialog is about
+  const dialog = useRef(null)
   const name = page?.project.name
   useEffect(() => {
     if (name) document.title = `${name} · Claude Factories`
@@ -269,7 +364,7 @@ export function BoardPage() {
   // Q6: after a menu move's reload, focus the card's Move button, in its new column or in place
   useEffect(() => {
     if (refocus.current == null) return
-    document.querySelector(`[popovertarget="move-${refocus.current}"]:not([popovertargetaction])`)?.focus()
+    document.querySelector(moveButton(refocus.current))?.focus()
     refocus.current = null
   }, [page])
 
@@ -303,6 +398,42 @@ export function BoardPage() {
   /** The one move path, for drops and the Move menu: `Moved #3 Task 3 <words>.` */
   function move(card, status, at, words, focus = null) {
     boardAction(() => moveTask(card.id, status, at), { said: `Moved #${card.id} ${card.title} ${words}.`, reload: true, focus })
+  }
+
+  // 048 Q7: Edit and Delete leave the board alert alone; their refusals show in the form or dialog, their successes here
+
+  /** FE2: the form renders in edit mode before the popover shows, so its autofocus lands on the card's Title. */
+  function edit(card) {
+    flushSync(() => setEditing(card))
+    document.getElementById('new-task').showPopover()
+  }
+
+  /** FE3, FE4: the form has hidden itself; announce, reload, and give focus back to the card's Move button. */
+  function saved(card, title) {
+    setEditing(null)
+    setSaid(`Saved #${card.id} ${title}.`)
+    refocus.current = card.id
+    refresh()
+  }
+
+  /** FE8: the dialog's body renders before showModal, which then focuses its first button, Cancel. */
+  function askDelete(card) {
+    flushSync(() => setDoomed(card))
+    dialog.current.returnValue = ''
+    dialog.current.showModal()
+  }
+
+  function deleted(card) {
+    setSaid(`Deleted #${card.id} ${card.title}.`)
+    dialog.current.close('deleted')
+    refresh()
+  }
+
+  /** FE9, FE10, Q9: Cancel, Esc, or a delete closed it: focus goes to + New task once the card is gone, else to its Move button. */
+  function deleteClosed(event) {
+    const gone = event.currentTarget.returnValue === 'deleted'
+    document.querySelector(gone ? '[popovertarget="new-task"]' : moveButton(doomed.id))?.focus()
+    setDoomed(null)
   }
 
   /** FE9: the other columns, each to its bottom (Q2); in Backlog, Up and Down one place, at the midpoint rule's position (Q3). */
@@ -361,7 +492,7 @@ export function BoardPage() {
     <>
       {/* 042: Code, Create factory, Import, Project context, and Move live on the project's other pages */}
       <ProjectHeader project={project} factory={page.factory}>
-        <NewTask projectId={project.id} onDone={refresh} />
+        <NewTask projectId={project.id} editing={editing} setEditing={setEditing} onCreated={refresh} onSaved={saved} />
         <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run}>
           Run next ▶
         </ActionButton>
@@ -402,6 +533,8 @@ export function BoardPage() {
                       canRun={page.can_run}
                       onRun={(taskId) => boardAction(() => runTask(taskId))}
                       {...menu(card, status, cards)}
+                      onEdit={edit}
+                      onDelete={askDelete}
                       dragging={drag?.dim && drag.id === card.id}
                       drop={i === gap ? 'before' : gap === cards.length && i === gap - 1 ? 'after' : undefined}
                       onDragStart={(event) => dragStart(event, card, status)}
@@ -420,6 +553,16 @@ export function BoardPage() {
           )
         })}
       </div>
+      {/* 048 Q8: centered (preflight drops the UA's auto margin), on the drawer's backdrop */}
+      <dialog
+        ref={dialog}
+        aria-labelledby="delete-task"
+        aria-describedby="delete-task-text"
+        onClose={deleteClosed}
+        className="m-auto w-md max-w-[90vw] rounded-lg border border-line bg-surface p-5 text-fg shadow-xl backdrop:bg-surface/80"
+      >
+        {doomed && <DeleteTask card={doomed} onCancel={() => dialog.current.close()} onDeleted={deleted} />}
+      </dialog>
     </>
   )
 }

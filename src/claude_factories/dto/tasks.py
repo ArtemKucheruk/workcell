@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, FiniteFloat
+from pydantic import BaseModel, FiniteFloat, field_validator
 
 from .rounds import RoundBody, RoundSummary
 
@@ -20,6 +20,16 @@ class TaskPatch(BaseModel):
     stage: Stage | None = None
     status: Status | None = None
     position: FiniteFloat | None = None
+    title: str | None = None  # 048 Q1: the board's Edit, either or both
+    description_md: str | None = None
+
+    @field_validator("title", "description_md")
+    @classmethod
+    def not_null(cls, value: str | None) -> str:
+        """048: a sent null gets FastAPI's list detail, as a non-string does; an omitted key stays None."""
+        if value is None:
+            raise ValueError("must be a string")
+        return value
 
 
 class RunOut(BaseModel):
