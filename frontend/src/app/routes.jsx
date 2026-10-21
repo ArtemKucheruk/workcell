@@ -11,6 +11,7 @@ import { SettingsPage } from '../pages/settings/SettingsPage.jsx'
 import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { TranscriptPage } from '../pages/transcript/TranscriptPage.jsx'
 import { WorkspacePage } from '../pages/workspace/WorkspacePage.jsx'
+import { WorkspaceSettingsPage } from '../pages/workspace-settings/WorkspaceSettingsPage.jsx'
 import { Layout } from './Layout.jsx'
 
 // docs/data-model-and-api.md §6.4: the SPA's routes; anything else outside /api is the not-found page
@@ -21,6 +22,7 @@ export const routes = [
     children: [
       { path: '/', element: <DashboardPage /> },
       { path: '/workspaces/:id', element: <WorkspacePage /> },
+      { path: '/workspaces/:id/settings', element: <WorkspaceSettingsPage /> }, // 049: a form page, not wide
       { path: '/projects/:id', element: <BoardPage />, handle: { wide: true } },
       { path: '/projects/:id/code', element: <CodePage />, handle: { wide: true } },
       // 042 FE37: lists and forms, so main keeps its max width

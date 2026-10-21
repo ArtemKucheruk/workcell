@@ -1,10 +1,14 @@
+import os
 import re
+from pathlib import Path
 
 import pytest
 from conftest import git, sql
 
 from claude_factories.lib.markdown import render
 from claude_factories.server.deps import get_git
+
+from .test_tasks import OWNED, add_run, add_task, dump, full_task
 
 H = {"X-Requested-By": "fctl"}
 SKILL = ".claude/skills/factory/SKILL.md"
@@ -188,7 +192,8 @@ def test_move_project(client):  # 020 AC30
     pid = connect(client)["id"]
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = client.patch(f"/api/projects/{pid}", json={"workspace_id": work}, headers=H)
-    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work})
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "api",
+                                              "test_cmd": "pytest -q"})  # 049 BE9: the whole project
     assert project_workspace(pid) == work
 
 
@@ -208,6 +213,172 @@ def test_move_project_refused(client, target, body, status):  # 020 AC31
     if status == 404:
         assert r.json() == {"detail": "Not Found"}
     assert project_workspace(pid) == workspace_id("personal")
+
+
+# --- PATCH name / test_cmd (049) ---------------------------------------------------
+
+
+def stored(pid):
+    """Every column a PATCH could touch, or must not."""
+    return sql("SELECT workspace_id, name, path, remote_url, default_branch, test_cmd, context_md, factory_version,"
+               " created_at FROM projects WHERE id = ?", (pid,))[0]
+
+
+def patch(client, pid, body):
+    return client.patch(f"/api/projects/{pid}", json=body, headers=H)
+
+
+def test_rename_project(client):  # 049 BE1
+    pid = connect(client)["id"]
+    client.put(f"/api/projects/{pid}/context", json={"context_md": "# Stack\n"}, headers=H)
+    before = stored(pid)
+    r = patch(client, pid, {"name": "  api2  "})
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": before[0], "name": "api2",
+                                              "test_cmd": "pytest -q"})
+    assert stored(pid) == (before[0], "api2", *before[2:])
+
+
+def test_patch_test_cmd(client):  # 049 BE2
+    pid = connect(client)["id"]
+    r = patch(client, pid, {"test_cmd": "  make test "})
+    assert (r.status_code, r.json()["test_cmd"]) == (200, "make test")
+    assert stored(pid)[5] == "make test"
+    r = patch(client, pid, {"test_cmd": "   "})
+    assert (r.status_code, r.json()["test_cmd"]) == (200, None)
+    assert stored(pid)[5] is None
+
+
+def test_patch_all_three(client):  # 049 BE3
+    pid = connect(client)["id"]
+    work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
+    r = patch(client, pid, {"workspace_id": work, "name": "x", "test_cmd": "y"})
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "x", "test_cmd": "y"})
+    assert stored(pid)[:2] == (work, "x")
+    assert stored(pid)[5] == "y"
+
+
+def test_rename_project_blank(client):  # 049 BE4
+    pid = connect(client)["id"]
+    before = stored(pid)
+    r = patch(client, pid, {"name": "   "})
+    assert (r.status_code, r.json()) == (422, {"detail": "name must not be blank"})
+    assert stored(pid) == before
+
+
+@pytest.mark.parametrize("body", [{"name": None}, {"test_cmd": None}, {"workspace_id": None}, {"name": 3}])
+def test_patch_project_null_or_wrong_type(client, body):  # 049 BE5
+    pid = connect(client)["id"]
+    before = stored(pid)
+    r = patch(client, pid, body)
+    assert r.status_code == 422
+    assert isinstance(r.json()["detail"], list)
+    assert stored(pid) == before
+
+
+@pytest.mark.parametrize("body", [{}, {"foo": 1}])
+def test_patch_project_nothing_sent(client, body):  # 049 BE6
+    pid = connect(client)["id"]
+    before = stored(pid)
+    r = patch(client, pid, body)
+    assert (r.status_code, r.json()) == (422, {"detail": "send at least one of: workspace_id, name, test_cmd"})
+    assert stored(pid) == before
+
+
+def test_patch_project_unknown(client):  # 049 BE7
+    r = patch(client, 999, {"name": "x"})
+    assert (r.status_code, r.json()) == (404, {"detail": "Not Found"})
+    pid = connect(client)["id"]
+    before = stored(pid)
+    r = patch(client, pid, {"workspace_id": 999, "name": "x"})
+    assert (r.status_code, r.json()) == (404, {"detail": "Not Found"})
+    assert stored(pid) == before
+
+
+def test_patch_project_during_run(client):  # 049 BE8
+    pid = connect(client)["id"]
+    add_run(add_task(pid, "in_progress", stage="build"), "running")
+    assert patch(client, pid, {"name": "api2"}).status_code == 200
+    assert patch(client, pid, {"test_cmd": "make test"}).status_code == 200
+    assert stored(pid)[1] == "api2"
+    assert stored(pid)[5] == "make test"
+
+
+# --- DELETE /api/projects/{id} (049) -----------------------------------------------
+
+
+def delete(client, pid, headers=H):
+    return client.delete(f"/api/projects/{pid}", headers=headers)
+
+
+def test_delete_project(client):  # 049 BE14
+    pid = connect(client)["id"]
+    full_task(pid)
+    full_task(pid)
+    assert all(dump().values())  # every owned table has a row to remove
+    ws = project_workspace(pid)
+    r = delete(client, pid)
+    assert r.status_code == 204
+    assert r.content == b""
+    assert sql("SELECT COUNT(*) FROM projects") == [(0,)]
+    assert dump() == {table: [] for table in OWNED}
+    assert client.get(f"/api/pages/projects/{pid}").status_code == 404
+    assert sql("SELECT id FROM workspaces") == [(ws,)]
+
+
+def test_delete_project_keeps_other_project(client):  # 049 BE15
+    other = connect(client, path="/code/other")["id"]
+    full_task(other)
+    kept = dump()
+    pid = connect(client)["id"]
+    full_task(pid)
+    assert delete(client, pid).status_code == 204
+    assert dump() == kept
+    assert sql("SELECT id FROM projects") == [(other,)]
+
+
+def test_delete_project_refused_during_run(client):  # 049 BE16
+    pid = connect(client)["id"]
+    full_task(pid)
+    task_id = full_task(pid)
+    run_id = add_run(task_id, "running")
+    kept = dump()
+    r = delete(client, pid)
+    assert (r.status_code, r.json()) == (409, {"detail": f"run #{run_id} active"})
+    assert dump() == kept
+    assert sql("SELECT id FROM projects") == [(pid,)]
+    # Q6: a run in another project doesn't block
+    sql("UPDATE runs SET status = 'stopped' WHERE id = ?", (run_id,))
+    other = connect(client, path="/code/other")["id"]
+    add_run(add_task(other), "running")
+    assert delete(client, pid).status_code == 204
+
+
+def test_delete_project_unknown(client):  # 049 BE17
+    r = delete(client, 999)
+    assert (r.status_code, r.json()) == (404, {"detail": "Project #999 not found"})
+
+
+def test_delete_project_leaves_disk(client, repo):  # 049 BE18
+    pid = connect(client, path=str(repo))["id"]
+    task_id = full_task(pid)
+    [(run_id, log, copy)] = sql("SELECT r.id, r.log_path, t.path FROM runs r JOIN transcripts t ON t.run_id = r.id"
+                                " WHERE r.task_id = ?", (task_id,))
+    home = Path(os.environ["FCTL_HOME"])
+    assert Path(log) == home / "runs" / f"{run_id}.log"
+    assert (home / "transcripts" / copy).parent == home / "transcripts" / str(run_id)
+    assert delete(client, pid).status_code == 204
+    assert (repo / ".git").is_dir()
+    assert Path(log).is_file()
+    assert (home / "transcripts" / copy).is_file()
+
+
+def test_delete_project_needs_fctl_header(client):  # 049 BE22
+    pid = connect(client)["id"]
+    full_task(pid)
+    kept = dump()
+    assert delete(client, pid, headers={}).status_code == 403
+    assert dump() == kept
+    assert sql("SELECT id FROM projects") == [(pid,)]
 
 
 # --- GET and PUT /api/projects/{id}/context (033) ---------------------------------

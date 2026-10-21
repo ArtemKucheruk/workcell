@@ -8,19 +8,6 @@ const BOARD = '/api/pages/projects/3'
 const HINT = "factory isn't committed on main: Create factory on the project board, then commit it on main"
 const ACTIVE = [409, { detail: 'run #41 active' }]
 
-// 048: jsdom 30 has neither; these do what the delete dialog relies on: `open`, and close(value) setting returnValue and
-// firing `close` once, as Cancel, Esc, and a delete do
-const dialogProto = HTMLDialogElement.prototype
-dialogProto.showModal ??= function showModal() {
-  this.open = true
-}
-dialogProto.close ??= function close(value) {
-  if (!this.open) return
-  if (value !== undefined) this.returnValue = value
-  this.open = false
-  this.dispatchEvent(new Event('close'))
-}
-
 /** A Card as 020's dto/pages.py has it, with 048's description_md. */
 const card = (id, status, extra = {}) => ({
   id, title: `Task ${id}`, description_md: '', status, stage: null, round: null, verdicts: null, additions: null, deletions: null,

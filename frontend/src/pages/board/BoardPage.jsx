@@ -11,7 +11,7 @@ import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
-import { button, field, muted, popover, smallButton } from '../../components/styles.js'
+import { button, danger, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -259,9 +259,6 @@ function NewTask({ projectId, editing, setEditing, onCreated, onSaved }) {
     </>
   )
 }
-
-const danger =
-  'cursor-pointer rounded-md border border-danger bg-danger px-3 py-1 font-medium text-surface hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
 
 /** 048 FE8, FE9, FE11, Q8: the delete dialog's body; a refusal shows inside it, which stays open. */
 function DeleteTask({ card, onCancel, onDeleted }) {

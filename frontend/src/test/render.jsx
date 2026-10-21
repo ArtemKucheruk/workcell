@@ -6,6 +6,19 @@ import { routes } from '../app/routes.jsx'
 
 afterEach(cleanup)
 
+// 048, 049: jsdom 30 has neither; these do what the drawer and the delete dialogs rely on: `open`, and close(value)
+// setting returnValue and firing `close` once, as Cancel, Esc, and a delete do
+const dialogProto = HTMLDialogElement.prototype
+dialogProto.showModal ??= function showModal() {
+  this.open = true
+}
+dialogProto.close ??= function close(value) {
+  if (!this.open) return
+  if (value !== undefined) this.returnValue = value
+  this.open = false
+  this.dispatchEvent(new Event('close'))
+}
+
 /**
  * `responses` maps "GET /api/auth" to [status, body], or to an Error for a rejected fetch.
  * A string body goes out as is (not JSON). Anything unlisted is a 404 {"detail":"Not Found"}.
