@@ -97,6 +97,13 @@ def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, task: in
     return page | {"workspaces": [w | {"projects": objs(w["projects"])} for w in page["workspaces"]]}
 
 
+@router.get("/api/pages/agents")
+def agents(runs: Runs) -> dto.AgentsPage:
+    """053: polled every 3 s by the Agents page; no ids, so no error statuses."""
+    page = handler.agents(runs)
+    return page | {"recent": objs(page["recent"])}
+
+
 @router.get("/api/pages/dashboard")
 def dashboard(tasks: Tasks, runs: Runs, show: str = "") -> dto.DashboardPage:
     page = handler.dashboard(tasks, runs, show)

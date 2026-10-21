@@ -134,6 +134,49 @@ class DashboardPage(BaseModel):
     done: list[DoneTask]
 
 
+# --- GET /api/pages/agents (docs/ui.md §8 item 15; 053) ---------------------------------
+
+
+class RunAgent(BaseModel):
+    name: str  # the Agent input's name, else its subagent_type, else "agent"
+    type: str | None  # subagent_type
+    round: int | None  # n from `Job|Task <id>, round <n>.` in its prompt
+    running: bool  # no tool_result answers it yet; the orchestrator always (Q12)
+    duration_ms: int | None  # Q1: the answer's tool_use_result.totalDurationMs
+    last_tool: str | None  # Q2: its latest own tool line, without the `<who> · ` prefix
+
+
+class RunningRun(BaseModel):
+    id: int
+    kind: Literal["factory"]  # scheduled runs join later (MVP §9)
+    task_id: int
+    title: str
+    project_id: int
+    project: str
+    stage: str | None
+    round: int | None  # Q4: the task's highest rounds.n
+    started_at: str
+    agents: list[RunAgent]  # the orchestrator first, then one per Agent tool_use in log order
+
+
+class RecentRun(BaseModel):
+    id: int
+    task_id: int
+    title: str
+    project_id: int
+    project: str
+    status: Literal["succeeded", "failed", "stopped"]
+    error: str | None
+    started_at: str
+    ended_at: str | None  # Q5: null for 031's imported runs, listed last
+    transcripts: int  # Q6: this run's transcripts rows
+
+
+class AgentsPage(BaseModel):
+    running: list[RunningRun]  # newest started_at first, then id
+    recent: list[RecentRun]  # at most 20, ended_at newest first, nulls last, then id
+
+
 # --- GET /api/pages/workspaces/{id} (§8 item 2) ----------------------------------------
 
 

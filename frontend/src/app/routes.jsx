@@ -1,4 +1,5 @@
 import { NotFound } from '../components/NotFound.jsx'
+import { AgentsPage } from '../pages/agents/AgentsPage.jsx'
 import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { CodePage } from '../pages/code/CodePage.jsx'
 import { ContextPage } from '../pages/context/ContextPage.jsx'
@@ -23,6 +24,7 @@ export const routes = [
     element: <Layout />,
     children: [
       { path: '/', element: <DashboardPage /> },
+      { path: '/agents', element: <AgentsPage /> }, // 053: lists, not wide
       { path: '/workspaces/:id', element: <WorkspacePage /> },
       { path: '/workspaces/:id/settings', element: <WorkspaceSettingsPage /> }, // 049: a form page, not wide
       { path: '/projects/:id', element: <BoardPage />, handle: { wide: true } },
