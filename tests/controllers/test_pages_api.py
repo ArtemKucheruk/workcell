@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, wrong_edges
 
 from claude_factories import db
+from claude_factories.adapters.git import SubprocessGit
 from claude_factories.handlers import pages
 from claude_factories.server.app import create_app
 from claude_factories.server.deps import get_git
@@ -1364,6 +1365,181 @@ def test_code_no_readme(client, repo):  # 026 AC32
 def test_code_non_utf8_replaced(client, repo):  # 026 AC33
     commit(repo, {"latin.txt": b"caf\xe9\n"})
     assert code(client, connect(client, repo), "latin.txt").json()["view"]["text"] == "caf\ufffd\n"
+
+
+# --- 054: ?branch= on the code page ----------------------------------------------------
+
+
+def commit_on(repo, branch, files):
+    """Commit `files` on the existing `branch`, then check main out again."""
+    git(repo, "checkout", "-q", branch)
+    sha = commit(repo, files)
+    git(repo, "checkout", "-q", "main")
+    return sha
+
+
+@pytest.fixture
+def branched(repo):
+    """main (checked out) and feature-x; origin/main, origin/old, origin/HEAD \u2192 origin/main, upstream/z, tag v1."""
+    main = commit(repo, {"README.md": "# Main\n", "src/a.py": "a = 1\n"})
+    for name in ("feature-x", "tmp"):
+        git(repo, "branch", name)
+    commit_on(repo, "feature-x", {"README.md": "# Feature\n", "only.py": "x = 1\ny = 2\n"})
+    old = commit_on(repo, "tmp", {"README.md": "# Old\n", "old.txt": "old\n"})
+    git(repo, "branch", "-q", "-D", "tmp")
+    for ref, sha in (("origin/main", main), ("origin/old", old), ("upstream/z", main)):
+        git(repo, "update-ref", f"refs/remotes/{ref}", sha)
+    git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(repo, "tag", "v1")
+    return repo
+
+
+def browse(client, project_id, status=200, **params):
+    """The code view-model's response for these query params, checked for status and JSON."""
+    r = client.get(f"/api/pages/projects/{project_id}/code", params=params)
+    assert (r.status_code, r.headers["content-type"]) == (status, "application/json"), r.text
+    return r
+
+
+def test_code_branches_listed(client, branched):  # 054 BE1
+    page = browse(client, connect(client, branched)).json()
+    assert (page["branches"], page["branch"]) == (["feature-x", "main", "origin/old"], "main")
+
+
+def test_code_branch_tree(client, branched):  # 054 BE2
+    write(branched, {"src/a.py": "edited = 1\n", "untracked.txt": "u"})
+    page = browse(client, connect(client, branched), branch="feature-x").json()
+    assert page["tree"] == {"README.md": {"path": "README.md"}, "only.py": {"path": "only.py"},
+                            "src/": {"a.py": {"path": "src/a.py"}}}
+    assert (page["shown"], page["branch"]) == ("README.md", "main")
+    assert "<h1>Feature</h1>" in page["readme_html"]
+
+
+def test_code_branch_file(client, branched):  # 054 BE3
+    page = browse(client, connect(client, branched), branch="feature-x", path="only.py").json()
+    assert (page["view"], page["lang"], page["readme_html"]) == ({"text": "x = 1\ny = 2\n", "lines": 2}, "py", None)
+
+
+def test_code_origin_branch(client, branched):  # 054 BE4
+    page = browse(client, connect(client, branched), branch="origin/old").json()
+    assert page["tree"] == {"README.md": {"path": "README.md"}, "old.txt": {"path": "old.txt"},
+                            "src/": {"a.py": {"path": "src/a.py"}}}
+    assert page["shown"] == "README.md" and "<h1>Old</h1>" in page["readme_html"]
+
+
+class SmallBlobsOnly(SubprocessGit):
+    """054 Q5: a blob over 1 MB is never read."""
+    def blob(self, root, oid):
+        data, error = super().blob(root, oid)
+        assert data is None or len(data) <= 1024 * 1024, "read a blob over 1 MB"
+        return data, error
+
+
+def test_code_branch_blob_rules(client, branched):  # 054 BE5
+    commit_on(branched, "feature-x", {"logo.bin": b"\x00\x01\x02", "big.txt": b"x" * (1024 * 1024 + 1),
+                                      "max.txt": b"y" * (1024 * 1024), "empty.txt": b"", "latin.txt": b"caf\xe9\n"})
+    pid = connect(client, branched)
+    client.app.dependency_overrides[get_git] = SmallBlobsOnly
+    views = {p: browse(client, pid, branch="feature-x", path=p).json()["view"]
+             for p in ("logo.bin", "big.txt", "max.txt", "empty.txt", "latin.txt")}
+    assert views == {"logo.bin": {"note": "Binary file not shown."}, "big.txt": {"note": "File over 1 MB not shown."},
+                     "max.txt": {"text": "y" * (1024 * 1024), "lines": 1}, "empty.txt": {"note": "Empty file."},
+                     "latin.txt": {"text": "caf\ufffd\n", "lines": 1}}
+
+
+def test_code_checked_out_branch_is_working_tree(client, branched):  # 054 BE6
+    write(branched, {"README.md": "# Edited on disk\n"})
+    pid = connect(client, branched)
+    for query in ({}, {"path": "README.md"}):
+        assert browse(client, pid, branch="main", **query).json() == browse(client, pid, **query).json()
+    page = browse(client, pid, branch="main").json()
+    assert page["view"]["text"] == "# Edited on disk\n" and "<h1>Edited on disk</h1>" in page["readme_html"]
+
+
+def test_code_unborn_checked_out_branch(client, tmp_path):  # 054 Q2 (round 2): no commits, so nothing is listed
+    git(tmp_path, "init", "-q", "-b", "main", str(tmp_path / "unborn"))
+    pid = connect(client, tmp_path / "unborn")
+    page = browse(client, pid, branch="main").json()
+    assert page == browse(client, pid).json() and (page["branch"], page["branches"]) == ("main", [])
+
+
+def test_code_unlisted_branch_404(client, branched, tmp_path):  # 054 BE7
+    pid = connect(client, branched)
+    out = tmp_path / "x"
+    for value in ("nope", "HEAD", "main~1", "main^{tree}", git(branched, "rev-parse", "HEAD"), "refs/heads/main",
+                  "origin/HEAD", "origin/main", "upstream/z", "v1", "-h", f"--output={out}"):
+        assert browse(client, pid, 404, branch=value).json() == {"detail": f"{value} is not a branch in repo"}
+    assert not out.exists()
+
+
+def test_code_branch_not_shadowed_by_tag(client, branched):  # 054 BE8
+    git(branched, "tag", "feature-x", "main")
+    page = browse(client, connect(client, branched), branch="feature-x").json()
+    assert "only.py" in page["tree"] and "<h1>Feature</h1>" in page["readme_html"]
+
+
+def test_code_branch_untracked_paths_404(client, branched, tmp_path):  # 054 BE9
+    commit(branched, {"main_only.txt": "TOP-SECRET-main"})
+    (tmp_path / "outside.txt").write_text("TOP-SECRET-outside")
+    write(branched, {"untracked.txt": "TOP-SECRET-untracked"})
+    pid = connect(client, branched)
+    for path in ("main_only.txt", "../outside.txt", "untracked.txt"):
+        r = browse(client, pid, 404, branch="feature-x", path=path)
+        assert r.json() == {"detail": f"{path} is not a tracked file in repo"}
+        assert "TOP-SECRET" not in r.text
+
+
+def test_code_branch_symlink_is_its_target(client, branched, tmp_path):  # 054 BE10
+    (tmp_path / "secret.txt").write_text(SECRET)
+    git(branched, "checkout", "-q", "feature-x")
+    os.symlink(tmp_path / "secret.txt", branched / "leak")
+    commit(branched)
+    git(branched, "checkout", "-q", "main")
+    r = browse(client, connect(client, branched), branch="feature-x", path="leak")
+    assert r.json()["view"] == {"text": str(tmp_path / "secret.txt"), "lines": 1}
+    assert SECRET not in r.text
+
+
+@pytest.mark.parametrize("target", ["commit", "annotated tag"])
+def test_code_branch_gitlink_not_shown(client, branched, tmp_path, target):  # 054 Q5, Q6 (rounds 2-3 security)
+    """A gitlink naming a local commit, or a tag of a blob over 1 MB: never the object it names, never read."""
+    (tmp_path / "big").write_bytes(b"B" * (1024 * 1024 + 1))
+    git(branched, "tag", "-a", "-m", "t", "big", git(branched, "hash-object", "-w", str(tmp_path / "big")))
+    oid = git(branched, "rev-parse", "main" if target == "commit" else "big")
+    git(branched, "checkout", "-q", "feature-x")
+    git(branched, "update-index", "--add", "--cacheinfo", f"160000,{oid},sub")
+    git(branched, "commit", "-q", "-m", "gitlink")
+    git(branched, "checkout", "-q", "main")
+    pid = connect(client, branched)
+    client.app.dependency_overrides[get_git] = SmallBlobsOnly
+    r = browse(client, pid, branch="feature-x", path="sub")
+    assert r.json()["view"] == {"note": "Not shown: not a regular file."}
+    assert oid not in r.text and "Main" not in r.text and "BBBB" not in r.text
+
+
+@pytest.mark.parametrize("kind", ["missing", "not a repo"])
+@pytest.mark.parametrize("params", [{}, {"branch": "x"}])
+def test_code_branch_git_failure(client, tmp_path, kind, params):  # 054 BE11
+    path = tmp_path / kind.replace(" ", "-")
+    if kind == "not a repo":
+        path.mkdir()
+    page = browse(client, connect(client, path), **params).json()
+    assert page["error"].startswith("fatal: ")
+    assert (page["branch"], page["branches"], page["tree"]) == (None, [], {})
+
+
+def test_code_branch_docs():  # 054 BE12
+    ui = section("ui.md", "## 8.")
+    item = ui[ui.index("6. **Project code**"):ui.index("7. **fctl reference**")]
+    for text in ("?branch=", "git ls-tree", "\u00a78.6", "`+/\u2212`"):
+        assert text in item, text
+    wireframe = section("ui.md", "### 8.6")
+    assert "Branch [main \u25be]" in wireframe and "\nBranch main\n" not in wireframe
+    api_doc = section("data-model-and-api.md", "### 6.4")
+    assert "/projects/{id}/code?path=&branch=" in api_doc and "branches" in api_doc
+    assert "?branch=" in section("MVP.md", "### 4.5")
+    later = section("MVP.md", "## 9.").split("**Later**")[1]
+    assert "Worktree browsing on the code page." in later and "Branch and worktree browsing" not in later
 
 
 # --- GET /api/docs/fctl (029) ----------------------------------------------------------
