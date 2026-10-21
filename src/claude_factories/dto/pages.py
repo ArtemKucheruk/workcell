@@ -177,6 +177,7 @@ class Card(TaskItem):
     position: float
     started_at: str | None
     branch: str | None  # 042 Q1: for the Reviews rows
+    description_md: str  # 048 Q5: prefills the board's Edit form
 
     @computed_field
     def waiting(self) -> bool:

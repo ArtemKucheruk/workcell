@@ -211,7 +211,20 @@ PATCH /api/tasks/12                                               (fctl spec / f
 → {"spec_md":"## Acceptance criteria\n- 6th failed login within 60s → 429\n…"}
 → {"stage":"agent_review"}
 → {"status":"backlog","position":1.5}
+→ {"title":"Export CSV v2","description_md":"Columns: *id, title*"}                    (board Edit)
 ← 200 {"id":12,"status":"in_progress","stage":"agent_review"}     # 409 if manual move during a run
+  # one group per request; a mix → 422 "send exactly one of: spec_md, stage, status with position, or title
+  #   and/or description_md"
+  # Edit: title, description_md, or both, in any status and during a run; status and stage stay, so no event
+  # the title is trimmed, 422 {"detail":"title must not be blank"} if that leaves nothing; description_md is
+  #   stored as sent, "" clears it; null or a non-string → 422 (FastAPI's list detail)
+
+DELETE /api/tasks/12                                              (board Delete)
+← 204, empty body
+  # one transaction removes the task with its runs, rounds, round_files, verdicts, comments, decisions,
+  #   events, and transcripts rows
+  # on disk, the worktree, branch, run logs, and transcript copies stay
+  # 409 {"detail":"run #41 active"} while a run is running · 404 {"detail":"Task #99 not found"}
 
 POST /api/tasks/12/run                                            (Run, Retry, fctl run 12)
 ← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login"}
@@ -318,8 +331,8 @@ GET  /api/pages/dashboard                       tiles, the waiting and escalated
                                                 workspace → project, rounds per task
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
 GET  /api/pages/projects/{id}                   the project (path, remote_url, default branch, test_cmd, workspace),
-                                                factory state and hint, board cards with stage, branch, chips per
-                                                round, +/−, waiting, escalated, stalled
+                                                factory state and hint, board cards with stage, branch,
+                                                description_md, chips per round, +/−, waiting, escalated, stalled
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts)

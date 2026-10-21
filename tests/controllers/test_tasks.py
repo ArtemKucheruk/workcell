@@ -1,4 +1,6 @@
+import os
 import re
+from pathlib import Path
 
 import pytest
 from conftest import sql
@@ -394,3 +396,177 @@ def test_patch_invalid(client, project, body):  # AC33
 
 def test_patch_unknown_task(client):  # AC34
     assert patch(client, 999, {"stage": "build"}).status_code == 404
+
+
+# --- PATCH title / description_md (048: the board's Edit) ------------------------------
+
+MIXED = "send exactly one of: spec_md, stage, status with position, or title and/or description_md"
+# §5.1: the tables a task owns, plus tasks itself
+OWNED = ("tasks", "runs", "rounds", "round_files", "verdicts", "comments", "decisions", "events", "transcripts")
+
+
+def texts(task_id):
+    return sql("SELECT title, description_md FROM tasks WHERE id = ?", (task_id,))[0]
+
+
+def test_edit(client, project):  # 048 BE1
+    task_id = create(client, project, title="Export CSV", description_md="Columns: *id*").json()["id"]
+    sql("UPDATE tasks SET updated_at = ? WHERE id = ?", (OLD, task_id))
+    history = events(task_id)
+    r = patch(client, task_id, {"title": "  Export CSV v2  ", "description_md": "New *body*"})
+    assert r.status_code == 200
+    assert r.json() == {"id": task_id, "status": "backlog", "stage": None}
+    assert texts(task_id) == ("Export CSV v2", "New *body*")
+    assert row(task_id)[3] > OLD
+    assert events(task_id) == history
+
+
+def test_edit_one_field(client, project):  # 048 BE2
+    task_id = create(client, project, title="T1", description_md="d").json()["id"]
+    assert patch(client, task_id, {"title": "T2"}).status_code == 200
+    assert texts(task_id) == ("T2", "d")
+    assert patch(client, task_id, {"description_md": ""}).status_code == 200
+    assert texts(task_id) == ("T2", "")
+
+
+@pytest.mark.parametrize("status, stage", [
+    ("backlog", None), ("in_progress", "build"), ("review", "human_review"), ("done", None)])
+def test_edit_any_status(client, project, status, stage):  # 048 BE3
+    task_id = add_task(project, status, 2.5, stage)
+    if status == "done":
+        sql("UPDATE tasks SET done_at = ? WHERE id = ?", (OLD, task_id))
+    status_, stage_, position, _, done_at, _ = row(task_id)
+    r = patch(client, task_id, {"title": "T2", "description_md": "d"})
+    assert r.status_code == 200
+    assert r.json() == {"id": task_id, "status": status, "stage": stage}
+    after = row(task_id)
+    assert (*after[:3], after[4]) == (status_, stage_, position, done_at)
+    assert texts(task_id) == ("T2", "d")
+
+
+def test_edit_during_run(client, project):  # 048 BE3
+    task_id = add_task(project, "in_progress", stage="build")
+    add_run(task_id, "running")
+    assert patch(client, task_id, {"title": "T2"}).status_code == 200
+    assert texts(task_id) == ("T2", "")
+
+
+@pytest.mark.parametrize("body, detail", [
+    ({"title": "   "}, "title must not be blank"), ({"title": "", "description_md": "x"}, "title must not be blank"),
+    ({"title": None}, list), ({"description_md": None}, list), ({"title": 5}, list),
+])
+def test_edit_invalid(client, project, body, detail):  # 048 BE4
+    task_id = create(client, project, title="T1", description_md="d").json()["id"]
+    before, history = (row(task_id), texts(task_id)), events(task_id)
+    r = patch(client, task_id, body)
+    assert r.status_code == 422
+    if detail is list:  # the contract's FastAPI list detail
+        assert isinstance(r.json()["detail"], list)
+    else:
+        assert r.json() == {"detail": detail}
+    assert (row(task_id), texts(task_id)) == before
+    assert events(task_id) == history
+
+
+@pytest.mark.parametrize("body", [
+    {"title": "T2", "spec_md": "x"}, {"description_md": "d", "stage": "build"},
+    {"title": "T2", "description_md": "d", "status": "review", "position": 1},
+])
+def test_edit_mixed(client, project, body):  # 048 BE5
+    task_id = create(client, project, title="T1").json()["id"]
+    before, history = (row(task_id), texts(task_id)), events(task_id)
+    r = patch(client, task_id, body)
+    assert r.status_code == 422
+    assert r.json() == {"detail": MIXED}
+    assert (row(task_id), texts(task_id)) == before
+    assert events(task_id) == history
+
+
+def test_edit_unknown_task(client):  # 048 BE6
+    r = patch(client, 999, {"title": "x"})
+    assert r.status_code == 404
+    assert r.json() == {"detail": "Not Found"}
+
+
+# --- DELETE /api/tasks/{id} (048) ---------------------------------------------------------
+
+
+def delete(client, task_id):
+    return client.delete(f"/api/tasks/{task_id}", headers=H)
+
+
+def dump():
+    """Every row of each table a task owns."""
+    return {table: sql(f"SELECT * FROM {table} ORDER BY rowid") for table in OWNED}
+
+
+def full_task(project_id):
+    """A review task with an ended run (its log and transcript copy on disk), two rounds with files and
+    verdicts, an inline and a conversation comment, a decision, two events, and a transcripts row."""
+    task_id = add_task(project_id, "review", stage="human_review")
+    run_id = add_run(task_id, "succeeded")
+    home = Path(os.environ["FCTL_HOME"])
+    log, copy = home / "runs" / f"{run_id}.log", f"{run_id}/main.jsonl"
+    for path in (log, home / "transcripts" / copy):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+    sql("UPDATE runs SET log_path = ? WHERE id = ?", (str(log), run_id))
+    r1 = add_round(task_id, 1, files=[(1, 0)], verdicts={"code": "CHANGES", "ux": "PASS"})
+    r2 = add_round(task_id, 2, "agent", files=[(2, 1), (3, 0)], verdicts={"code": "PASS"})
+    sql("INSERT INTO comments (task_id, round_id, author, path, line, side, body_md, created_at)"
+        " VALUES (?, ?, 'code', 'f0.py', 1, 'new', 'inline', ?)", (task_id, r1, OLD))
+    sql("INSERT INTO comments (task_id, round_id, author, body_md, created_at) VALUES (?, ?, 'me', 'talk', ?)",
+        (task_id, r2, OLD))
+    sql("INSERT INTO decisions (task_id, round_id, actor, decision, created_at)"
+        " VALUES (?, ?, 'approver', 'APPROVE', ?)", (task_id, r2, OLD))
+    for from_status, to_status in ((None, "backlog"), ("backlog", "review")):
+        sql("INSERT INTO events (task_id, actor, from_status, to_status, created_at) VALUES (?, 'me', ?, ?, ?)",
+            (task_id, from_status, to_status, OLD))
+    sql("INSERT INTO transcripts (run_id, task_id, path, turns, input_tokens, cache_read_tokens, output_tokens)"
+        " VALUES (?, ?, ?, 3, 0, 0, 0)", (run_id, task_id, copy))
+    return task_id
+
+
+def test_delete(client, project):  # 048 BE7
+    task_id = full_task(project)
+    assert all(dump().values())  # every owned table has a row to remove
+    r = delete(client, task_id)
+    assert r.status_code == 204
+    assert r.content == b""
+    assert dump() == {table: [] for table in OWNED}
+    assert client.get(f"/api/tasks/{task_id}").status_code == 404
+
+
+def test_delete_keeps_other_task(client, project):  # 048 BE8
+    full_task(project)
+    kept = dump()
+    task_id = full_task(project)
+    assert delete(client, task_id).status_code == 204
+    assert dump() == kept
+
+
+def test_delete_refused_during_run(client, project):  # 048 BE9
+    task_id = full_task(project)
+    run_id = add_run(task_id, "running")
+    kept = dump()
+    r = delete(client, task_id)
+    assert r.status_code == 409
+    assert r.json() == {"detail": f"run #{run_id} active"}
+    assert dump() == kept
+
+
+def test_delete_unknown_task(client):  # 048 BE10
+    r = delete(client, 999)
+    assert r.status_code == 404
+    assert r.json() == {"detail": "Task #999 not found"}
+
+
+def test_delete_leaves_disk(client, project):  # 048 BE11
+    task_id = full_task(project)
+    [(log, copy)] = sql("SELECT r.log_path, t.path FROM runs r JOIN transcripts t ON t.run_id = r.id"
+                        " WHERE r.task_id = ?", (task_id,))
+    home = Path(os.environ["FCTL_HOME"])
+    assert Path(log).parent == home / "runs"
+    assert delete(client, task_id).status_code == 204
+    assert Path(log).is_file()
+    assert (home / "transcripts" / copy).is_file()

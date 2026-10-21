@@ -57,7 +57,8 @@ class TasksRepo:
 
     def for_project(self, project_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(
-            "SELECT id, title, status, stage, position, branch FROM tasks WHERE project_id = ?", (project_id,)
+            "SELECT id, title, description_md, status, stage, position, branch FROM tasks WHERE project_id = ?",
+            (project_id,),
         ).fetchall()
 
     def bottom_position(self, project_id: int, status: str) -> float:
@@ -77,6 +78,30 @@ class TasksRepo:
 
     def set_spec(self, task_id: int, spec_md: str, now: str) -> None:
         self.conn.execute("UPDATE tasks SET spec_md = ?, updated_at = ? WHERE id = ?", (spec_md, now, task_id))
+
+    def edit(self, task_id: int, title: str | None, description_md: str | None, now: str) -> None:
+        """048: a None argument keeps the stored value."""
+        self.conn.execute(
+            "UPDATE tasks SET title = COALESCE(?, title), description_md = COALESCE(?, description_md),"
+            " updated_at = ? WHERE id = ?",
+            (title, description_md, now, task_id),
+        )
+
+    def delete(self, task_id: int) -> None:
+        """048: §5.1's cascade, which the schema lacks (foreign_keys is on), children before parents."""
+        rounds = "SELECT id FROM rounds WHERE task_id = :task"
+        for statement in (
+            "DELETE FROM transcripts WHERE task_id = :task",
+            "DELETE FROM comments WHERE task_id = :task",
+            "DELETE FROM decisions WHERE task_id = :task",
+            f"DELETE FROM verdicts WHERE round_id IN ({rounds})",
+            f"DELETE FROM round_files WHERE round_id IN ({rounds})",
+            "DELETE FROM rounds WHERE task_id = :task",
+            "DELETE FROM runs WHERE task_id = :task",
+            "DELETE FROM events WHERE task_id = :task",
+            "DELETE FROM tasks WHERE id = :task",
+        ):
+            self.conn.execute(statement, {"task": task_id})
 
     def move(self, task_id: int, status: str, stage: str | None, done_at: str | None, now: str,
              position: float | None = None) -> None:

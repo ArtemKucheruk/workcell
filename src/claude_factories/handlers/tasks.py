@@ -1,4 +1,4 @@
-"""Tasks: list, create, get, and patch (docs/data-model-and-api.md §5.2, §6.2; docs/claude-code.md §7.5)."""
+"""Tasks: list, create, get, patch, and delete (docs/data-model-and-api.md §5.2, §6.2; docs/claude-code.md §7.5)."""
 
 from ..domain.enums import STAGE_STATUS, Stage, Status
 from ..domain.errors import Conflict, Invalid, NotFound
@@ -69,18 +69,30 @@ def get_task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: R
     )
 
 
+PATCH_GROUPS = ({"spec_md"}, {"stage"}, {"status", "position"}, {"title"}, {"description_md"},
+                {"title", "description_md"})
+EDIT = {"title", "description_md"}
+
+
 def patch_task(tasks: TasksRepo, runs: RunsRepo, task_id: int, body: TaskPatch) -> TaskPatched:
-    """The spec, a stage (status from §5.2, actor orchestrator), or a manual move (status and position,
-    stage cleared, actor me, refused while a run is active). One event per status or stage change."""
+    """The spec, a stage (status from §5.2, actor orchestrator), a manual move (status and position,
+    stage cleared, actor me, refused while a run is active), or an edit (title and/or description, any status,
+    048 Q1–Q3). One event per status or stage change."""
     sent = body.model_fields_set
-    if sent not in ({"spec_md"}, {"stage"}, {"status", "position"}):
-        raise Invalid("send exactly one of: spec_md, stage, or status with position")
+    if sent not in PATCH_GROUPS:
+        raise Invalid("send exactly one of: spec_md, stage, status with position, or title and/or description_md")
     if any(getattr(body, key) is None for key in sent):
         raise Invalid(f"{', '.join(sorted(sent))} must not be null")
+    title = None if body.title is None else body.title.strip()
+    if title == "":
+        raise Invalid("title must not be blank")
     now = tasks.lock()  # the 409 check, the update, and the event commit together
     task = tasks.get(task_id)
     if task is None:
         raise NotFound()
+    if sent <= EDIT:  # 048 Q2: status and stage stay, so no event
+        tasks.edit(task_id, title, body.description_md, now)
+        return TaskPatched(id=task_id, status=task["status"], stage=task["stage"])
     if body.spec_md is not None:
         tasks.set_spec(task_id, body.spec_md, now)
         return TaskPatched(id=task_id, status=task["status"], stage=task["stage"])
@@ -97,3 +109,13 @@ def patch_task(tasks: TasksRepo, runs: RunsRepo, task_id: int, body: TaskPatch) 
     if (status, stage) != (task["status"], task["stage"]):
         tasks.add_event(task_id, actor, task["status"], status, stage, now)
     return TaskPatched(id=task_id, status=status, stage=stage)
+
+
+def delete_task(tasks: TasksRepo, runs: RunsRepo, task_id: int) -> None:
+    """048: the task and every row it owns (§5.1), refused while a run is active (§5.2). Nothing on disk."""
+    tasks.lock()  # the 409 check and the deletes commit together
+    if not tasks.exists(task_id):
+        raise NotFound(f"Task #{task_id} not found")
+    if run := runs.running(task_id):
+        raise Conflict(f"run #{run['id']} active")
+    tasks.delete(task_id)

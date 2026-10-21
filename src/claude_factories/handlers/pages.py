@@ -209,14 +209,16 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
     if project is None:
         raise NotFound()
     listed = [t.model_dump() for t in list_tasks(projects, tasks, rounds, reviews, runs, project_id)]  # 035 Q10
-    # Q13, 042 BE4: the API returns neither position nor branch; read them after list_tasks so every listed
-    # task has a row
+    # Q13, 042 BE4, 048 Q5: the API returns neither position, branch, nor description_md; read them after
+    # list_tasks so every listed task has a row
     rows = {t["id"]: t for t in tasks.for_project(project_id)}
     # 014: nor the run's start (§6.2 keeps run {id, status}); read after it, so every listed run has one
     started = runs.started_at(project_id)
     columns = {status: [] for status in COLUMNS}
     for t in listed:
-        columns[t["status"]].append(t | {"position": rows[t["id"]]["position"], "branch": rows[t["id"]]["branch"],
+        row = rows[t["id"]]
+        columns[t["status"]].append(t | {"position": row["position"], "branch": row["branch"],
+                                         "description_md": row["description_md"],
                                          "started_at": t["run"] and started[t["run"]["id"]]})
     factory = factory_state(git, project["path"], project["default_branch"])
     return {

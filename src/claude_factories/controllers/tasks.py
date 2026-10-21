@@ -29,3 +29,8 @@ def get_task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs:
 @router.patch("/api/tasks/{task_id}")
 def patch_task(task_id: int, body: TaskPatch, tasks: Tasks, runs: Runs) -> TaskPatched:
     return handler.patch_task(tasks, runs, task_id, body)
+
+
+@router.delete("/api/tasks/{task_id}", status_code=204)
+def delete_task(task_id: int, tasks: Tasks, runs: Runs) -> None:
+    handler.delete_task(tasks, runs, task_id)

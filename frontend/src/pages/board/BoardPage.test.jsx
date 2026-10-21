@@ -8,9 +8,22 @@ const BOARD = '/api/pages/projects/3'
 const HINT = "factory isn't committed on main: Create factory on the project board, then commit it on main"
 const ACTIVE = [409, { detail: 'run #41 active' }]
 
-/** A Card as 020's dto/pages.py has it. */
+// 048: jsdom 30 has neither; these do what the delete dialog relies on: `open`, and close(value) setting returnValue and
+// firing `close` once, as Cancel, Esc, and a delete do
+const dialogProto = HTMLDialogElement.prototype
+dialogProto.showModal ??= function showModal() {
+  this.open = true
+}
+dialogProto.close ??= function close(value) {
+  if (!this.open) return
+  if (value !== undefined) this.returnValue = value
+  this.open = false
+  this.dispatchEvent(new Event('close'))
+}
+
+/** A Card as 020's dto/pages.py has it, with 048's description_md. */
 const card = (id, status, extra = {}) => ({
-  id, title: `Task ${id}`, status, stage: null, round: null, verdicts: null, additions: null, deletions: null,
+  id, title: `Task ${id}`, description_md: '', status, stage: null, round: null, verdicts: null, additions: null, deletions: null,
   run: null, position: id, started_at: null, waiting: false, escalated: false, stalled: false, ...extra,
 })
 /** A BoardPage view-model; `columns` fills in the rest of the four. */
@@ -24,6 +37,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 /** Renders /projects/3 with `page` as its view-model; mutate `responses` to change later replies. */
@@ -594,24 +608,24 @@ test('FE8: every card in every column has a Move button opening its own popover=
   }
 })
 
-test('FE9: a menu lists the other columns in order, then Up and Down in Backlog, not past its ends', async () => {
+test('FE9: a menu lists the other columns in order, then Up and Down in Backlog, not past its ends (048: then Edit and Delete)', async () => {
   const names = (id) => within(menuOf(id)).getAllByRole('button', { hidden: true }).map((b) => b.textContent)
   const { unmount } = await open(board(ALL))
-  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Down'])
-  expect(names(2)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Down'])
-  expect(names(3)).toEqual(['In progress', 'Review', 'Done', 'Up'])
-  expect(names(7)).toEqual(['Backlog', 'Review', 'Done'])
-  expect(names(12)).toEqual(['Backlog', 'In progress', 'Done'])
-  expect(names(9)).toEqual(['Backlog', 'In progress', 'Review'])
+  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Down', 'Edit', 'Delete'])
+  expect(names(2)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Down', 'Edit', 'Delete'])
+  expect(names(3)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Edit', 'Delete'])
+  expect(names(7)).toEqual(['Backlog', 'Review', 'Done', 'Edit', 'Delete'])
+  expect(names(12)).toEqual(['Backlog', 'In progress', 'Done', 'Edit', 'Delete'])
+  expect(names(9)).toEqual(['Backlog', 'In progress', 'Review', 'Edit', 'Delete'])
   unmount()
   await open(board({ backlog: [card(1, 'backlog')] }))
-  expect(names(1)).toEqual(['In progress', 'Review', 'Done'])
+  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Edit', 'Delete'])
 })
 
 test('FE10: every menu button hides its menu natively', async () => {
   await open(board(ALL))
   const buttons = [...document.querySelectorAll('[id^="move-"] button')]
-  expect(buttons).toHaveLength(4 + 5 + 4 + 3 + 3 + 3)
+  expect(buttons).toHaveLength(4 + 5 + 4 + 3 + 3 + 3 + 6 * 2) // 048: Edit and Delete on each
   for (const b of buttons) {
     expect(b.getAttribute('popovertarget')).toBe(b.closest('[popover]').id)
     expect(b.getAttribute('popovertargetaction')).toBe('hide')
@@ -753,6 +767,7 @@ function newTask() {
   const popover = document.getElementById(button.getAttribute('popovertarget'))
   popover.style.display = 'block' // jsdom's UA sheet hides it while closed
   popover.hidePopover = vi.fn()
+  popover.showPopover = vi.fn()
   return popover
 }
 
@@ -856,4 +871,248 @@ test("046 FE16: until the first load the board is a skeleton of the header and t
   const columns = [...grid[0].children]
   expect(columns).toHaveLength(4)
   for (const column of columns) expect(column.className).toMatch(cls('min-h-32'))
+})
+
+// --- 048: Edit and Delete --------------------------------------------------------------
+
+const CSV = card(14, 'backlog', { title: 'Export CSV', description_md: 'Columns: *id*' })
+const SAVED = [200, { id: 14, status: 'backlog', stage: null }]
+const Q8 =
+  'This removes its runs, rounds and their files, verdicts, comments, decisions, status history, and transcript records ' +
+  'from the app. Its worktree, branch, run logs, and copied transcript files stay on disk.'
+const moveOf = (id) => within(cardEl(id)).getByRole('button', { name: 'Move' })
+const titleBox = (form) => form.getByRole('textbox', { name: 'Title' })
+const descriptionBox = (form) => form.getByRole('textbox', { name: 'Description' })
+const type = (box, value) => fireEvent.change(box, { target: { value } })
+
+/** The board with #14 Export CSV in Backlog, then Edit chosen in its menu; `shown` is the submit label as showPopover ran. */
+async function editing(more = {}) {
+  const view = await open(board({ backlog: [CSV] }), more)
+  const popover = newTask()
+  let shown
+  popover.showPopover = vi.fn(() => (shown = popover.querySelector('form button').textContent))
+  pick(14, 'Edit')
+  return { ...view, popover, form: within(popover), shown }
+}
+
+test('048 FE1: every Move menu ends with a divider, then Edit and Delete, after the columns and any Up and Down', async () => {
+  await open(board(ALL))
+  const items = (id) => [...menuOf(id).children].slice(1).map((el) => (el.tagName === 'HR' ? '—' : el.textContent))
+  expect(items(2)).toEqual(['In progress', 'Review', 'Done', '—', 'Up', 'Down', '—', 'Edit', 'Delete'])
+  expect(items(7)).toEqual(['Backlog', 'Review', 'Done', '—', 'Edit', 'Delete'])
+  for (const id of [1, 2, 3, 7, 12, 9]) {
+    expect(items(id).slice(-3)).toEqual(['—', 'Edit', 'Delete'])
+    for (const name of ['Edit', 'Delete']) {
+      const item = within(menuOf(id)).getByRole('button', { name, hidden: true })
+      expect(item.getAttribute('popovertarget')).toBe(`move-${id}`)
+      expect(item.getAttribute('popovertargetaction')).toBe('hide')
+    }
+  }
+})
+
+test('048 FE2: Edit shows the new-task popover labelled Edit #14, filled from the card, with Save for Add task', async () => {
+  const { popover, form } = await editing()
+  expect(popover.id).toBe('new-task')
+  expect(popover.showPopover).toHaveBeenCalledTimes(1)
+  expect(popover.querySelector('form button').textContent).toBe('Save')
+  const edit = within(form.getByRole('form', { name: 'Edit #14' }))
+  expect(titleBox(edit).value).toBe('Export CSV')
+  expect(descriptionBox(edit).value).toBe('Columns: *id*')
+  expect(edit.getByRole('button', { name: 'Save' })).toBeTruthy()
+  expect(form.queryByRole('button', { name: 'Add task' })).toBeNull()
+})
+
+test('048 FE2: the form is in edit mode before showPopover runs, so its autofocus lands on the filled Title', async () => {
+  const { shown, form } = await editing()
+  expect(shown).toBe('Save')
+  expect(titleBox(form).hasAttribute('autofocus')).toBe(true)
+})
+
+test('048 FE3: Save patches the title and description as typed, then hides the popover, reloads, and says Saved #14', async () => {
+  const { fetch, form, popover } = await editing({ 'PATCH /api/tasks/14': SAVED })
+  type(titleBox(form), '  Export CSV v2  ')
+  type(descriptionBox(form), 'Columns: *id, title*')
+  fireEvent.click(form.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'PATCH', '/api/tasks/14')).toEqual({ title: '  Export CSV v2  ', description_md: 'Columns: *id, title*' })
+  expect(popover.hidePopover).toHaveBeenCalledTimes(1)
+  expect(status().textContent).toBe('Saved #14 Export CSV v2.')
+  expect(sends(fetch, 'POST', '/api/projects/3/tasks')).toEqual([])
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test("048 FE4: after a save's reload, focus is on card 14's Move button", async () => {
+  const { form, responses } = await editing({ 'PATCH /api/tasks/14': SAVED })
+  responses[`GET ${BOARD}`] = [200, board({ backlog: [card(15, 'backlog'), { ...CSV, title: 'Export CSV v2' }] })]
+  type(titleBox(form), 'Export CSV v2')
+  fireEvent.click(form.getByRole('button', { name: 'Save' }))
+  await screen.findByRole('link', { name: '#14 Export CSV v2' })
+  await waitFor(() => expect(document.activeElement).toBe(moveOf(14)))
+})
+
+test('048 FE5: a refused save shows its detail in the form and keeps the popover open with the input; the board alert stays empty', async () => {
+  const { fetch, form, popover } = await editing({ 'PATCH /api/tasks/14': [422, { detail: 'title must not be blank' }] })
+  type(titleBox(form), 'x')
+  type(descriptionBox(form), 'New *body*')
+  fireEvent.click(form.getByRole('button', { name: 'Save' }))
+  const alert = await form.findByRole('alert')
+  expect(alert.textContent).toBe('title must not be blank')
+  expect(alert.closest('form')).toBe(form.getByRole('form', { name: 'Edit #14' }))
+  expect(screen.getAllByRole('alert')).toEqual([alert])
+  expect(popover.hidePopover).not.toHaveBeenCalled()
+  expect(titleBox(form).value).toBe('x')
+  expect(descriptionBox(form).value).toBe('New *body*')
+  expect(form.getByRole('button', { name: 'Save' })).toBeTruthy()
+  expect(status().textContent).toBe('')
+  expect(loads(fetch)).toBe(1)
+})
+
+test('048 FE6: a poll that lands while the Edit form is open leaves the typed Title and Description as they were', async () => {
+  vi.useFakeTimers()
+  const responses = { [`GET ${BOARD}`]: [200, board({ backlog: [CSV] })] }
+  const fetch = mockFetch(responses)
+  renderAt('/projects/3')
+  await advance(0)
+  const form = within(newTask())
+  pick(14, 'Edit')
+  type(titleBox(form), 'Export CSV v2')
+  type(descriptionBox(form), 'Typed *here*')
+  responses[`GET ${BOARD}`] = [200, board({ backlog: [{ ...CSV, title: 'Renamed elsewhere', description_md: 'Changed elsewhere' }] })]
+  await advance(3000)
+  expect(loads(fetch)).toBe(2)
+  expect(screen.getByRole('link', { name: '#14 Renamed elsewhere' })).toBeTruthy()
+  expect(form.getByRole('form', { name: 'Edit #14' })).toBeTruthy()
+  expect(titleBox(form).value).toBe('Export CSV v2')
+  expect(descriptionBox(form).value).toBe('Typed *here*')
+})
+
+test('048 FE7: + New task clicked over an Edit keeps the popover open on the empty create form, which posts and never patches', async () => {
+  const { fetch, form } = await editing({ 'POST /api/projects/3/tasks': [201, { id: 15, status: 'backlog' }] })
+  type(titleBox(form), 'Changed')
+  const plus = screen.getByRole('button', { name: '+ New task' })
+  expect(fireEvent.click(plus)).toBe(false) // canceled, so the native toggle doesn't close the popover
+  expect(form.queryByRole('form', { name: 'Edit #14' })).toBeNull()
+  expect(form.queryByText('Edit #14')).toBeNull()
+  expect(titleBox(form).value).toBe('')
+  expect(descriptionBox(form).value).toBe('')
+  expect(document.activeElement).toBe(titleBox(form))
+  expect(form.queryByRole('button', { name: 'Save' })).toBeNull()
+  expect(fireEvent.click(plus)).toBe(true) // in create mode it toggles natively, as before
+  type(titleBox(form), 'Import CSV')
+  fireEvent.click(form.getByRole('button', { name: 'Add task' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Import CSV', description_md: '' })
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toEqual([])
+})
+
+test('048 FE8: Delete opens a modal <dialog> through showModal, named Delete #14 Export CSV?, with the Q8 text, Cancel, and a danger Delete', async () => {
+  let shown
+  const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function showModal() {
+    shown = this.textContent
+    this.open = true
+  })
+  await open(board({ backlog: [CSV] }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  pick(14, 'Delete')
+  expect(showModal).toHaveBeenCalledOnce()
+  expect(shown).toContain('Delete #14 Export CSV?') // its body rendered first, so showModal can focus Cancel
+  const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
+  expect(dialog.tagName).toBe('DIALOG')
+  expect(within(dialog).getByText(Q8)).toBeTruthy()
+  expect(within(dialog).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cancel', 'Delete'])
+  expect(document.getElementById(dialog.getAttribute('aria-describedby')).textContent).toBe(Q8) // round-1 review-ui nit
+  const remove = within(dialog).getByRole('button', { name: 'Delete' })
+  expect(remove.className).toMatch(cls('bg-danger'))
+  expect(remove.className).toMatch(cls('text-surface'))
+})
+
+test("048 FE9: the dialog's Delete sends DELETE, closes, reloads without the card, says Deleted #14, and focuses + New task", async () => {
+  const { fetch, responses } = await open(board({ backlog: [CSV, card(15, 'backlog')] }), { 'DELETE /api/tasks/14': [204] })
+  responses[`GET ${BOARD}`] = [200, board({ backlog: [card(15, 'backlog')] })]
+  pick(14, 'Delete')
+  const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'DELETE', '/api/tasks/14')).toBeUndefined()
+  expect(dialog.open).toBe(false)
+  await waitFor(() => expect(screen.queryByRole('link', { name: '#14 Export CSV' })).toBeNull())
+  expect(status().textContent).toBe('Deleted #14 Export CSV.')
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: '+ New task' }))
+  expect(screen.queryByRole('alert')).toBeNull()
+})
+
+test("048 FE10: Cancel, or the dialog closing on Esc, sends nothing and gives focus back to the card's Move button", async () => {
+  const { fetch } = await open(board({ backlog: [CSV, card(15, 'backlog')] }), { 'DELETE /api/tasks/15': [204] })
+  // a delete first leaves returnValue 'deleted' on the dialog, which the next open must clear
+  pick(15, 'Delete')
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  pick(14, 'Delete')
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(document.activeElement).toBe(moveOf(14))
+  document.activeElement.blur()
+  pick(14, 'Delete')
+  const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
+  act(() => dialog.close()) // what Esc does after its cancel event
+  expect(dialog.open).toBe(false)
+  expect(document.activeElement).toBe(moveOf(14))
+  expect(sends(fetch, 'DELETE', '/api/tasks/14')).toEqual([])
+  expect(loads(fetch)).toBe(2)
+})
+
+test('048 FE11: a refused delete shows its detail inside the dialog, which stays open; the board alert stays empty', async () => {
+  const { fetch } = await open(board({ backlog: [CSV] }), { 'DELETE /api/tasks/14': ACTIVE })
+  pick(14, 'Delete')
+  const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+  const alert = await within(dialog).findByRole('alert')
+  expect(alert.textContent).toBe('run #41 active')
+  expect(screen.getAllByRole('alert')).toEqual([alert])
+  expect(dialog.open).toBe(true)
+  expect(sent(fetch, 'DELETE', '/api/tasks/14')).toBeUndefined()
+  expect(status().textContent).toBe('')
+  expect(loads(fetch)).toBe(1)
+})
+
+test('048 FE12: Delete is disabled, with why in its title, on the running card only; Edit is enabled on every card', async () => {
+  const running = card(13, 'in_progress', { stage: 'build', run: { id: 41, status: 'running' }, started_at: '2026-10-18T01:02:00Z' })
+  const stalled = card(16, 'in_progress', { stage: 'build', run: { id: 42, status: 'failed' }, stalled: true })
+  await open(board({ ...ALL, in_progress: [running, stalled, ...ALL.in_progress] }))
+  expect(within(cardEl(13)).getByText(fullText('● running'))).toBeTruthy()
+  for (const id of [1, 2, 3, 13, 16, 7, 12, 9]) {
+    const menu = within(menuOf(id))
+    expect(menu.getByRole('button', { name: 'Edit', hidden: true }).disabled).toBe(false)
+    const remove = menu.getByRole('button', { name: 'Delete', hidden: true })
+    expect(remove.disabled).toBe(id === 13)
+    expect(remove.getAttribute('title')).toBe(id === 13 ? 'Stop the run to delete this task' : null)
+  }
+})
+
+/** The toggle event the browser fires as the popover closes on Esc or a click outside; jsdom has no Popover API. */
+const closePopover = (popover) => act(() => popover.dispatchEvent(Object.assign(new Event('toggle'), { newState: 'closed' })))
+
+test("048 Q9: an Edit closed by Esc gives focus back to the card's Move button unless focus went elsewhere, and leaves edit mode", async () => {
+  const { form, popover } = await editing()
+  titleBox(form).focus() // inside the popover, which the browser has just hidden
+  closePopover(popover)
+  expect(document.activeElement).toBe(moveOf(14))
+  expect(form.queryByRole('form', { name: 'Edit #14' })).toBeNull()
+  expect(form.getByRole('button', { name: 'Add task' })).toBeTruthy()
+  expect(fireEvent.click(screen.getByRole('button', { name: '+ New task' }))).toBe(true) // not canceled: it opens natively
+  pick(14, 'Edit')
+  const elsewhere = screen.getByRole('button', { name: 'Run next ▶' }) // a click outside that took focus keeps it
+  elsewhere.focus()
+  closePopover(popover)
+  expect(document.activeElement).toBe(elsewhere)
+})
+
+test('048 round-1 review-ui: + New task over an Edit, then Esc, gives focus to + New task, not body', async () => {
+  const { popover } = await editing()
+  const plus = screen.getByRole('button', { name: '+ New task' })
+  fireEvent.click(plus)
+  document.activeElement.blur() // the browser's focus fixup once the popover is hidden
+  expect(document.activeElement).toBe(document.body)
+  closePopover(popover)
+  expect(document.activeElement).toBe(plus)
 })
