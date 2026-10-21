@@ -393,7 +393,8 @@ class CodePage(BaseModel):
     """With `error` (git ls-files failed) only `project` is filled in."""
     project: CodeProject
     error: str | None = None
-    branch: str | None = None
+    branch: str | None = None  # the checked-out branch, whichever one is browsed
+    branches: list[str] = []  # 054 Q4: local names, then origin/<name> without a local twin
     tree: dict = {}  # Q12: lib.diff.file_tree's nesting, directory keys ending in "/"
     shown: str = ""
     view: TextView | NoteView | None = None

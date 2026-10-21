@@ -44,6 +44,11 @@ class Git(Protocol):
     def add_worktree(self, repo: str, branch: str, path: str, base: str) -> str | None: ...
     def ls_files(self, root: str) -> tuple[bytes | None, str | None]: ...
     def current_branch(self, root: str) -> tuple[bytes | None, str | None]: ...
+    def branch_refs(self, root: str) -> tuple[bytes | None, str | None]: ...
+    def ls_tree(self, root: str, ref: str) -> tuple[bytes | None, str | None]: ...
+    def object_id(self, root: str, ref: str, path: str) -> tuple[bytes | None, str | None]: ...
+    def object_size(self, root: str, oid: str) -> tuple[bytes | None, str | None]: ...
+    def blob(self, root: str, oid: str) -> tuple[bytes | None, str | None]: ...
     def init(self, path: str) -> None: ...
     def commit_all(self, path: str, message: str) -> None: ...
     def capture(self, path: str) -> tuple[str, str]: ...
@@ -79,6 +84,27 @@ class SubprocessGit:
 
     def current_branch(self, root: str) -> tuple[bytes | None, str | None]:
         return git_stdout(root, "branch", "--show-current")
+
+    def branch_refs(self, root: str) -> tuple[bytes | None, str | None]:
+        """054 Q4: the full refnames of the local and origin branches, one per line, in refname order."""
+        return git_stdout(root, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin")
+
+    def ls_tree(self, root: str, ref: str) -> tuple[bytes | None, str | None]:
+        """054: the files committed on the full refname `ref`, NUL-separated, like ls_files."""
+        return git_stdout(root, "ls-tree", "-r", "-z", "--name-only", ref)
+
+    def object_id(self, root: str, ref: str, path: str) -> tuple[bytes | None, str | None]:
+        """054: the id of `path`'s object on `ref`, resolved once so a moving ref can't swap it between reads."""
+        return git_stdout(root, "rev-parse", "--verify", "-q", f"{ref}:{path}")
+
+    def object_size(self, root: str, oid: str) -> tuple[bytes | None, str | None]:
+        """054 Q5: the object's size in bytes, without reading it."""
+        return git_stdout(root, "cat-file", "-s", oid)
+
+    def blob(self, root: str, oid: str) -> tuple[bytes | None, str | None]:
+        """054 Q6: a blob's raw bytes (a symlink's is its target path). Anything but a blob, like a gitlink's
+        commit, fails, and no diff, textconv, or filter runs."""
+        return git_stdout(root, "cat-file", "blob", oid)
 
     def init(self, path: str) -> None:
         """038: a new repo at `path` (parents created) on `main`."""

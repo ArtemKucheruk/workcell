@@ -324,9 +324,10 @@ test('050 FE21: docs/ui.md names Preline in §8, draws the tree in §8.3 and §8
   for (const text of ['[−] app/', '[+] tests/', '│  limits.py +42 −0']) expect(files).toContain(text)
   expect(ui.indexOf('### 8.6 Code')).toBeGreaterThan(ui.indexOf('### 8.5 Reviews'))
   const wire = ui.slice(ui.indexOf('### 8.6 Code'))
-  for (const text of ['personal › api-server › Code', 'api-server · personal', 'Factory: ready ✓', 'Branch main', '[−] app/', '[+] docs/', '  │  limits.py', '│  1 │ import time']) {
+  for (const text of ['personal › api-server › Code', 'api-server · personal', 'Factory: ready ✓', 'Branch [main ▾]', '[−] app/', '[+] docs/', '  │  limits.py', '│  1 │ import time']) {
     expect(wire).toContain(text)
   }
+  expect(wire.slice(0, wire.indexOf('### 8.7'))).not.toMatch(/^Branch main$/m) // 054 FE11: the picker replaced the label
   const mvp = read('../../docs/MVP.md')
   expect(mvp.slice(mvp.indexOf('### 4.2 Stack'), mvp.indexOf('### 4.3'))).toContain('`preline`')
 })

@@ -1,5 +1,5 @@
 import hljs from 'highlight.js/lib/common'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useId, useMemo } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { boardPage, codePage } from '../../api/pages.js'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
@@ -9,7 +9,7 @@ import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { Block, Crumbs, Lines, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
-import { muted } from '../../components/styles.js'
+import { field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
 // Q6: both <pre> share font, size, and line height, so the gutter's numbers line up with the code's lines
@@ -53,14 +53,14 @@ function Viewer({ page }) {
   return view ? <Code view={view} lang={lang} /> : null
 }
 
-/** 046 Q5: the breadcrumb, the project header with its branch line, then the file tree beside the viewer. */
+/** 046 Q5: the breadcrumb, the project header with its Branch picker line, then the file tree beside the viewer. */
 function CodeSkeleton() {
   return (
     <Skeleton>
       <Crumbs className="mb-2 w-48" />
       <ProjectHeaderSkeleton>
         <div className="basis-full">
-          <Block className="h-6 w-48" />
+          <Block className="h-7.5 w-48" />
         </div>
       </ProjectHeaderSkeleton>
       <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">
@@ -73,13 +73,15 @@ function CodeSkeleton() {
   )
 }
 
-/** docs/ui.md §8 item 6: the main checkout's tracked files, the README landing, and one file at a time. */
+/** docs/ui.md §8 item 6: the main checkout's or a branch's tracked files, the README landing, and one file at a time. */
 export function CodePage() {
   const { id } = useParams()
-  const [params] = useSearchParams()
+  const [params, setParams] = useSearchParams()
   const path = params.get('path') ?? '' // Q2: an empty path is the landing
-  // Q1: no polling; fetches on first load and on each path change
-  const load = useCallback(() => codePage(id, path), [id, path])
+  const wanted = params.get('branch') ?? '' // 054: sent as is, so ?branch=<checked-out> gets the working tree from the backend
+  // Q1: no polling; fetches on first load and on each path or branch change
+  const load = useCallback(() => codePage(id, path, wanted), [id, path, wanted])
+  const branchId = useId()
   const { data: page, error } = usePoll(load)
   // 042 Q2, 047 Q1: the header's factory state comes from the board view-model, once per project; until it arrives,
   // or if it fails, the header is the code view-model's `name · workspace` alone
@@ -93,7 +95,10 @@ export function CodePage() {
   // only until the first good load
   if (error?.status === 404) return <NotFound detail={error.message} />
   if (!page) return error ? <ErrorMessage error={error} /> : <CodeSkeleton />
-  const { project, branch, tree, shown } = page
+  // 054: a backend from before `branches` gives a picker with the checked-out branch alone, not a crash
+  const { project, branch, branches = [], tree, shown } = page
+  // 054 Q2: the browsed branch; none (the "" option, the working tree) for no ?branch= or the checked-out one
+  const browsed = wanted && wanted !== branch ? wanted : ''
   // usePoll keeps the last data across a project change: only this project's board view-model counts
   const head = board?.project.id === project.id ? board : { project }
 
@@ -104,9 +109,27 @@ export function CodePage() {
         <Breadcrumbs items={[...projectTrail({ ...project, project_id: project.id, project: project.name }), { label: 'Code' }]} />
       </div>
       <ProjectHeader project={head.project} factory={head.factory}>
+        {/* 054 Q8: only with a checked-out branch (or detached HEAD), as the old label; a sibling label, so the
+            select's name is Branch and not Branch plus its option. Q3: picking one drops ?path= for its README landing.
+            min-w-0 lets the line shrink to the header, so a long option can't widen the page; the select caps at 28rem */}
         {branch && (
-          <p className="basis-full">
-            Branch <code className="wrap-anywhere">{branch}</code>
+          <p className="min-w-0 basis-full text-sm">
+            <label htmlFor={branchId}>Branch</label>{' '}
+            <select
+              id={branchId}
+              value={browsed}
+              onChange={(event) => setParams(event.target.value ? { branch: event.target.value } : {})}
+              className={`${field} max-w-[min(100%,28rem)] font-mono`}
+            >
+              <option value="">{branch}</option>
+              {branches
+                .filter((name) => name !== branch)
+                .map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+            </select>
           </p>
         )}
       </ProjectHeader>
@@ -126,7 +149,7 @@ export function CodePage() {
               current={path}
               renderFile={(file, name) => (
                 <Link
-                  to={`/projects/${project.id}/code?${new URLSearchParams({ path: file.path })}`}
+                  to={`/projects/${project.id}/code?${new URLSearchParams(browsed ? { path: file.path, branch: browsed } : { path: file.path })}`}
                   aria-current={file.path === path ? 'page' : undefined}
                   className="text-fg aria-[current=page]:font-semibold aria-[current=page]:text-accent"
                 >

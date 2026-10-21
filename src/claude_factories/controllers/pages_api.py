@@ -161,7 +161,7 @@ def review(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews,
 
 
 @router.get("/api/pages/projects/{project_id}/code")
-def code(project_id: int, projects: Projects, git: GitAdapter, path: str = "") -> dto.CodePage:
-    page = code_handler.code(projects, git, project_id, path)
+def code(project_id: int, projects: Projects, git: GitAdapter, path: str = "", branch: str = "") -> dto.CodePage:
+    page = code_handler.code(projects, git, project_id, path, branch)
     text = None if path else page.get("view", {}).get("text")  # Q12: the landing page's README
     return page | {"project": obj(page["project"]), "readme_html": None if text is None else render(text)}

@@ -460,7 +460,7 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
-`/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=` ·
+`/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=&branch=` ·
 `/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
 `/projects/{id}/factories/{fid}` · `/projects/{id}/settings` ·
 `/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` ·
@@ -513,8 +513,12 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
 GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; timeline; files with diff rows carrying
                                                 side, old/new line, kind, text, and the path:side:line anchor; inline
                                                 comments
-GET  /api/pages/projects/{id}/code?path=        the project {id, name, path, workspace_id, workspace}, also on a git
-                                                failure; tree, README or file, branch
+GET  /api/pages/projects/{id}/code?path=&branch=  the project {id, name, path, workspace_id, workspace}, also on a
+                                                git failure; tree, README or file, branch (the checked-out one),
+                                                branches (local names, then origin/<name> with no local twin)
+  # ?branch= must be one of branches; the checked-out one (or none) is the working tree, any other is
+  #   read from git by its full refname: ls-tree for the tree, cat-file blob for the file
+  # 404 {"detail":"nope is not a branch in api-server"} for a branch that isn't listed
 ← 404 {"detail":"Task #99 not found"}
 
 GET  /api/pages/sidebar                                           (every route but the two below)

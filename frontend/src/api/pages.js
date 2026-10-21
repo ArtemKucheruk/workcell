@@ -13,9 +13,14 @@ export const taskPage = (id) => api(`/api/pages/tasks/${encodeURIComponent(id)}`
 export const reviewPage = (id, round) =>
   api(`/api/pages/tasks/${encodeURIComponent(id)}/review${round ? `?${new URLSearchParams({ round })}` : ''}`)
 
-/** 025 Q2: `?path=` only when the URL has one; without it the backend shows the README landing. */
-export const codePage = (id, path) =>
-  api(`/api/pages/projects/${encodeURIComponent(id)}/code${path ? `?${new URLSearchParams({ path })}` : ''}`)
+/**
+ * 025 Q2: `?path=` only when the URL has one; without it the backend shows the README landing.
+ * 054: then `?branch=`, also only when non-empty; without it the backend shows the working tree.
+ */
+export const codePage = (id, path, branch) => {
+  const query = String(new URLSearchParams(Object.entries({ path, branch }).filter(([, value]) => value)))
+  return api(`/api/pages/projects/${encodeURIComponent(id)}/code${query ? `?${query}` : ''}`)
+}
 
 /** 029: the fctl reference, pre-rendered with heading ids, and its headings for the Contents nav. */
 export const fctlDoc = () => api('/api/docs/fctl')
