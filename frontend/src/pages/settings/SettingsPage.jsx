@@ -1,10 +1,19 @@
-import { useEffect, useState } from 'react'
-import { getAuth, planName, sendLoginCode, startLogin } from '../../api/auth.js'
+import { useEffect, useRef, useState } from 'react'
+import { getAuth, logout, planName, sendLoginCode, startLogin } from '../../api/auth.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
+import { DeleteDialog } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Block, ButtonBlock, Rows, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
+
+/** 055 Q5: what Disconnect does, and that outside Docker it is the machine's own claude login too. */
+const DISCONNECT_TEXT = (
+  <>
+    This signs the app out of Claude with <code>claude auth logout</code>. Runs stay disabled until you log in again.
+    Outside Docker, this is also your own claude login on this machine.
+  </>
+)
 
 /** 039: GET /api/auth's answer as rows; Q3: a login that isn't claude.ai reports no method, plan, or account. */
 function LoginRows({ auth }) {
@@ -36,7 +45,8 @@ function LoginRows({ auth }) {
 
 /**
  * docs/ui.md §8 item 9: the Claude login runs will use, and a claude.ai login done in the browser (039). The page
- * loads /api/auth once; a successful code's response replaces it. Subscription only (MVP §4.3): no API key field.
+ * loads /api/auth once; a successful code's or Disconnect's response replaces it. Subscription only (MVP §4.3): no API
+ * key field. 055: Disconnect, shown only while runs are enabled (Q8), asks in the delete dialog, then posts the logout.
  */
 export function SettingsPage() {
   const { data: loaded, error } = usePoll(getAuth) // no interval: once
@@ -46,6 +56,10 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState(null)
   const [loggedIn, setLoggedIn] = useState(false)
+  const [asking, setAsking] = useState(false) // the Disconnect dialog is open
+  const signedOut = useRef(null) // the logout's body, applied once the dialog has closed so its title doesn't change
+  const loginButton = useRef(null)
+  const disconnectButton = useRef(null)
   useEffect(() => {
     document.title = 'Settings · Claude Factories'
   }, [])
@@ -108,9 +122,17 @@ export function SettingsPage() {
               {shown.email ? `Logged in as ${shown.email}` : 'Logged in'}
             </p>
           )}
-          <ActionButton action={begin} className={`${button} justify-self-start`}>
-            {label}
-          </ActionButton>
+          <div className="flex flex-wrap gap-2">
+            <ActionButton ref={loginButton} action={begin}>
+              {label}
+            </ActionButton>
+            {shown.runs_enabled && (
+              // 055: outlined, its danger kept for the dialog's filled confirm
+              <button ref={disconnectButton} type="button" onClick={() => setAsking(true)} className={`${button} text-danger`}>
+                Disconnect
+              </button>
+            )}
+          </div>
           {url && (
             <form onSubmit={submit} className="grid gap-2">
               <p>
@@ -136,6 +158,28 @@ export function SettingsPage() {
             </form>
           )}
           {failure && <ErrorMessage error={failure} />}
+          {asking && (
+            <DeleteDialog
+              title={shown.email ? `Disconnect ${shown.email}?` : 'Disconnect Claude?'}
+              text={DISCONNECT_TEXT}
+              confirmLabel="Disconnect"
+              remove={async () => {
+                signedOut.current = await logout()
+              }}
+              onDeleted={() => {
+                setAuth(signedOut.current)
+                setUrl(null)
+                setLoggedIn(false)
+                setFailure(null)
+                // Q6: the opener is gone, so focus goes to Log in with Claude; here, as the dialog may have closed already
+                loginButton.current?.focus()
+              }}
+              onClose={(done) => {
+                setAsking(false)
+                if (!done) disconnectButton.current?.focus()
+              }}
+            />
+          )}
         </section>
       )}
     </>

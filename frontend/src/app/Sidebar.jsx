@@ -15,12 +15,15 @@ const row = 'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left hov
 // Q9: NavLink marks the current page itself; the others drop the base `a` accent
 const navLink = ({ isActive }) => `${row} ${isActive ? 'bg-surface font-medium text-accent' : 'text-fg'}`
 
-/** docs/ui.md §8, Q8: the login runs will use, as handlers/pages.py claude_login words it; 039: a link to Settings. */
+/**
+ * docs/ui.md §8, Q8: the login runs will use, as handlers/pages.py claude_login words it; 039: a link to Settings.
+ * 055 Q1: /api/auth gives the same nulls for no login and a non-claude.ai one, so runs disabled reads Not signed in.
+ */
 function AuthBadge({ auth }) {
   if (!auth.runs_enabled) {
     return (
       <Link to="/settings" className="text-sm font-semibold text-danger">
-        API key — runs disabled
+        Not signed in — runs disabled
       </Link>
     )
   }

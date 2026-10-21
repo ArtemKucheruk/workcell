@@ -41,10 +41,10 @@ test('FE2 (AC14): plan null with runs enabled reads like the Jinja badge', async
   expect(await sidebar().findByText('Claude: subscription ✓')).toBeTruthy()
 })
 
-test('FE2 (AC15): runs disabled shows the red API key badge', async () => {
+test('FE2 (AC15): runs disabled shows the red Not signed in badge', async () => {
   mockFetch(dashboard([200, { auth_method: null, plan: null, runs_enabled: false }]))
   renderAt('/')
-  const badge = await sidebar().findByText('API key — runs disabled')
+  const badge = await sidebar().findByText('Not signed in — runs disabled')
   expect(badge.className).toMatch(/(^|\s)text-danger(\s|$)/)
 })
 
@@ -54,7 +54,7 @@ test('FE2 (AC16): a failed /api/auth shows no badge and the page still renders',
     const { unmount } = renderAt('/')
     expect(await screen.findByRole('heading', { name: 'Dashboard' })).toBeTruthy()
     await waitFor(() => expect(fetched(fetch)).toContain('/api/auth'))
-    expect(screen.queryByText(/Claude:|API key/)).toBeNull()
+    expect(screen.queryByText(/Claude:|runs disabled/)).toBeNull()
     expect(sidebar().getByRole('link', { name: 'Dashboard' })).toBeTruthy()
     unmount()
   }
@@ -118,7 +118,7 @@ test('FE2 (039 AC17): the badge links to /settings, and the runs-disabled one st
   unmount()
   mockFetch(dashboard([200, OFF]))
   renderAt('/')
-  const off = await sidebar().findByRole('link', { name: 'API key — runs disabled' })
+  const off = await sidebar().findByRole('link', { name: 'Not signed in — runs disabled' })
   expect(off.getAttribute('href')).toBe('/settings')
   expect(off.className).toMatch(/(^|\s)text-danger(\s|$)/)
 })
@@ -133,14 +133,14 @@ test('FE2 (039 AC18): the sidebar re-fetches /api/auth every 3 s and the badge f
     renderAt('/')
     await advance(0)
     const side = sidebar()
-    expect(side.getByText('API key — runs disabled')).toBeTruthy()
+    expect(side.getByText('Not signed in — runs disabled')).toBeTruthy()
     responses['GET /api/auth'] = [200, PRO]
     await advance(2999)
     expect(auths()).toBe(1)
     await advance(1)
     expect(auths()).toBe(2)
     expect(side.getByText('Claude: Pro ✓')).toBeTruthy()
-    expect(side.queryByText('API key — runs disabled')).toBeNull()
+    expect(side.queryByText('Not signed in — runs disabled')).toBeNull()
   } finally {
     vi.useRealTimers()
   }
