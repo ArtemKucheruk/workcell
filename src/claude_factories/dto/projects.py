@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ConnectBody(BaseModel):
@@ -25,13 +25,26 @@ class ProjectOut(BaseModel):
     factory: Literal["ready", "uncommitted", "none"]
 
 
-class MoveBody(BaseModel):
-    workspace_id: int = Field(ge=-2**63, lt=2**63)  # SQLite INTEGER bounds: a 404, not an OverflowError's 500
+class ProjectPatch(BaseModel):
+    """049 Q1: any non-empty subset, applied together."""
+    workspace_id: int | None = Field(None, ge=-2**63, lt=2**63)  # SQLite INTEGER bounds: a 404, not a 500
+    name: str | None = None
+    test_cmd: str | None = None
+
+    @field_validator("workspace_id", "name", "test_cmd")
+    @classmethod
+    def not_null(cls, value):
+        """048's TaskPatch.not_null: a sent null gets FastAPI's list detail; an omitted key stays None."""
+        if value is None:
+            raise ValueError("must not be null")
+        return value
 
 
-class MoveOut(BaseModel):
+class ProjectPatched(BaseModel):
     id: int
     workspace_id: int
+    name: str
+    test_cmd: str | None
 
 
 class ContextBody(BaseModel):

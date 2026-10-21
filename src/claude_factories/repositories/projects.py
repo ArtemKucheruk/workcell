@@ -35,10 +35,18 @@ class ProjectsRepo:
             (workspace_id, name, remote_url, default_branch, test_cmd, project_id),
         )
 
-    def move(self, project_id: int, workspace_id: int) -> bool:
-        """False if there is no such project."""
-        moved = self.conn.execute("UPDATE projects SET workspace_id = ? WHERE id = ?", (workspace_id, project_id))
-        return moved.rowcount > 0
+    def patch(self, project_id: int, fields: dict) -> sqlite3.Row | None:
+        """049: sets `fields`, whose keys are ProjectPatch's columns; the row after, or None if there is no such
+        project."""
+        sets = ", ".join(f"{column} = :{column}" for column in fields)
+        return self.conn.execute(
+            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, test_cmd",
+            fields | {"id": project_id},
+        ).fetchone()
+
+    def delete(self, project_id: int) -> None:
+        """049: the projects row only; its tasks go first, through TasksRepo.delete."""
+        self.conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
     def for_factory(self, project_id: int) -> sqlite3.Row | None:
         """What Create factory renders and checks, with the workspace's name for its hint."""

@@ -1,13 +1,13 @@
-"""docs/data-model-and-api.md §6.1: connect a project, find one by path, move one to another workspace, and
-get or put its context."""
+"""docs/data-model-and-api.md §6.1: connect a project, find one by path, patch (move, rename, test command) or
+delete one, and get or put its context."""
 
 import os
 
 from fastapi import APIRouter, HTTPException, Request
 
-from ..dto.projects import ConnectBody, ConnectOut, ContextBody, ContextOut, MoveBody, MoveOut, ProjectOut
+from ..dto.projects import ConnectBody, ConnectOut, ContextBody, ContextOut, ProjectOut, ProjectPatch, ProjectPatched
 from ..handlers import projects as handler
-from ..server.deps import GitAdapter, Projects, Workspaces
+from ..server.deps import GitAdapter, Projects, Runs, Tasks, Workspaces
 
 router = APIRouter()
 
@@ -33,10 +33,14 @@ def find_project(path: str, projects: Projects, git: GitAdapter) -> ProjectOut:
 
 
 @router.patch("/api/projects/{project_id}")
-def move_project(project_id: int, body: MoveBody, workspaces: Workspaces, projects: Projects) -> MoveOut:
-    """404 if either id is unknown, before any write."""
-    handler.move_project(workspaces, projects, project_id, body.workspace_id)
-    return MoveOut(id=project_id, workspace_id=body.workspace_id)
+def patch_project(project_id: int, body: ProjectPatch, workspaces: Workspaces, projects: Projects,
+                  tasks: Tasks) -> ProjectPatched:
+    return handler.patch_project(workspaces, projects, tasks, project_id, body)
+
+
+@router.delete("/api/projects/{project_id}", status_code=204)
+def delete_project(project_id: int, projects: Projects, tasks: Tasks, runs: Runs) -> None:
+    handler.delete_project(projects, tasks, runs, project_id)
 
 
 @router.get("/api/projects/{project_id}/context")

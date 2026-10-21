@@ -7,6 +7,13 @@ export const button =
 // Q10: moved unchanged; which padding wins follows Tailwind's CSS order, not this string's
 export const smallButton = `${button} px-2 py-0.5 text-sm`
 
+// 048, moved here by 049: a filled danger button for the delete dialogs' Delete and the Danger zones
+export const danger =
+  'cursor-pointer rounded-md border border-danger bg-danger px-3 py-1 font-medium text-surface hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+
+// 049: a settings page's titled block, under a rule; its h2 drops the heading scale's margins with m-0
+export const section = 'grid gap-3 border-t border-line pt-6'
+
 // Q6: one field for every page; the opacity keeps a disabled box looking disabled
 export const field = 'rounded-md border border-line bg-surface px-2 py-1 disabled:opacity-50'
 

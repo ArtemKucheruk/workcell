@@ -1,7 +1,10 @@
 import { api } from './client.js'
 
-export const moveProject = (id, workspaceId) =>
-  api(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: { workspace_id: workspaceId } })
+/** 049: any of workspace_id, name, and test_cmd, sent as given; the reply is the project after the update. */
+export const patchProject = (id, fields) =>
+  api(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: fields })
+
+export const deleteProject = (id) => api(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
 
 export const createFactory = (id, overwrite) =>
   api(`/api/projects/${encodeURIComponent(id)}/factory`, { method: 'POST', body: { overwrite } })

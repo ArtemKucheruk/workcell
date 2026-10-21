@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation, useMatches } from 'react-router'
 import { getAuth } from '../api/auth.js'
 import { sidebarPage } from '../api/pages.js'
@@ -16,7 +16,7 @@ function routeIds(pathname) {
   return {
     query: task ? { task } : transcript ? { transcript } : undefined,
     project: id(/^\/projects\/(\d+)(?:\/(?:code|reviews|context|settings))?\/?$/),
-    workspace: id(/^\/workspaces\/(\d+)\/?$/),
+    workspace: id(/^\/workspaces\/(\d+)(?:\/settings)?\/?$/), // 049 FE24
   }
 }
 
@@ -48,6 +48,10 @@ export function Layout() {
   const [selected, setSelected] = useState(null)
   const [open, setOpen] = useState(() => new Set())
   const [drawer, setDrawer] = useState(false)
+  // 049 Q13: a rename or move refetches the sidebar with no navigation, by bumping the fetch effect; Sidebar and the
+  // settings pages (through the Outlet context) call it
+  const [reloads, setReloads] = useState(0)
+  const reloadSidebar = useCallback(() => setReloads((n) => n + 1), [])
   const menu = useRef(null)
   const dialog = useRef(null)
 
@@ -64,7 +68,7 @@ export function Layout() {
     })
   }
 
-  // Q11: one fetch per pathname or search change, never polled; Q12: a failure stays until the next one
+  // Q11: one fetch per pathname or search change (or reload), never polled; Q12: a failure stays until the next one
   useEffect(() => {
     let alive = true
     const ids = routeIds(pathname)
@@ -88,7 +92,7 @@ export function Layout() {
     return () => {
       alive = false
     }
-  }, [pathname, search])
+  }, [pathname, search, reloads])
 
   // 050 Q8: Preline's plugins bind to the markup a route renders; optional, since only the built app loads Preline
   useEffect(() => {
@@ -111,7 +115,7 @@ export function Layout() {
     menu.current.focus()
   }
 
-  const props = { auth, sidebar, selected, onSelect: select, open, onToggle: toggle }
+  const props = { auth, sidebar, selected, onSelect: select, open, onToggle: toggle, onReload: reloadSidebar }
   return (
     <div className="md:flex">
       <div className="sticky top-0 hidden h-screen w-60 shrink-0 overflow-y-auto border-r border-line bg-raised md:block">
@@ -130,7 +134,7 @@ export function Layout() {
         </button>
         {/* Q14: the board, review, and code pages take the full width; text pages keep a readable one */}
         <main className={wide ? 'px-6 py-6' : 'mx-auto max-w-6xl px-6 py-6'}>
-          <Outlet />
+          <Outlet context={{ reloadSidebar }} />
         </main>
       </div>
       <dialog

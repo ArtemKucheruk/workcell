@@ -48,13 +48,33 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
   `warning` pill shown when above 0), **Context**, and **Settings**, and the current page's project opens
   by itself with its current link marked.
+- Each project row, at its right, and the workspace switcher, beside it, have a `⋯` button
+  (`Actions for <project>`, `Actions for workspace <name>`) that opens a native popover menu.
+  The project's holds **Rename**, a **Settings** link, a muted `Move to workspace` caption with
+  one button per other workspace (both left out when there is none), and, under a divider,
+  **Delete** in `danger`. The workspace's holds **Rename**, a **Settings** link (item 13), and,
+  under a divider, **Delete**. From `md` up a `⋯` is hidden by opacity only, never `display`, so
+  Tab still reaches it: it shows while its row is hovered or holds focus, or while its menu is
+  open. Below `md` it always shows.
+- **Rename** replaces the project's name, or the workspace `<select>`, with a text field holding
+  the name, focused and selected. Enter sends the PATCH (§6.1), even with the name unchanged.
+  Esc or leaving the field cancels with no request. A refusal shows its detail beside the field,
+  which stays. After a save or Esc, focus is on the row's `⋯`.
+- **Move to workspace** sends `PATCH /api/projects/{id}` with the chosen `workspace_id`, then
+  focus goes to the workspace `<select>`. A refusal shows its detail in the sidebar.
+- **Delete** opens a modal `<dialog>` (§8.4) with **Cancel** first, then **Delete** filled
+  `danger` with `surface` text. It is never disabled ahead of time: the server decides, and its
+  409 detail shows inside the dialog, which stays open. A deleted project's app goes to
+  `/workspaces/{id}`, a deleted workspace's to `/`.
 - Bottom: **Dashboard**, the fctl reference (item 7), and the login runs will use, from
   `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓` when it is a
   subscription, or a red `API key — runs disabled` otherwise. The badge links to `/settings`
   (item 9).
 
 The sidebar's data comes from `GET /api/pages/sidebar` (§6.4) on load and after each
-navigation, and is not polled. The selected workspace is the current page's project's (or
+navigation, and is not polled. A rename or move, from the sidebar or a Settings page, also
+reloads it, with no navigation; other pages showing the old name catch up on their next load
+or poll. The selected workspace is the current page's project's (or
 the `/workspaces/{id}` page's), else the last one shown, kept in `localStorage`, else the
 first. Below `md` the sidebar is a `<dialog>` drawer behind a **Menu** button: Esc and the
 backdrop close it, and focus returns to the button. The board, review, and code pages use
@@ -120,7 +140,8 @@ Loading, failures, times, and motion are the same on every page:
 2. **Workspace** (`/workspaces/{id}`): one row per project with name, path, counts per
    status, factory state (none / uncommitted / ready), and last activity as a relative time
    (`3h ago`). **+ Workspace** creates one. For each project, its Settings page (item 12) moves
-   it to another workspace.
+   it to another workspace. The workspace's own Settings page (item 13, from the sidebar's
+   workspace `⋯`) renames or deletes it.
 3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header is the project
    header plus **+ New task**, **Run next**, and the hint for why runs are off. **+ New task**
    opens its form in a native popover, which Esc or a click outside closes, and a created task
@@ -239,14 +260,33 @@ Loading, failures, times, and motion are the same on every page:
     - Beside it, a **Preview** of the saved `context_html`, refreshed by each Save.
     - Loaded once, not polled.
 12. **Project settings** (`/projects/{id}/settings`)
-    - Path, remote, default branch, and test command, read-only.
+    - At the top of Repository, one form: **Name** and **Test command** (empty when not set),
+      with one **Save** sending both as typed (`PATCH /api/projects/{id}`). A blank test command
+      clears it, shown as `not set`. A refusal shows its detail in the form, which keeps what was
+      typed. A save also reloads the sidebar.
+    - Path, remote, and default branch, read-only, with the note: "Path, remote, and default
+      branch come from `fctl connect`. Rerunning it in the repo also resets the name, and the
+      test command when it passes one."
     - The factory state with its hint, plus **Create factory** (with *Overwrite*) unless
       ready, and its written and skipped lists and commit hint (§3.2).
     - **Import** takes a task bundle (a `.zip` from **Export**) from a file input, disabled
       until a file is chosen, and posts it raw to `POST /api/projects/{id}/import`.
       `Imported #12 <title>` links to the task, or the refusal's detail shows.
     - **Move** to another workspace (`PATCH /api/projects/{id}`).
+    - **Danger zone**, the last section: **Delete project** (filled `danger`) opens the
+      sidebar's project delete dialog (§8.4). On 204 the app goes to `/workspaces/{id}`.
     - Loaded once, and reloaded after each of these actions.
+13. **Workspace settings** (`/workspaces/{id}/settings`)
+    - Loads `GET /api/pages/workspaces/{id}` once, and again after a rename. The sidebar
+      selects this workspace. The title reads `<name> · Settings`. No breadcrumb.
+    - `h1` the workspace's name, then a **Name** form with **Save**
+      (`PATCH /api/workspaces/{id}`). A refusal, such as `workspace work already exists`, shows
+      its detail in the form, which keeps the typed name. A save also reloads the sidebar.
+    - **Projects**: each project's name, linking to its Settings (where Move and Delete live),
+      and its path. With none, `No projects.`
+    - **Danger zone**: **Delete workspace** opens the sidebar's workspace delete dialog (§8.4).
+      On 204 the app goes to `/`; a workspace that still holds projects gets its 409 inside the
+      dialog.
 
 ### 8.1 Board
 ```
@@ -340,24 +380,55 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 
 ### 8.4 Sidebar
 ```
-┌──────────────────────┐
-│ Claude Factories     │
-│ Workspace [personal▾]│
-│ + New workspace      │
-│                      │
-│ ▾ api-server         │
-│     Board            │  ← current page: aria-current, accent
-│     Code             │
-│     Reviews      (2) │  ← waiting on me or escalated, when above 0: a warning pill
-│     Context          │
-│     Settings         │
-│ ▸ web                │
-│                      │
-│ Dashboard            │
-│ fctl reference       │
-│ Claude: Pro ✓        │
-└──────────────────────┘
+┌──────────────────────────┐
+│ Claude Factories         │
+│ Workspace [personal▾] ⋯  │  ← ⋯: the workspace menu
+│ + New workspace          │
+│                          │
+│ ▾ api-server           ⋯ │  ← ⋯: the project menu
+│     Board                │  ← current page: aria-current, accent
+│     Code                 │
+│     Reviews          (2) │  ← waiting on me or escalated, when above 0: a warning pill
+│     Context              │
+│     Settings             │
+│ ▸ web                  ⋯ │
+│                          │
+│ Dashboard                │
+│ fctl reference           │
+│ Claude: Pro ✓            │
+└──────────────────────────┘
 below md: [☰ Menu] opens the same sidebar as a drawer (<dialog>)
+⋯: from md up, opacity 0 until its row is hovered or holds focus, or its menu is open; below md always shown
+
+project ⋯                  workspace ⋯
+┌───────────────────┐      ┌────────────┐
+│ Rename            │      │ Rename     │
+│ Settings          │      │ Settings   │
+│ Move to workspace │      │ ────────── │  ← Move to workspace: a muted caption, one button per other workspace
+│   work            │      │ Delete     │  ← text-danger
+│ ───────────────── │      └────────────┘
+│ Delete            │  ← text-danger
+└───────────────────┘
+
+Rename in place (Enter saves, Esc or blur cancels)
+│ ▾ [api-server______]   ⋯ │  ← the name, focused and selected; the workspace's replaces its <select>
+│   name must not be blank │  ← a refusal, beside the field, which stays
+
+┌ Delete project api-server? ─────────────────────────────────────────────┐
+│ This removes its tasks, with their runs, rounds and their files,        │
+│ verdicts, comments, decisions, status history, and transcript records,  │
+│ from the app. The repo, its worktrees and branches, run logs, and       │
+│ copied transcript files stay on disk.                                   │
+│ run #41 active                          ← a refusal, the dialog stays   │
+│                                                     [Cancel] [Delete]   │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌ Delete workspace personal? ─────────────────────────────────────────────┐
+│ This removes the workspace from the app. It must hold no projects:      │
+│ move or delete them first.                                              │
+│                                                     [Cancel] [Delete]   │
+└─────────────────────────────────────────────────────────────────────────┘
+[Delete]: filled danger, surface text · Cancel comes first and takes focus
 ```
 
 ### 8.5 Reviews

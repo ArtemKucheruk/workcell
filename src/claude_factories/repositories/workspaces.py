@@ -25,3 +25,16 @@ class WorkspacesRepo:
 
     def get(self, workspace_id: int) -> sqlite3.Row | None:
         return self.conn.execute("SELECT id, name FROM workspaces WHERE id = ?", (workspace_id,)).fetchone()
+
+    def by_name(self, name: str) -> int | None:
+        row = self.conn.execute("SELECT id FROM workspaces WHERE name = ?", (name,)).fetchone()
+        return None if row is None else row[0]
+
+    def project_count(self, workspace_id: int) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM projects WHERE workspace_id = ?", (workspace_id,)).fetchone()[0]
+
+    def rename(self, workspace_id: int, name: str) -> None:
+        self.conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", (name, workspace_id))
+
+    def delete(self, workspace_id: int) -> None:
+        self.conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))

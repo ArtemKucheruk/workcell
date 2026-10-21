@@ -1,12 +1,14 @@
-"""Projects: connect, find by path, move to another workspace, and the project context
+"""Projects: connect, find by path, patch (move, rename, test command), delete, and the project context
 (docs/data-model-and-api.md §6.1)."""
 
 from .. import config
 from ..adapters.git import Git
-from ..domain.errors import NotFound, TooLarge
-from ..dto.projects import ConnectBody, ConnectOut, ContextOut, ProjectOut
+from ..domain.errors import Conflict, Invalid, NotFound, TooLarge
+from ..dto.projects import ConnectBody, ConnectOut, ContextOut, ProjectOut, ProjectPatch, ProjectPatched
 from ..lib.markdown import render
 from ..repositories.projects import ProjectsRepo
+from ..repositories.runs import RunsRepo
+from ..repositories.tasks import TasksRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_state
 
@@ -32,9 +34,40 @@ def find_project(projects: ProjectsRepo, git: Git, path: str) -> ProjectOut:
                       factory=factory_state(git, p["path"], p["default_branch"]))
 
 
-def move_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, project_id: int, workspace_id: int) -> None:
-    if not workspaces.exists(workspace_id) or not projects.move(project_id, workspace_id):
+def patch_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, tasks: TasksRepo, project_id: int,
+                  body: ProjectPatch) -> ProjectPatched:
+    """049 Q1–Q4: the sent fields together, in any state. Both 404s keep 020's `Not Found`."""
+    fields = {key: getattr(body, key) for key in body.model_fields_set}
+    if not fields:
+        raise Invalid("send at least one of: workspace_id, name, test_cmd")
+    if "name" in fields:
+        fields["name"] = fields["name"].strip()
+        if not fields["name"]:
+            raise Invalid("name must not be blank")
+    if "test_cmd" in fields:
+        fields["test_cmd"] = fields["test_cmd"].strip() or None  # Q3: blank stores NULL
+    tasks.lock()  # so the workspace can't go between its check and the update
+    if "workspace_id" in fields and not workspaces.exists(fields["workspace_id"]):
         raise NotFound()
+    row = projects.patch(project_id, fields)
+    if row is None:
+        raise NotFound()
+    return ProjectPatched(**row)
+
+
+def delete_project(projects: ProjectsRepo, tasks: TasksRepo, runs: RunsRepo, project_id: int) -> None:
+    """049: the project and its tasks, each the 048 way (§5.1), refused while one of them runs (§5.2, Q6).
+    Nothing on disk."""
+    tasks.lock()  # the 409 check and the deletes commit together
+    if not projects.exists(project_id):
+        raise NotFound(f"Project #{project_id} not found")
+    task_ids = [t["id"] for t in tasks.for_project(project_id)]
+    for task_id in task_ids:
+        if run := runs.running(task_id):
+            raise Conflict(f"run #{run['id']} active")
+    for task_id in task_ids:
+        tasks.delete(task_id)
+    projects.delete(project_id)
 
 
 def context_out(context_md: str) -> ContextOut:

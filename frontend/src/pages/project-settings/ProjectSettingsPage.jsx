@@ -1,15 +1,77 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
-import { createFactory, importBundle, moveProject } from '../../api/projects.js'
+import { createFactory, deleteProject, importBundle, patchProject } from '../../api/projects.js'
+import { DangerZone, PROJECT_TEXT } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
-import { Block, ProjectHeaderSkeleton, Rows, Skeleton } from '../../components/Skeleton.jsx'
-import { button, field, muted } from '../../components/styles.js'
+import { Block, ButtonBlock, ProjectHeaderSkeleton, Rows, Skeleton } from '../../components/Skeleton.jsx'
+import { button, field, muted, section } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/**
+ * 049 FE16–FE18, Q15: Name and Test command in one form, sent together as typed. On success the fields take the stored
+ * values (trimmed; a blank test command is null), and `onSaved` reloads; a refusal keeps what was typed.
+ * A subgrid of the Repository grid, so its labels line up with the read-only rows under it.
+ */
+function ProjectForm({ project, onSaved }) {
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const { name, test_cmd } = Object.fromEntries(new FormData(form))
+    setBusy(true)
+    setSaved(false)
+    try {
+      const out = await patchProject(project.id, { name, test_cmd })
+      setError(null)
+      form.elements.namedItem('name').value = out.name
+      form.elements.namedItem('test_cmd').value = out.test_cmd ?? ''
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form onSubmit={submit} onInput={() => setSaved(false)} className="col-span-2 grid grid-cols-subgrid items-center gap-y-2">
+      <label htmlFor="project-name" className={muted}>
+        Name
+      </label>
+      <input id="project-name" name="name" defaultValue={project.name} className={`${field} w-full max-w-md`} />
+      <label htmlFor="project-test-cmd" className={muted}>
+        Test command
+      </label>
+      <input
+        id="project-test-cmd"
+        name="test_cmd"
+        defaultValue={project.test_cmd ?? ''}
+        placeholder="not set"
+        className={`${field} w-full max-w-md font-mono text-sm/6`}
+      />
+      <div className="col-start-2 flex flex-wrap items-center gap-3">
+        <button disabled={busy} className={button}>
+          Save
+        </button>
+        <span aria-live="polite" className={muted}>
+          {saved ? 'Saved.' : ''}
+        </span>
+      </div>
+      {error && (
+        <div className="col-start-2">
+          <ErrorMessage error={error} />
+        </div>
+      )}
+    </form>
+  )
+}
 
 /** Q9: the repo facts `fctl connect` set, read-only; a null value says so in words. */
 function Repository({ project }) {
@@ -17,10 +79,9 @@ function Repository({ project }) {
     ['Path', project.path],
     ['Remote', project.remote_url, 'none'],
     ['Default branch', project.default_branch],
-    ['Test command', project.test_cmd, 'not set'],
   ]
   return (
-    <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1">
+    <dl className="col-span-2 grid grid-cols-subgrid gap-y-1">
       {rows.map(([name, value, empty]) => (
         <div key={name} className="contents">
           <dt className={muted}>{name}</dt>
@@ -134,7 +195,7 @@ function MoveProject({ project, workspaces, onDone }) {
     const workspaceId = Number(new FormData(event.currentTarget).get('workspace_id'))
     setBusy(true)
     try {
-      await moveProject(project.id, workspaceId)
+      await patchProject(project.id, { workspace_id: workspaceId })
       setError(null)
       onDone()
     } catch (err) {
@@ -164,7 +225,7 @@ function MoveProject({ project, workspaces, onDone }) {
 /** One titled block of the page; `id` ties the heading to the region. */
 function Section({ id, title, children }) {
   return (
-    <section aria-labelledby={id} className="grid gap-3 border-t border-line pt-6">
+    <section aria-labelledby={id} className={section}>
       <h2 id={id} className="m-0">
         {title}
       </h2>
@@ -173,21 +234,30 @@ function Section({ id, title, children }) {
   )
 }
 
-/** 046 Q5: the project header, then the Repository section's heading and four rows. */
+/** 046 Q5: the project header, then the Repository section's heading, its two fields and Save, and three rows. */
 function SettingsSkeleton() {
   return (
     <Skeleton>
       <ProjectHeaderSkeleton />
-      <div className="grid max-w-3xl gap-3 border-t border-line pt-6">
+      <div className={`${section} max-w-3xl`}>
         <Block className="h-7 w-32" />
-        <Rows n={4} />
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-2">
+          <Block className="h-6 w-28" />
+          <Block className="h-8 w-full max-w-md" />
+          <Block className="h-6 w-28" />
+          <Block className="h-8 w-full max-w-md" />
+          <ButtonBlock className="col-start-2 w-16" />
+        </div>
+        <Rows n={3} />
       </div>
     </Skeleton>
   )
 }
 
-/** docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Create factory, Import, and Move. */
+/** docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Save, Create factory, Import, and Move. */
 function ProjectSettings({ id }) {
+  const { reloadSidebar } = useOutletContext()
+  const navigate = useNavigate()
   // board Q3: bumping `tick` hands usePoll a new load, which fetches at once
   const [tick, setTick] = useState(0)
   const refresh = useCallback(() => setTick((n) => n + 1), [])
@@ -228,9 +298,21 @@ function ProjectSettings({ id }) {
       {error && <ErrorMessage error={error} />}
       <div className="grid max-w-3xl gap-8">
         <Section id="settings-repo" title="Repository">
-          <Repository project={project} />
+          {/* 049 Q15: the editable two first, then the read-only rows, on one grid */}
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-4">
+            <ProjectForm
+              project={project}
+              onSaved={() => {
+                refresh()
+                reloadSidebar() // Q13: no navigation, so the sidebar's name follows here
+              }}
+            />
+            <Repository project={project} />
+          </div>
+          {/* Q5 */}
           <p className={`text-sm ${muted}`}>
-            <code>fctl connect</code> sets these; run it again in the repo to change them.
+            Path, remote, and default branch come from <code>fctl connect</code>. Rerunning it in the repo also resets the
+            name, and the test command when it passes one.
           </p>
         </Section>
         <Section id="settings-factory" title="Factory">
@@ -251,8 +333,24 @@ function ProjectSettings({ id }) {
           <div aria-live="polite">{importOut && <ImportResult out={importOut} />}</div>
         </Section>
         <Section id="settings-move" title="Move to another workspace">
-          <MoveProject key={project.workspace_id} project={project} workspaces={page.workspaces} onDone={refresh} />
+          <MoveProject
+            key={project.workspace_id}
+            project={project}
+            workspaces={page.workspaces}
+            onDone={() => {
+              refresh()
+              reloadSidebar()
+            }}
+          />
         </Section>
+        <DangerZone
+          label="Delete project"
+          summary="Delete this project and its tasks from the app. The repo stays on disk."
+          title={`Delete project ${project.name}?`}
+          text={PROJECT_TEXT}
+          remove={() => deleteProject(project.id)}
+          onDeleted={() => navigate(`/workspaces/${project.workspace_id}`)}
+        />
       </div>
     </>
   )

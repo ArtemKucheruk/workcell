@@ -57,27 +57,95 @@ test('FE25: the page fetches the board view-model once, and 10 s fetch nothing m
   expect(pages()).toEqual([BOARD])
 })
 
-test('FE26: path, remote, default branch, and test command show as text; null remote and test command say so', async () => {
+const Q5 =
+  'Path, remote, and default branch come from fctl connect. Rerunning it in the repo also resets the name, and the test command when it passes one.'
+const nameBox = () => within(section('Repository')).getByRole('textbox', { name: 'Name' })
+const testBox = () => within(section('Repository')).getByRole('textbox', { name: 'Test command' })
+
+test('049 FE16 (042 FE26): Repository opens with a Name and Test command form with Save, then path, remote, and default branch as text', async () => {
   const { unmount } = await open(board())
+  const repo = within(section('Repository'))
   const facts = () => {
     const dl = section('Repository').querySelector('dl')
     return [...dl.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling.textContent])
   }
+  expect([nameBox().value, testBox().value]).toEqual(['api', 'pytest -q'])
+  const save = repo.getByRole('button', { name: 'Save' })
+  expect(save.closest('form')).toBe(nameBox().closest('form'))
+  expect(testBox().closest('form')).toBe(nameBox().closest('form'))
   expect(facts()).toEqual([
     ['Path', '/Users/me/api'],
     ['Remote', 'git@github.com:me/api.git'],
     ['Default branch', 'main'],
-    ['Test command', 'pytest -q'],
   ])
-  expect(section('Repository').querySelectorAll('input, textarea, select')).toHaveLength(0)
+  // Q15: the form comes first, above the read-only rows; those have no field
+  const dl = section('Repository').querySelector('dl')
+  expect(save.compareDocumentPosition(dl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(dl.querySelectorAll('input, textarea, select')).toHaveLength(0)
+  expect(repo.getByText(fullText(Q5)).querySelector('code').textContent).toBe('fctl connect')
   unmount()
   await open(board({ project: { ...PROJECT, remote_url: null, test_cmd: null } }))
+  expect(testBox().value).toBe('')
   expect(facts()).toEqual([
     ['Path', '/Users/me/api'],
     ['Remote', 'none'],
     ['Default branch', 'main'],
-    ['Test command', 'not set'],
   ])
+})
+
+test('049 FE17: Save sends PATCH {name, test_cmd} as typed; on 200 the page reloads, the header follows, and the sidebar is fetched again', async () => {
+  const { fetch, responses } = await open(board(), {
+    'PATCH /api/projects/3': [200, { id: 3, workspace_id: 2, name: 'api2', test_cmd: null }],
+  })
+  const sidebarLoads = () => fetched(fetch).filter((url) => url === '/api/pages/sidebar').length
+  await waitFor(() => expect(sidebarLoads()).toBe(1))
+  fireEvent.change(nameBox(), { target: { value: '  api2 ' } })
+  fireEvent.change(testBox(), { target: { value: '   ' } })
+  responses[`GET ${BOARD}`] = [200, board({ project: { ...PROJECT, name: 'api2', test_cmd: null } })]
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  expect(await screen.findByRole('heading', { level: 1, name: 'api2 · personal' })).toBeTruthy()
+  expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ name: '  api2 ', test_cmd: '   ' })
+  expect(loads(fetch)).toBe(2)
+  await waitFor(() => expect(sidebarLoads()).toBe(2))
+  expect([nameBox().value, testBox().value]).toEqual(['api2', '']) // what the server stored
+  expect(within(section('Repository')).getByText('Saved.')).toBeTruthy()
+})
+
+test('049 FE18: a refused Save shows its detail in the form, which keeps what was typed', async () => {
+  const { fetch } = await open(board(), { 'PATCH /api/projects/3': [422, { detail: 'name must not be blank' }] })
+  fireEvent.change(nameBox(), { target: { value: '   ' } })
+  fireEvent.change(testBox(), { target: { value: 'make test' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe('name must not be blank')
+  expect(alert.closest('form')).toBe(nameBox().closest('form'))
+  expect([nameBox().value, testBox().value]).toEqual(['   ', 'make test'])
+  expect(loads(fetch)).toBe(1)
+  expect(screen.queryByText('Saved.')).toBeNull()
+})
+
+const PROJECT_TEXT =
+  'This removes its tasks, with their runs, rounds and their files, verdicts, comments, decisions, status history, and ' +
+  'transcript records, from the app. The repo, its worktrees and branches, run logs, and copied transcript files stay on disk.'
+
+test('049 FE19: the last section, Danger zone, has a danger Delete project that opens the dialog; confirming deletes and opens /workspaces/2', async () => {
+  const { fetch, router } = await open(board(), { 'DELETE /api/projects/3': [204] })
+  const sections = screen.getAllByRole('region')
+  expect(sections.at(-1)).toBe(section('Danger zone'))
+  const button = within(section('Danger zone')).getByRole('button', { name: 'Delete project' })
+  expect(button.className).toMatch(/(^|\s)bg-danger(\s|$)/)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  fireEvent.click(button)
+  const dialog = screen.getByRole('dialog', { name: 'Delete project api?' })
+  expect(document.getElementById(dialog.getAttribute('aria-describedby')).textContent).toBe(PROJECT_TEXT)
+  expect(within(dialog).getAllByRole('button').map((b) => b.textContent)).toEqual(['Cancel', 'Delete'])
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(sends(fetch, 'DELETE', '/api/projects/3')).toEqual([])
+  fireEvent.click(button)
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/workspaces/2'))
+  expect(sent(fetch, 'DELETE', '/api/projects/3')).toBeUndefined()
 })
 
 test('FE27: ready has no Create factory; uncommitted and none show the unticked checkbox, the button, and the hint', async () => {
@@ -208,8 +276,10 @@ test('FE30 (032 AC49): a 413 or 422 shows its detail, and the page stays', async
 
 // --- Move (board AC27–AC28, moved) -------------------------------------------------------
 
-test('FE31 (AC27): Move lists the workspaces, patches the chosen one, and the header follows the reload', async () => {
-  const { fetch, responses } = await open(board(), { 'PATCH /api/projects/3': [200, { id: 3, workspace_id: 4 }] })
+test('FE31 (AC27), 049 Q13: Move lists the workspaces, patches the chosen one, the header follows the reload, and so does the sidebar', async () => {
+  const { fetch, responses } = await open(board(), {
+    'PATCH /api/projects/3': [200, { id: 3, workspace_id: 4, name: 'api', test_cmd: 'pytest -q' }],
+  })
   const select = screen.getByRole('combobox', { name: 'Workspace' })
   expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['personal', true], ['work', false]])
   responses[`GET ${BOARD}`] = [200, board({ project: { ...PROJECT, workspace_id: 4, workspace: 'work' } })]
@@ -219,6 +289,7 @@ test('FE31 (AC27): Move lists the workspaces, patches the chosen one, and the he
   expect(within(h1).getByRole('link', { name: 'work' }).getAttribute('href')).toBe('/workspaces/4')
   expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ workspace_id: 4 })
   expect(loads(fetch)).toBe(2)
+  await waitFor(() => expect(fetched(fetch).filter((url) => url === '/api/pages/sidebar')).toHaveLength(2))
 })
 
 test('FE31 (AC28): a refused move shows its detail in the Move form', async () => {

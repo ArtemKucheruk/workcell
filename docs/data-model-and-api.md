@@ -144,9 +144,40 @@ POST /api/workspaces                                              (+ Workspace)
 → {"name":"work"}
 ← 200 {"id":4,"name":"work"}                                      # an existing name returns its id
 
-PATCH /api/projects/3                                             (move to another workspace)
-→ {"workspace_id":4}
-← 200 {"id":3,"workspace_id":4}                                   # 404 if either id is unknown
+PATCH /api/workspaces/4                                           (sidebar Rename, workspace Settings Save)
+→ {"name":"work"}
+← 200 {"id":4,"name":"work"}
+  # name is trimmed: 422 {"detail":"name must not be blank"}; missing, null, or not a string → 422 FastAPI's list detail
+  # 409 {"detail":"workspace work already exists"} when another workspace has that name; its own name → 200
+  # 404 {"detail":"Workspace #99 not found"}
+
+DELETE /api/workspaces/4                                          (sidebar Delete, workspace Settings Danger zone)
+← 204, empty body
+  # 409 {"detail":"workspace personal still holds 2 projects; move or delete them first"}  ("1 project" for one)
+  # 404 {"detail":"Workspace #99 not found"}
+
+PATCH /api/projects/3                                             (Settings, sidebar Rename and Move)
+→ {"workspace_id":4}                                              (move to another workspace)
+→ {"name":"api-server"}
+→ {"test_cmd":"pytest -q"}
+→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q"}, applied together
+← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q"}   # the project after the update
+                                                                              # id, workspace_id: int; name: str; test_cmd: str | null
+  # name is trimmed: 422 {"detail":"name must not be blank"} if nothing is left
+  # test_cmd is trimmed, and blank stores NULL, returned as "test_cmd": null
+  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd"} for {} (or only unknown keys)
+  # 422 FastAPI's list detail: any of the three sent as null or the wrong type, or workspace_id out of SQLite's range
+  # 404 {"detail":"Not Found"} for an unknown project or workspace_id (unchanged), with nothing written
+  # allowed in any state, also while a run is going (no 409)
+  # fctl connect, rerun in the repo, sets the name back to the directory's, and the test command when it passes one
+
+DELETE /api/projects/3                                            (sidebar Delete, project Settings Danger zone)
+← 204, empty body
+  # one transaction removes the project, its tasks, and each task's runs, rounds, round_files, verdicts,
+  #   comments, decisions, events, and transcripts rows
+  # on disk, the repo, its worktrees and branches, run logs, and transcript copies stay
+  # 409 {"detail":"run #41 active"} while one of its tasks has a running run
+  # 404 {"detail":"Project #99 not found"}
 
 POST /api/projects/connect                                        (fctl connect)
 → {"path":"/Users/artem/code/api-server","workspace":"personal","name":"api-server",
@@ -299,11 +330,12 @@ POST /api/tasks/12/approve                                        (Approve, fctl
 
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
-`/projects/{id}` board · `/projects/{id}/code?path=` · `/projects/{id}/reviews?tab=closed` ·
-`/projects/{id}/context` · `/projects/{id}/settings` · `/tasks/{id}` ·
-`/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl` · `/settings`. Any
-other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}` loads
-`GET /api/transcripts/{id}` (§6.2).
+`/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=` ·
+`/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/settings` ·
+`/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/docs/fctl` ·
+`/settings`. Any other path outside `/api` gets the SPA's not-found page. `/transcripts/{id}`
+loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
+`GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does.
 
 Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
 rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.

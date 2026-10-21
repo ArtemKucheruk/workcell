@@ -4,17 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { fetched, mockFetch, renderAt } from '../test/render.jsx'
 
-// FE17: jsdom 30 has neither; these do what the drawer relies on: `open`, and close() firing `close` once
-const dialogProto = HTMLDialogElement.prototype
-dialogProto.showModal ??= function showModal() {
-  this.open = true
-}
-dialogProto.close ??= function close() {
-  if (!this.open) return
-  this.open = false
-  this.dispatchEvent(new Event('close'))
-}
-
 beforeEach(() => localStorage.clear())
 afterEach(() => {
   vi.restoreAllMocks()
@@ -346,4 +335,21 @@ test('050 FE18: autoInit runs once the route\'s page has mounted, and again on e
   expect(at[1]).not.toBe(at[0]) // the board's skeleton, not the dashboard's
   await act(() => router.navigate('/projects/3?x=1'))
   expect(autoInit).toHaveBeenCalledTimes(3)
+})
+
+test('049 FE24: on /workspaces/5/settings the sidebar selects workspace 5 over storage, as on /workspaces/5, and main keeps its max width', async () => {
+  const two = {
+    workspaces: [SIDEBAR.workspaces[0], { id: 5, name: 'work', projects: [] }],
+    current: null,
+  }
+  for (const path of ['/workspaces/5', '/workspaces/5/settings']) {
+    localStorage.setItem('sidebar.workspace', '2')
+    mockFetch({ 'GET /api/pages/sidebar': [200, two] })
+    const { unmount } = renderAt(path)
+    const select = await sidebar().findByRole('combobox', { name: 'Workspace' })
+    await waitFor(() => expect(select.selectedOptions[0].textContent).toBe('work'))
+    expect(localStorage.getItem('sidebar.workspace')).toBe('5')
+    expect(screen.getByRole('main').className.split(/\s+/)).toEqual(expect.arrayContaining(['mx-auto', 'max-w-6xl']))
+    unmount()
+  }
 })

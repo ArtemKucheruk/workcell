@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..dto.workspaces import WorkspaceBody, WorkspaceCreated, WorkspaceOut
 from ..handlers import workspaces as handler
-from ..server.deps import Workspaces
+from ..server.deps import Tasks, Workspaces
 
 router = APIRouter()
 
@@ -21,3 +21,13 @@ def create_workspace(body: WorkspaceBody, workspaces: Workspaces) -> WorkspaceCr
     if not name:
         raise HTTPException(422, "name must not be blank")
     return WorkspaceCreated(id=handler.create_workspace(workspaces, name), name=name)
+
+
+@router.patch("/api/workspaces/{workspace_id}")
+def rename_workspace(workspace_id: int, body: WorkspaceBody, workspaces: Workspaces, tasks: Tasks) -> WorkspaceCreated:
+    return handler.rename_workspace(workspaces, tasks, workspace_id, body.name)
+
+
+@router.delete("/api/workspaces/{workspace_id}", status_code=204)
+def delete_workspace(workspace_id: int, workspaces: Workspaces, tasks: Tasks) -> None:
+    handler.delete_workspace(workspaces, tasks, workspace_id)
