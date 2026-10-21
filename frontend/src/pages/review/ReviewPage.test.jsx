@@ -353,24 +353,32 @@ test('AC16: with no rounds the Conversation tab says comments open later and has
 
 // --- Files changed -----------------------------------------------------------------------
 
-test('AC17: the file tree nests directories in patch order, each file a fragment link with +/−', async () => {
-  await openFiles(reviewPage({}, {
-    files: [
-      file('app/limits.py', { additions: 42 }),
-      file('README.md', { additions: 1, deletions: 1 }),
-      file('app/auth.py', { additions: 12, deletions: 3 }),
-    ],
-  }))
-  const tree = screen.getByRole('navigation', { name: 'Files' })
-  const top = [...tree.querySelector('ul').children]
-  expect(top).toHaveLength(2)
-  expect(top[0].firstChild.textContent).toBe('app/')
-  const nested = [...top[0].querySelector('ul').children]
-  expect(nested.map((li) => li.textContent)).toEqual([`limits.py +42 ${M}0`, `auth.py +12 ${M}3`])
-  expect(top[1].textContent).toBe(`README.md +1 ${M}1`)
-  expect([...tree.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual([
-    '#file:app/limits.py', '#file:app/auth.py', '#file:README.md',
+const PATCH = [
+  file('app/limits.py', { additions: 42 }),
+  file('README.md', { additions: 1, deletions: 1 }),
+  file('app/auth.py', { additions: 12, deletions: 3 }),
+]
+const tree = () => screen.getByRole('navigation', { name: 'Files' })
+
+test('FE13 (AC17): Files changed\'s tree is FileTree, all open, each file a fragment link with +/− in patch order', async () => {
+  await openFiles(reviewPage({}, { files: PATCH }))
+  const app = within(tree()).getByRole('button', { name: 'app/' })
+  expect(app.getAttribute('aria-expanded')).toBe('true')
+  expect(within(tree()).getAllByRole('link').map((a) => [a.getAttribute('href'), a.textContent])).toEqual([
+    ['#file:app/limits.py', `limits.py +42 ${M}0`],
+    ['#file:app/auth.py', `auth.py +12 ${M}3`],
+    ['#file:README.md', `README.md +1 ${M}1`],
   ])
+})
+
+test('FE14: clicking app/ collapses it; its links leave, README.md\'s stays, and every diff still renders', async () => {
+  await openFiles(reviewPage({}, { files: PATCH }))
+  fireEvent.click(within(tree()).getByRole('button', { name: 'app/' }))
+  expect(within(tree()).getByRole('button', { name: 'app/' }).getAttribute('aria-expanded')).toBe('false')
+  expect(within(tree()).getAllByRole('link').map((a) => a.getAttribute('href'))).toEqual(['#file:README.md'])
+  for (const path of ['app/limits.py', 'README.md', 'app/auth.py']) {
+    expect(document.getElementById(`file:${path}`).tagName).toBe('SECTION')
+  }
 })
 
 test('AC18: each file is a section headed by its path, its change, and +/−', async () => {

@@ -22,5 +22,9 @@ export function usePoll(fn, interval) {
       clearTimeout(timer)
     }
   }, [fn, interval])
+  // 050 Q8: Preline's plugins bind to what newly loaded data renders; a failure keeps the data, so it runs nothing
+  useEffect(() => {
+    if (state.data !== undefined) window.HSStaticMethods?.autoInit()
+  }, [state.data])
   return state
 }

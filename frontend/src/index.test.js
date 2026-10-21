@@ -119,7 +119,7 @@ const families = Object.fromEntries(
 test('040 FE8: two self-hosted variable fonts, imported in main.jsx, head --font-sans and --font-mono', () => {
   expect(fonts).toHaveLength(2)
   expect(Object.keys(pkg.dependencies).filter((name) => !fonts.includes(name))).toEqual([
-    'highlight.js', 'react', 'react-dom', 'react-router',
+    'highlight.js', 'preline', 'react', 'react-dom', 'react-router',
   ])
   expect(Object.keys(families).sort()).toEqual(['monospace', 'sans-serif'])
   const main = read('./main.jsx')
@@ -268,4 +268,64 @@ test('046 FE22: docs/ui.md §8 has skeletons, the offline banner, relative times
   const review = ui.slice(ui.indexOf('### 8.2'), ui.indexOf('### 8.3'))
   expect(review).toContain('ago')
   expect(review).not.toContain('10:02 created')
+})
+
+test('050 FE15: dependencies are the two fonts, highlight.js, preline, and React; preline is installed with MIT and variants.css', () => {
+  expect(Object.keys(pkg.dependencies)).toEqual([
+    '@fontsource-variable/ibm-plex-sans', '@fontsource-variable/jetbrains-mono', 'highlight.js', 'preline', 'react', 'react-dom', 'react-router',
+  ])
+  expect(Object.keys(pkg.devDependencies)).toEqual([
+    '@tailwindcss/vite', '@testing-library/react', '@vitejs/plugin-react', 'jsdom', 'tailwindcss', 'vite', 'vitest',
+  ])
+  const preline = JSON.parse(read('../node_modules/preline/package.json'))
+  // ponytail: npm's field is "Licensed under MIT and Preline UI Fair Use License", not a bare "MIT" (build-frontend.md Q1);
+  // pinned whole, so an upgrade that changes the terms fails here
+  expect(preline.license).toBe('Licensed under MIT and Preline UI Fair Use License')
+  expect(read('../node_modules/preline/LICENSE')).toContain('MIT License')
+  expect(fs.existsSync(here('../node_modules/preline/variants.css'))).toBe(true)
+})
+
+/** A CSS file and every file it @imports by a relative path, recursively. */
+function withImports(file) {
+  const text = fs.readFileSync(file, 'utf8')
+  const nested = [...text.matchAll(/@import\s+['"](\.[^'"]+)['"]/g)].flatMap(([, rel]) => withImports(path.join(path.dirname(file), rel)))
+  return [text, ...nested]
+}
+
+test('050 FE16: index.css imports preline/variants.css and @sources its dist JS right after tailwindcss; the variants declare no dark', () => {
+  const lines = css.split('\n')
+  expect(lines.slice(0, 3)).toEqual(['@import "tailwindcss";', '@import "preline/variants.css";', '@source "../node_modules/preline/dist/*.js";'])
+  expect(fs.readdirSync(here('../node_modules/preline/dist')).some((f) => f.endsWith('.js'))).toBe(true)
+  const variants = withImports(here('../node_modules/preline/variants.css'))
+  expect(variants.length).toBeGreaterThan(20) // variants.css and the plugins' files it imports
+  expect(variants.join('\n')).toMatch(/@custom-variant\s+hs-/)
+  for (const text of variants) expect(text).not.toMatch(/@(custom-)?variant\s+dark(?![\w-])/)
+})
+
+test('050 FE17: main.jsx imports Preline\'s JS from the package, before index.css', () => {
+  const main = read('./main.jsx')
+  expect(main).toMatch(/^import 'preline'$/m)
+  expect(main.indexOf("import 'preline'")).toBeLessThan(main.indexOf("import './index.css'"))
+  expect(main).not.toMatch(/https?:\/\//)
+})
+
+test('050 FE21: docs/ui.md names Preline in §8, draws the tree in §8.3 and §8.6; docs/MVP.md §4.2 lists preline', () => {
+  const ui = read('../../docs/ui.md')
+  const intro = ui.slice(ui.indexOf('## 8. UI'), ui.indexOf('\n1. **Dashboard**'))
+  const flat = intro.replace(/\s+/g, ' ')
+  for (const text of ['Preline', '`preline`', 'MIT', 'Pro', 'CDN', 'restyled onto the nine tokens', 'light and dark stay the app\'s']) expect(flat).toContain(text)
+  const review = ui.slice(ui.indexOf('5. **Code review**'), ui.indexOf('6. **Project code**'))
+  const code = ui.slice(ui.indexOf('6. **Project code**'), ui.indexOf('7. **fctl reference**'))
+  for (const item of [review, code]) expect(item).toContain('`+/−`')
+  expect(code).toContain('§8.6')
+  expect(code).not.toContain('a file tree from')
+  const files = ui.slice(ui.indexOf('### 8.3'), ui.indexOf('### 8.4'))
+  for (const text of ['[−] app/', '[+] tests/', '│  limits.py +42 −0']) expect(files).toContain(text)
+  expect(ui.indexOf('### 8.6 Code')).toBeGreaterThan(ui.indexOf('### 8.5 Reviews'))
+  const wire = ui.slice(ui.indexOf('### 8.6 Code'))
+  for (const text of ['personal › api-server › Code', 'api-server · personal', 'Factory: ready ✓', 'Branch main', '[−] app/', '[+] docs/', '  │  limits.py', '│  1 │ import time']) {
+    expect(wire).toContain(text)
+  }
+  const mvp = read('../../docs/MVP.md')
+  expect(mvp.slice(mvp.indexOf('### 4.2 Stack'), mvp.indexOf('### 4.3'))).toContain('`preline`')
 })

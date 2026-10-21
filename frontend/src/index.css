@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "preline/variants.css";
+@source "../node_modules/preline/dist/*.js";
+/* 050 Q5, Q7: Preline's variants, none of them named dark, so the dark variant keeps following the system; its JS scanned
+ * for the classes its plugins add; no Preline theme CSS, since its markup is restyled onto the tokens below */
 /* 024 Q10: highlight.js's themes by the system's scheme, as base.html loads them */
 @import "highlight.js/styles/github.css" (prefers-color-scheme: light);
 @import "highlight.js/styles/github-dark.css" (prefers-color-scheme: dark);

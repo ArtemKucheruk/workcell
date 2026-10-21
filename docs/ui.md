@@ -14,6 +14,16 @@ with Tailwind's palette. Text is set in IBM Plex Sans; code, diffs, paths, and t
 JetBrains Mono. Both are self-hosted (§4.2). The browser tab shows an SVG favicon,
 `frontend/public/favicon.svg`.
 
+Components come from Preline UI: the free `preline` npm package (MIT, with Preline's Fair Use
+License beside it), never Preline Pro. Vite bundles it into `dist/`, so it loads from no CDN.
+`index.css` imports its Tailwind variants, `main.jsx` loads its JS plugins once, and they
+re-initialise after each route change and each data load. Its markup is restyled onto the
+nine tokens, with none of Preline's theme CSS, palette, or class-based dark mode, so light and
+dark stay the app's. The first component taken from it is the file tree of items 5 and 6:
+Preline Tree View's rows, folder and file icons, `+/−` toggles, and guide lines. React opens and
+closes its directories, each one a disclosure button with `aria-expanded`, and a closed
+directory's entries leave the Tab order.
+
 Task state is drawn as pills, and reviewer verdicts as chips, each from one component, so
 every page uses the same words and colors:
 - A status is an outlined pill, its border and text in one token: `Backlog` in `muted`,
@@ -157,6 +167,8 @@ Loading, failures, times, and motion are the same on every page:
    - Round selector, defaulting to latest. The diff is a table built from the backend's diff
      rows, with one row per line and anchor `path:side:line`, and highlight.js colors it.
    - Clicking a line number opens an inline comment form.
+   - Files changed has the file tree (§8.3) beside the diffs: each file links to its diff and
+     shows its `+A −D`. Every directory starts open, and its `+/−` toggle collapses it.
    - The breadcrumb, then the title row with **Review changes**, which opens a native
      popover: a **Summary** box, an **Approve** / **Request changes** radio with neither
      picked, and **Submit review**. **Review changes** is enabled only in `review` with at
@@ -171,7 +183,10 @@ Loading, failures, times, and motion are the same on every page:
 6. **Project code** (`/projects/{id}/code`)
    - The breadcrumb `workspace › project › Code` above the project header, both from the
      code view-model's project.
-   - Left: a file tree from `git ls-files` of the main checkout.
+   - Left: the file tree (wireframe §8.6) of `git ls-files` in the main checkout. The
+     directories of the file shown open, and the file is marked as the current page. Every
+     other directory starts closed, and its `+/−` toggle opens it. Opening another file opens
+     its directories and leaves the ones I opened or closed as they were.
    - The landing view renders `README.md`.
    - Clicking a file opens a highlighted view with line numbers. Binary files and files
      over 1 MB show "not shown". The header shows the current branch.
@@ -282,20 +297,23 @@ timeline: relative times (2h ago), each with its local YYYY-MM-DD HH:MM as its t
 ### 8.3 Review — Files changed
 ```
 ─ Conversation ─┬─ Files changed 4 ─────────────────────────────────────────────────────
- app/            │ app/limits.py  (new)                                         +42 −0
-   limits.py +42 │  ─────────────────────────────────────────────────────────────────────
-   auth.py  +12−3│      29 + def client_key(request):
-   settings +4   │      30 +     # behind proxy only if TRUSTED_PROXY set
- tests/          │      31 +     return request.client.host
-   test_lim… +68−6│     ┌ security (round 1): Use request.client.host unless behind… ┐
-                 │      │ me: Make the limit configurable via settings.        [Reply]│
-                 │      └───────────────────────────────────────────────────────────┘
-                 │      32 +
-                 │ app/auth.py                                                  +12 −3
-                 │  @@ -41,7 +41,9 @@ def login():
-                 │  41 41      user = authenticate(form)
-                 │  42    -    if not user:
-                 │     42 +    if not user and limiter.hit(client_key(request)):
+ [−] app/             │ app/limits.py  (new)                                         +42 −0
+  │  limits.py +42 −0 │  ─────────────────────────────────────────────────────────────────────
+  │  auth.py +12 −3   │      29 + def client_key(request):
+  │  settings.py +4 −0│      30 +     # behind proxy only if TRUSTED_PROXY set
+ [+] tests/           │      31 +     return request.client.host
+                      │      ┌ security (round 1): Use request.client.host unless behind… ┐
+                      │      │ me: Make the limit configurable via settings.        [Reply]│
+                      │      └───────────────────────────────────────────────────────────┘
+                      │      32 +
+                      │ app/auth.py                                                  +12 −3
+                      │  @@ -41,7 +41,9 @@ def login():
+                      │  41 41      user = authenticate(form)
+                      │  42    -    if not user:
+                      │     42 +    if not user and limiter.hit(client_key(request)):
+tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+] a closed one, │ its
+  guide line, and a folder or file icon (not drawn) starts each row. Every directory starts open;
+  tests/ has been collapsed here. Each file links to its diff, with its +A −D in muted.
 ```
 
 ### 8.4 Sidebar
@@ -329,4 +347,25 @@ api-server · personal                                         Factory: ready �
  #12 Rate-limit login endpoint        (waiting on you)
  factory/12-rate-limit-login   round 2   sec ✓  ux ✓  ui ✓  code ✓   +126 −9
 each row links to /tasks/{id}/review · Closed: the Done column, rows without the state pill
+```
+
+### 8.6 Code
+```
+personal › api-server › Code
+api-server · personal                                         Factory: ready ✓
+Branch main
+ README.md            │ app/limits.py
+ [−] app/             │ ┌────┬─────────────────────────────────────────────────────┐
+  │  auth.py          │ │  1 │ import time                                         │
+  │  limits.py        │ │  2 │                                                     │
+  │  settings.py      │ │  3 │ WINDOW = 60                                         │
+ [+] docs/            │ │  4 │                                                     │
+ [+] tests/           │ │  5 │ def client_key(request):                            │
+                      │ │  6 │     return request.client.host                      │
+                      │ └────┴─────────────────────────────────────────────────────┘
+tree: Preline Tree View's rows, as in §8.3. The file shown (app/limits.py) is the current page:
+  aria-current, semibold accent on a raised row. Its directories open; the others start closed.
+  [+] opens a directory and [−] closes it; another file opens its own and leaves the rest as they were.
+viewer: the file's path, then a highlighted view with an aria-hidden gutter of line numbers; binary
+  files and files over 1 MB show "not shown". The landing (no ?path=) renders README.md.
 ```
