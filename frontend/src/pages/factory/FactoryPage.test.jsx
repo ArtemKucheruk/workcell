@@ -140,7 +140,7 @@ test('FE9: the breadcrumb, then the h1 with the name, an empty status, and Save'
   expect(current.getAttribute('aria-current')).toBe('page')
   expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).textContent).toBe('personal › api-server › Factories › default')
   const row = screen.getByRole('heading', { level: 1, name: 'default' }).parentElement
-  expect([...row.children].map((el) => el.tagName)).toEqual(['H1', 'P', 'BUTTON'])
+  expect([...row.children].map((el) => el.tagName)).toEqual(['H1', 'P', 'BUTTON', 'BUTTON']) // 052: Files, then Save
   expect(status()).toBe('')
   expect(save().disabled).toBe(true)
 })
@@ -544,4 +544,62 @@ test('round-1 review-ux: a refused save\'s list detail says which node field it 
   expect((await titleRow().findByRole('alert')).textContent).toBe('nodes.8.rounds_below.data.n: Input should be a valid integer')
   expect(sent(puts(fetch)[0]).graph.nodes[8]).toMatchObject({ id: 'rounds', data: { n: null } })
   expect(status()).toBe('Unsaved changes')
+})
+
+// --- 052: the Files dialog -----------------------------------------------------------------
+
+const FILES_URL = '/api/factories/7/files'
+const FILES = [
+  { path: '.claude/skills/factory/SKILL.md', content: '---\nname: factory\n---\n' },
+  { path: '.claude/agents/spec-writer.md', content: '---\nname: spec-writer\n---\n' },
+]
+const NOTE = 'Showing the last saved design. Save to include your changes.'
+const filesGets = (fetch) => fetch.mock.calls.filter(([url, init]) => url === FILES_URL && (init?.method ?? 'GET') === 'GET')
+/** Opens Files and waits for its list. */
+async function openFiles() {
+  fireEvent.click(screen.getByRole('button', { name: 'Files' }))
+  const dialog = screen.getByRole('dialog', { name: 'Files' })
+  await within(dialog).findByRole('button', { name: FILES[0].path })
+  return dialog
+}
+
+test('FE1: the title row has Files before Save; it opens a modal dialog headed Files and GETs the files', async () => {
+  const { fetch } = await open({ [`GET ${FILES_URL}`]: [200, FILES] })
+  const buttons = titleRow().getAllByRole('button').map((b) => b.textContent)
+  expect(buttons).toEqual(['Files', 'Save'])
+  expect(screen.queryByRole('dialog')).toBeNull()
+  expect(filesGets(fetch)).toEqual([])
+  const dialog = await openFiles()
+  expect(dialog.tagName).toBe('DIALOG')
+  expect(dialog.open).toBe(true)
+  expect(within(dialog).getByRole('heading', { level: 2 }).textContent).toBe('Files')
+  expect(filesGets(fetch)).toHaveLength(1)
+})
+
+test('FE10: with unsaved changes the dialog says it shows the last saved design; saved, it doesn\'t', async () => {
+  await open({ [`GET ${FILES_URL}`]: [200, FILES], [`PUT ${URL}`]: [200, FACTORY] })
+  let dialog = await openFiles()
+  expect(within(dialog).queryByText(NOTE)).toBeNull()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Delete edge Start → spec-writer' }))
+  await waitFor(() => expect(status()).toBe('Unsaved changes'))
+  dialog = await openFiles()
+  expect(within(dialog).getByText(NOTE)).toBeTruthy()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+
+  fireEvent.click(save())
+  await waitFor(() => expect(status()).toBe(''))
+  dialog = await openFiles()
+  expect(within(dialog).queryByText(NOTE)).toBeNull()
+})
+
+test('FE11: Close closes the dialog; opening Files again sends a fresh GET', async () => {
+  const { fetch } = await open({ [`GET ${FILES_URL}`]: [200, FILES] })
+  const dialog = await openFiles()
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+  expect(dialog.open).toBe(false)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  await openFiles()
+  expect(filesGets(fetch)).toHaveLength(2)
 })

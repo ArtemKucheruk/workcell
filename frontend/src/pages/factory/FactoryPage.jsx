@@ -18,8 +18,9 @@ import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { Block, ButtonBlock, Crumbs, Skeleton } from '../../components/Skeleton.jsx'
-import { muted } from '../../components/styles.js'
+import { button, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
+import { FilesDialog } from './FilesDialog.jsx'
 import { AGENTS, CONDITIONS, edgeTypes, newId, newNode, nodeTypes } from './graph.jsx'
 import { NodePanel } from './NodePanel.jsx'
 import { DRAG, Palette } from './Palette.jsx'
@@ -66,6 +67,7 @@ function Designer({ factory }) {
   const [version, setVersion] = useState(0)
   const [saved, setSaved] = useState(0)
   const [error, setError] = useState(null)
+  const [showFiles, setShowFiles] = useState(false)
   const flow = useRef(null)
   const saveButton = useRef(null)
   const dirty = version !== saved
@@ -183,6 +185,10 @@ function Designer({ factory }) {
             {dirty ? 'Unsaved changes' : ''}
           </p>
           {error && <ErrorMessage error={error} />}
+          {/* 052 FE1: the stored graph's compiled files, before Save */}
+          <button type="button" onClick={() => setShowFiles(true)} className={button}>
+            Files
+          </button>
           <ActionButton ref={saveButton} action={save} disabled={!dirty}>
             Save
           </ActionButton>
@@ -212,6 +218,7 @@ function Designer({ factory }) {
         </div>
         <NodePanel nodes={nodes} onChange={edit} />
       </div>
+      {showFiles && <FilesDialog id={factory.id} unsaved={dirty} onClose={() => setShowFiles(false)} />}
     </>
   )
 }

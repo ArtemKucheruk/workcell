@@ -3,14 +3,13 @@ import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
 import { createFactory, deleteProject, importBundle, patchProject } from '../../api/projects.js'
 import { DangerZone, PROJECT_TEXT } from '../../components/DeleteDialog.jsx'
+import { FactoryForm, FactoryResult } from '../../components/FactoryResult.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Rows, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, section } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
-
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /**
  * 049 FE16–FE18, Q15: Name and Test command in one form, sent together as typed. On success the fields take the stored
@@ -89,61 +88,6 @@ function Repository({ project }) {
         </div>
       ))}
     </dl>
-  )
-}
-
-/** Board Q8, moved: the Overwrite checkbox and the button. */
-function FactoryForm({ create }) {
-  const [busy, setBusy] = useState(false)
-  async function submit(event) {
-    event.preventDefault()
-    const overwrite = event.currentTarget.elements.overwrite.checked
-    setBusy(true)
-    try {
-      await create(overwrite)
-    } finally {
-      setBusy(false)
-    }
-  }
-  return (
-    <form onSubmit={submit} className="flex flex-wrap items-center gap-3">
-      <button disabled={busy} className={button}>
-        Create factory
-      </button>
-      <label className="flex items-center gap-1">
-        <input type="checkbox" name="overwrite" /> Overwrite existing files
-      </label>
-    </form>
-  )
-}
-
-/** MVP §3.2: what Create factory wrote and skipped, and the commit command; or its refusal. */
-function FactoryResult({ out }) {
-  if (out instanceof Error) return <ErrorMessage error={out} />
-  const files = (paths) => (
-    <ul className="ml-6 list-disc">
-      {paths.map((path) => (
-        <li key={path}><code>{path}</code></li>
-      ))}
-    </ul>
-  )
-  return (
-    <div className="grid gap-1 rounded-md border border-line p-3">
-      {out.written.length > 0 && (
-        <>
-          <p>{`Wrote ${plural(out.written.length, 'file')}:`}</p>
-          {files(out.written)}
-        </>
-      )}
-      {out.skipped.length > 0 && (
-        <>
-          <p>{`Skipped ${plural(out.skipped.length, 'existing file')} (tick Overwrite to replace them):`}</p>
-          {files(out.skipped)}
-        </>
-      )}
-      <p>Commit them so runs can see the factory:</p>
-      <pre className="overflow-x-auto rounded bg-raised p-2 text-sm"><code>{out.commit_hint}</code></pre>
-    </div>
   )
 }
 
@@ -322,7 +266,7 @@ function ProjectSettings({ id }) {
           ) : (
             <>
               {page.hint && <p className={muted}>{page.hint}</p>}
-              <FactoryForm create={makeFactory} />
+              <FactoryForm label="Create factory" create={makeFactory} />
             </>
           )}
           <div aria-live="polite">{factoryOut && <FactoryResult out={factoryOut} />}</div>
