@@ -1,4 +1,5 @@
-import { act, cleanup, renderHook } from '@testing-library/react'
+import { act, cleanup, render, renderHook } from '@testing-library/react'
+import { createElement } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { usePoll } from './usePoll.js'
 
@@ -44,4 +45,35 @@ test('AC13: a rejection sets error, the next success clears it; no interval call
   await advance(60000)
   expect(once).toHaveBeenCalledTimes(1)
   expect(single.result.current).toEqual({ data: 'x' })
+})
+
+test('050 FE19: autoInit runs after each render carrying newly loaded data; not before, on a failure, or on a re-render', async () => {
+  const seen = [] // what the DOM showed at each call
+  vi.stubGlobal('HSStaticMethods', { autoInit: vi.fn(() => seen.push(document.querySelector('output')?.textContent)) })
+  // each load is a new object, as each fetch's JSON is
+  const fn = vi.fn().mockResolvedValueOnce({ v: 'a' }).mockRejectedValueOnce(new Error('boom')).mockImplementation(async () => ({ v: 'b' }))
+  function Probe() {
+    const { data, error } = usePoll(fn, 3000)
+    return createElement('output', null, `${data?.v ?? ''}${error ? ' failed' : ''}`)
+  }
+  const { rerender } = render(createElement(Probe))
+  expect(seen).toEqual([])
+  await flush()
+  expect(seen).toEqual(['a']) // after the render that shows 'a'
+  rerender(createElement(Probe))
+  await advance(3000)
+  expect(document.querySelector('output').textContent).toBe('a failed')
+  expect(seen).toEqual(['a'])
+  await advance(3000)
+  expect(seen).toEqual(['a', 'b'])
+  await advance(3000)
+  expect(seen).toEqual(['a', 'b', 'b']) // 050 Q8: each poll is a new load
+})
+
+test('050 FE20: without Preline, window.HSStaticMethods is undefined and loading data throws nothing', async () => {
+  expect(window.HSStaticMethods).toBeUndefined()
+  const fn = vi.fn().mockResolvedValue('x')
+  const { result } = renderHook(() => usePoll(fn))
+  await flush()
+  expect(result.current).toEqual({ data: 'x' })
 })

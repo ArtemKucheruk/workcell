@@ -46,12 +46,15 @@ const fileHeader = () => screen.queryByRole('heading', { level: 2 })
 const gutter = () => document.querySelector('main pre[aria-hidden="true"]')
 const codes = () => [...document.querySelectorAll('main pre code')]
 const highlighted = () => document.querySelectorAll('main [class*="hljs-"]')
-const dir = (name) => [...document.querySelectorAll('main details')].find((d) => d.querySelector(':scope > summary').textContent === name)
+const dir = (name) => within(files()).getByRole('button', { name })
+const expanded = (name) => dir(name).getAttribute('aria-expanded')
+/** FE12: a.py is in src/, which is closed on the landing, so its link is reached by opening src/ first. */
+const openSrc = () => fireEvent.click(dir('src/'))
 /** The Files nav as nested arrays: a file's name, or [directory, its entries]. */
 const shape = (ul) =>
   [...ul.children].map((li) => {
-    const details = li.querySelector(':scope > details')
-    return details ? [details.querySelector(':scope > summary').textContent, shape(details.querySelector(':scope > ul'))] : li.textContent
+    const button = li.querySelector(':scope > button')
+    return button ? [button.textContent, shape(li.querySelector(':scope > ul'))] : li.textContent
   })
 
 // --- Route, header, URL ------------------------------------------------------------------
@@ -78,6 +81,7 @@ test('FE33, 047 Q1: a ?path= change refetches the code view-model, not the board
     [`GET ${BOARD}`]: [200, BOARD_PAGE],
   })
   await waitFor(() => expect(h1().textContent).toBe('api · personal'))
+  openSrc()
   fireEvent.click(link('a.py'))
   await waitFor(() => expect(fileHeader().textContent).toBe('src/a.py'))
   await act(() => router.navigate('/projects/3/code'))
@@ -140,12 +144,16 @@ test('AC3: ?path= is sent encoded and titles the page; an empty ?path= is the la
 
 // --- Tree --------------------------------------------------------------------------------
 
-test('AC4: a Files nav of nested lists in the view-model order, <details> directories, encoded file links', async () => {
+test('FE9 (AC4): the Files nav is FileTree, nested in the view-model order, with encoded file links', async () => {
   await open({ [`GET ${API}`]: [200, landing()] })
+  // FE1 checks the nesting itself; here the view-model's tree reaches FileTree in its Object.entries order
   expect(shape(files().querySelector(':scope > ul'))).toEqual([
     'README.md',
     ['src/', ['a.py', ['lib/', ['b.py']]]],
     ['docs/', ['guide.md']],
+  ])
+  expect(within(files()).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-expanded')])).toEqual([
+    ['src/', 'false'], ['docs/', 'false'],
   ])
   const hrefs = [...files().querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])
   expect(hrefs).toEqual([
@@ -156,25 +164,37 @@ test('AC4: a Files nav of nested lists in the view-model order, <details> direct
   ])
 })
 
-test('AC5: nothing open on the landing; the URL\'s file opens its directories and is the current page', async () => {
+test('FE10 (AC5): nothing open on the landing; the URL\'s file opens its directories and is the current page', async () => {
   const { unmount } = await open({ [`GET ${API}`]: [200, landing()] })
-  expect(document.querySelectorAll('main details').length).toBe(3)
-  expect(document.querySelectorAll('details[open]').length).toBe(0)
+  expect(within(files()).getAllByRole('button').map((b) => b.getAttribute('aria-expanded'))).toEqual(['false', 'false'])
   expect(files().querySelectorAll('[aria-current]').length).toBe(0) // 047: the breadcrumb's Code is current too
   unmount()
   await openFile('src/lib/b.py', file('src/lib/b.py', text('y = 2\n'), 'py'))
-  expect(dir('src/').open).toBe(true)
-  expect(dir('lib/').open).toBe(true)
-  expect(dir('docs/').open).toBe(false)
+  expect([expanded('src/'), expanded('lib/'), expanded('docs/')]).toEqual(['true', 'true', 'false'])
   expect(link('b.py').getAttribute('aria-current')).toBe('page')
   expect([...files().querySelectorAll('[aria-current]')]).toEqual([link('b.py')])
 })
 
-test('AC6: clicking a.py moves the URL, fetches its view-model, and shows the file', async () => {
+test('FE11: a ?path= change opens the new file\'s directories and keeps the ones I opened', async () => {
+  const { router } = await open({
+    [`GET ${API}`]: [200, landing()],
+    [`GET ${API}?path=docs%2Fguide.md`]: [200, file('docs/guide.md', text('# Guide\n'), 'md')],
+  })
+  openSrc()
+  await act(() => router.navigate('/projects/3/code?path=docs/guide.md'))
+  await waitFor(() => expect(fileHeader().textContent).toBe('docs/guide.md'))
+  expect(expanded('docs/')).toBe('true')
+  expect(link('guide.md').getAttribute('aria-current')).toBe('page')
+  expect(expanded('src/')).toBe('true')
+  expect(expanded('lib/')).toBe('false')
+})
+
+test('AC6, FE12: clicking a.py moves the URL, fetches its view-model, and shows the file', async () => {
   const { fetch, router } = await open({
     [`GET ${API}`]: [200, landing()],
     [`GET ${API}?path=src%2Fa.py`]: [200, file('src/a.py', text('import os\n'), 'py')],
   })
+  openSrc()
   fireEvent.click(link('a.py'))
   await waitFor(() => expect(fileHeader().textContent).toBe('src/a.py'))
   expect(router.state.location.pathname).toBe('/projects/3/code')
@@ -323,6 +343,7 @@ test('AC20: a failed first load is an alert alone; a failed click keeps the page
   first.unmount()
 
   await open({ [`GET ${API}`]: [200, landing()], [`GET ${API}?path=src%2Fa.py`]: [500, { detail: 'boom' }] })
+  openSrc()
   fireEvent.click(link('a.py'))
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
   expect(h1().textContent).toBe('api · personal') // FE4: no board view-model mocked; 047 Q1: the code one names it

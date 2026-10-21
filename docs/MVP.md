@@ -208,7 +208,9 @@ The frontend lives in `frontend/`: a Vite + React SPA in plain JSX, styled with 
 and routed with react-router. highlight.js, installed from npm, highlights code. The fonts
 come from `@fontsource-variable/ibm-plex-sans` and `@fontsource-variable/jetbrains-mono`, which
 Vite bundles into `dist/`: they are self-hosted, so the app on 127.0.0.1 works offline and
-calls no CDN. Tests run on
+calls no CDN. Components come from Preline UI, the free `preline` package (MIT, with Preline's
+Fair Use License), installed from npm and bundled into `dist/` the same way, with no Preline
+Pro. Tests run on
 vitest with @testing-library/react and jsdom. `frontend/server.js` serves the built SPA and
 proxies `/api` to the backend. It runs on `node:http` with no extra dependencies. The
 frontend needs Node 22 and npm.

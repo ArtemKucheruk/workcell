@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router'
 import { boardPage, codePage } from '../../api/pages.js'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { FileTree } from '../../components/FileTree.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
@@ -14,34 +15,8 @@ import { usePoll } from '../../hooks/usePoll.js'
 // Q6: both <pre> share font, size, and line height, so the gutter's numbers line up with the code's lines
 const mono = 'm-0 p-2 font-mono text-[0.85rem]/[1.4]'
 
-/**
- * Q4: the nested tree as sent, in `Object.entries` order; directory keys end in "/". A directory is open
- * only if the URL's `path` is under it, and the URL's file is the current page.
- */
-function Tree({ node, id, path, prefix = '' }) {
-  return (
-    <ul className={prefix ? 'pl-4' : ''}>
-      {Object.entries(node).map(([name, child]) => (
-        <li key={name}>
-          {name.endsWith('/') ? (
-            <details open={path.startsWith(prefix + name)}>
-              <summary className="cursor-pointer">{name}</summary>
-              <Tree node={child} id={id} path={path} prefix={prefix + name} />
-            </details>
-          ) : (
-            <Link
-              to={`/projects/${id}/code?${new URLSearchParams({ path: child.path })}`}
-              aria-current={child.path === path ? 'page' : undefined}
-              className="aria-[current=page]:font-semibold"
-            >
-              {name}
-            </Link>
-          )}
-        </li>
-      ))}
-    </ul>
-  )
-}
+/** Q2, 025 Q4: the view-model's nested tree as FileTree's flat list, in `Object.entries` order; directory keys end in "/". */
+const flatten = (node) => Object.entries(node).flatMap(([name, child]) => (name.endsWith('/') ? flatten(child) : [child]))
 
 /**
  * Q5: the whole file at once, so multi-line strings and comments color right, and only for an extension
@@ -144,7 +119,21 @@ export function CodePage() {
         // Q9: the review page's Files grid; minmax(0, 1fr) keeps a long line from widening the page
         <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">
           <nav aria-label="Files" className="text-sm wrap-anywhere">
-            <Tree node={tree} id={project.id} path={path} />
+            {/* Q3: the URL's file opens its directories and is the current page; keyed so another project starts fresh */}
+            <FileTree
+              key={project.id}
+              files={flatten(tree)}
+              current={path}
+              renderFile={(file, name) => (
+                <Link
+                  to={`/projects/${project.id}/code?${new URLSearchParams({ path: file.path })}`}
+                  aria-current={file.path === path ? 'page' : undefined}
+                  className="text-fg aria-[current=page]:font-semibold aria-[current=page]:text-accent"
+                >
+                  {name}
+                </Link>
+              )}
+            />
           </nav>
           <div className="min-w-0">
             {shown && (

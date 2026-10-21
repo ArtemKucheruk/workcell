@@ -8,6 +8,7 @@ import { TaskState } from '../../components/Badge.jsx'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
+import { FileTree } from '../../components/FileTree.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TabsSkeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
@@ -164,43 +165,6 @@ function Conversation({ page, onSent }) {
 
 // --- Files changed (docs/ui.md §8.3) -----------------------------------------------------
 
-/** 008 Q6: {"dir/": Map, name: file} in patch order; a directory sits where its first file is. */
-function fileTree(files) {
-  const root = new Map()
-  for (const file of files) {
-    const parts = file.path.split('/')
-    let node = root
-    for (const dir of parts.slice(0, -1)) {
-      if (!node.has(`${dir}/`)) node.set(`${dir}/`, new Map())
-      node = node.get(`${dir}/`)
-    }
-    node.set(parts.at(-1), file)
-  }
-  return root
-}
-
-/** Q2: plain fragment links, so the browser does the scrolling. */
-function Tree({ node, nested = false }) {
-  return (
-    <ul className={nested ? 'pl-4' : ''}>
-      {[...node].map(([name, child]) => (
-        <li key={name}>
-          {child instanceof Map ? (
-            <>
-              {name}
-              <Tree node={child} nested />
-            </>
-          ) : (
-            <a href={`#${encodeURI(`file:${child.path}`)}`}>
-              {name} <span className="tabular-nums">{plusMinus(child)}</span>
-            </a>
-          )}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
 /**
  * Q10: each code cell's highlight.js HTML, which escapes the text, or null when highlight.js doesn't know the
  * extension (no auto-detection). ponytail: line by line, so a construct spanning lines (a multi-line string or
@@ -337,7 +301,16 @@ function Files({ page, onSent }) {
   return (
     <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-[minmax(10rem,16rem)_minmax(0,1fr)]">
       <nav aria-label="Files" className="text-sm wrap-anywhere md:sticky md:top-4">
-        <Tree node={fileTree(files)} />
+        {/* Q2: plain fragment links, so the browser does the scrolling; Q3: every directory starts open */}
+        <FileTree
+          files={files}
+          allOpen
+          renderFile={(file, name) => (
+            <a href={`#${encodeURI(`file:${file.path}`)}`} className="text-fg">
+              {name} <span className={`tabular-nums ${muted}`}>{plusMinus(file)}</span>
+            </a>
+          )}
+        />
       </nav>
       {/* grid-cols-1 is minmax(0, 1fr): an auto track would grow to the widest diff line and widen the page */}
       <div className="grid min-w-0 grid-cols-1 gap-6">

@@ -330,3 +330,20 @@ test('042 FE37: Reviews, Context, and Settings keep main at mx-auto max-w-6xl', 
     unmount()
   }
 })
+
+test('050 FE18: autoInit runs once the route\'s page has mounted, and again on each navigation while its view-model is pending', async () => {
+  const at = [] // what main showed at each call
+  const autoInit = vi.fn(() => at.push(document.querySelector('main').innerHTML))
+  vi.stubGlobal('HSStaticMethods', { autoInit })
+  vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {}))) // nothing ever loads, so usePoll never calls it
+  const { router } = renderAt('/')
+  await screen.findByRole('status') // the dashboard's skeleton
+  expect(autoInit).toHaveBeenCalledTimes(1)
+  expect(at[0]).toBe(document.querySelector('main').innerHTML)
+  await act(() => router.navigate('/projects/3'))
+  expect(autoInit).toHaveBeenCalledTimes(2)
+  expect(at[1]).toBe(document.querySelector('main').innerHTML)
+  expect(at[1]).not.toBe(at[0]) // the board's skeleton, not the dashboard's
+  await act(() => router.navigate('/projects/3?x=1'))
+  expect(autoInit).toHaveBeenCalledTimes(3)
+})

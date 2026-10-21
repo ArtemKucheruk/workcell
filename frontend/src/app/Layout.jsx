@@ -90,6 +90,11 @@ export function Layout() {
     }
   }, [pathname, search])
 
+  // 050 Q8: Preline's plugins bind to the markup a route renders; optional, since only the built app loads Preline
+  useEffect(() => {
+    window.HSStaticMethods?.autoInit()
+  }, [location])
+
   // Q11: any navigation closes the drawer, a link to the page it's on included
   useEffect(() => {
     if (dialog.current.open) dialog.current.close()
