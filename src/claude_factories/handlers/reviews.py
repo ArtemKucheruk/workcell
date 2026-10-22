@@ -11,6 +11,7 @@ from ..domain.enums import Reviewer, Stage, Status
 from ..domain.errors import Conflict, DomainError, Invalid, NotFound
 from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, CommentBody, DecisionBody, IdOut,
                            VerdictBody, VerdictOut)
+from ..repositories.context_items import ContextItemsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
@@ -130,17 +131,25 @@ def rework(tx, git: Git, claude: Claude, task_id: int, body: ChangesBody, base_u
     return ChangesOut(status="in_progress", stage="rework", run_id=run_id)
 
 
-def context_md(reviews: ReviewsRepo, task, found: list, feedback=None, project_md: str | None = None) -> str:
+def context_md(reviews: ReviewsRepo, task, found: list, feedback=None, project_md: str | None = None,
+               cards: list = ()) -> str:
     """006 Q5, Q6: the task as markdown blocks joined by one blank line. A block is a heading, then its
     body with trailing whitespace stripped, unless the body is blank. Agent text passes through as is.
-    033 Q2: a non-blank `project_md` comes first, as ## Project context."""
+    033 Q2: a non-blank `project_md` comes first, as ## Project context. 057: then the context cards, by
+    position (`cards` is ContextItemsRepo.for_project), each top-level one as ### and a group's as ####."""
     blocks = []
 
     def add(heading: str, body: str | None = None):
         blocks.append(heading + (f"\n{body.rstrip()}" if body and body.strip() else ""))
 
-    if project_md and project_md.strip():
+    if (project_md and project_md.strip()) or cards:
         add("## Project context", project_md)
+    for card in cards:
+        if card["parent_id"] is None:
+            add(f"### {card['title']}", card["content_md"])
+            for child in cards:
+                if child["parent_id"] == card["id"]:
+                    add(f"#### {child['title']}", child["content_md"])
 
     def add_comments(round_id: int, only_me: bool):
         comments = reviews.comments(round_id, only_me)
@@ -173,8 +182,8 @@ def context_md(reviews: ReviewsRepo, task, found: list, feedback=None, project_m
     return "\n\n".join(blocks) + "\n"
 
 
-def context(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, n: str | None,
-            feedback: bool) -> str:
+def context(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, items: ContextItemsRepo, task_id: int,
+            n: str | None, feedback: bool) -> str:
     """§6.2: everything (no query), one round (`?round=`), or my latest feedback (`?feedback=1`)."""
     if n is not None and feedback:
         raise Invalid("give round or feedback, not both")
@@ -191,6 +200,7 @@ def context(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id:
         found = [find_round(tasks, rounds, task_id, n)]
     else:
         found = rounds.all(task_id)
-    # 033 Q2: only the full view carries the project context; --round and --feedback calls repeat often
-    full = n is None and not feedback
-    return context_md(reviews, task, found, mine, task["context_md"] if full else None)
+    # 033 Q2: only the full view carries the project context, cards included; --round and --feedback calls repeat often
+    if n is None and not feedback:
+        return context_md(reviews, task, found, mine, task["context_md"], items.for_project(task["project_id"]))
+    return context_md(reviews, task, found, mine)

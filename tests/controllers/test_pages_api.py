@@ -1753,6 +1753,68 @@ def test_code_branch_git_failure(client, tmp_path, kind, params):  # 054 BE11
     assert (page["branch"], page["branches"], page["tree"]) == (None, [], {})
 
 
+def test_context_library_docs():  # 057 BE23
+    tables = section("data-model-and-api.md", "### 5.1")
+    table = tables[tables.index("CREATE TABLE context_items"):]
+    table = table[:table.index(";")]
+    for column in ("project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE",
+                   "parent_id INTEGER REFERENCES context_items(id) ON DELETE CASCADE", "CHECK (kind IN ('item','group'))",
+                   "title", "description", "content_md", "source_path", "position REAL", "created_at", "updated_at"):
+        assert column in table, column
+    relations = " ".join(tables[tables.index("Relations:"):].split())
+    assert "0–n context items, removed with it" in relations
+    projects = section("data-model-and-api.md", "### 6.1")
+    rows = {
+        "GET  /api/projects/3/context/items ": ['"detail":"Project #99 not found"'],
+        "POST /api/projects/3/context/items ": [
+            "title must not be blank", "description over 160 characters", "a group has no content",
+            "groups are one level deep", "parent_id 7 is not a group of this project", "card over 16 KB",
+            "project context over 64 KB", "every 4xx writes nothing"],
+        "POST /api/projects/3/context/items/upload?name=": ["only .md, .markdown, and .txt files", "not UTF-8"],
+        "POST /api/projects/3/context/items/from-path ": [
+            "path must be absolute", "no file or folder at", "no .md, .markdown, or .txt files",
+            "51 files; the limit is 50", "Permission denied"],
+        "PATCH /api/context/items/5 ": ["send at least one of: title, description, content_md, parent_id, position",
+                                        "Context item #99 not found"],
+        "DELETE /api/context/items/5 ": ["ON DELETE CASCADE"],
+        "POST /api/context/items/5/reload ": ["only a card read from a path can be reloaded", "no file at"],
+    }
+    starts = [projects.index(row) for row in rows]
+    assert starts == sorted(starts)
+    for (row, texts), start, end in zip(rows.items(), starts, [*starts[1:], projects.index("```", starts[-1])]):
+        for text in texts:
+            assert text in projects[start:end], (row, text)
+    assert "<ContextItem> = {" in projects and "**Derived titles and descriptions.**" in projects
+    context_row = section("data-model-and-api.md", "### 6.2")
+    context_row = context_row[context_row.index("GET  /api/tasks/12/context"):context_row.index("PATCH /api/tasks/12")]
+    assert "the pinned context_md, then the context cards" in " ".join(context_row.split())
+    [show] = [line for line in section("claude-code.md", "### 7.2").splitlines() if line.startswith("| `fctl show")]
+    assert "the pinned context, then the project's context cards" in show
+    routes = section("data-model-and-api.md", "### 6.4")
+    assert "`/projects/{id}/context` loads" in routes and "/context/items` for the rest" in routes
+    ui = section("ui.md", "## 8.")
+    item = ui[ui.index("11. **Project context**"):ui.index("12. **Project settings**")]
+    for text in ("Stack and conventions", "<dialog>", "Upload files", "Add from path", "Reload from path"):
+        assert text in item, text
+    assert ui.index("### 8.8 Agents") < ui.index("### 8.9 Context")
+    wireframe = section("ui.md", "### 8.9")
+    grid = wireframe[wireframe.index("[+ New card] [+ New group]"):wireframe.index("⋯ → a native popover menu")]
+    for text in ("api-server · personal", "Upload files", "Path [", "[Add from path]", "2 cards", "README.md"):
+        assert text in wireframe[:wireframe.index("⋯ → ")], text
+    assert grid.index("Stack and conventions") < grid.index("API conventions") < grid.index("Runbooks")
+    menu, modal, dialog = (wireframe.index(m) for m in ("\n⋯ → ", "\nRunbooks → the group modal",
+                                                         "\nAPI conventions → the card dialog"))
+    for text in ("Edit", "Reload from path", "Move to group", "Move out of group", "Delete"):
+        assert text in wireframe[menu:modal], text
+    assert "[Close]" in wireframe[modal:dialog] and "Deploy" in wireframe[modal:dialog]
+    assert "16384 bytes" in wireframe[dialog:] and "Preview" in wireframe[dialog:]
+    safety = " ".join(section("MVP.md", "### 4.5").split())
+    for text in ("context card over 16 KB", "over 64 KB in all", "`.md`, `.markdown`, and `.txt` regular files",
+                 "never subfolders", "at most 50 per folder", "writes nothing to disk"):
+        assert text in safety, text
+    assert "MAX_CONTEXT_TOTAL, MAX_CONTEXT_FILES" in section("MVP.md", "### 4.7")
+
+
 def test_code_branch_docs():  # 054 BE12
     ui = section("ui.md", "## 8.")
     item = ui[ui.index("6. **Project code**"):ui.index("7. **fctl reference**")]

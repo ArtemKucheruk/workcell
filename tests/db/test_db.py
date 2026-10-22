@@ -35,7 +35,8 @@ def test_schema_has_every_table_and_index():  # AC10
     with closing(db.connect()) as conn:
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
-              "decisions", "events", "transcripts", "factories", "claude_accounts"}  # 030 AC15, 051 BE1, 056
+              "decisions", "events", "transcripts", "factories", "claude_accounts",
+              "context_items"}  # 030 AC15, 051 BE1, 056, 057 BE1
     assert {("table", t) for t in tables} <= rows
     assert {("index", "one_active_run"), ("index", "one_active_account")} <= rows
 
@@ -254,3 +255,46 @@ def test_one_active_account():  # 056 BE3
         [(first,)] = conn.execute("SELECT config_dir FROM claude_accounts").fetchall()
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?)", (first, NOW))
+
+
+CONTEXT_ITEM_COLUMNS = [  # 057 BE1: (name, type, notnull)
+    ("id", "INTEGER", 0), ("project_id", "INTEGER", 1), ("parent_id", "INTEGER", 0), ("kind", "TEXT", 1),
+    ("title", "TEXT", 1), ("description", "TEXT", 1), ("content_md", "TEXT", 1), ("source_path", "TEXT", 0),
+    ("position", "REAL", 1), ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1),
+]
+
+
+def assert_context_items_table():
+    with closing(db.connect()) as conn:
+        columns = conn.execute("PRAGMA table_info(context_items)").fetchall()
+        assert [(name, kind, notnull) for _, name, kind, notnull, _, _ in columns] == CONTEXT_ITEM_COLUMNS
+        fks = {(fk[2], fk[3], fk[4], fk[6]) for fk in conn.execute("PRAGMA foreign_key_list(context_items)")}
+        assert fks == {("projects", "project_id", "id", "CASCADE"), ("context_items", "parent_id", "id", "CASCADE")}
+        conn.execute("INSERT INTO workspaces (id, name, created_at) VALUES (9, 'w9', ?)", (NOW,))
+        conn.execute("INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at)"
+                     " VALUES (9, 9, 'p9', '/p9', 'main', ?)", (NOW,))
+        with pytest.raises(sqlite3.IntegrityError):  # kind CHECK
+            conn.execute("INSERT INTO context_items (project_id, kind, title, position, created_at, updated_at)"
+                         " VALUES (9, 'folder', 't', 1, ?, ?)", (NOW, NOW))
+        conn.rollback()
+
+
+def test_startup_creates_context_items_table():  # 057 BE1
+    start_app()
+    assert_context_items_table()
+
+
+def test_old_db_gets_context_items_table():  # 057 BE1: a factory.db made before this job
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    db.init()
+    with closing(db.connect()) as conn, conn:
+        conn.execute("INSERT INTO context_items (project_id, kind, title, position, created_at, updated_at)"
+                     " VALUES (1, 'item', 'kept', 1, ?, ?)", (NOW, NOW))
+    db.init()  # a second init changes nothing
+    assert_context_items_table()
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT project_id, title FROM context_items").fetchall() == [(1, "kept")]
+        assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]

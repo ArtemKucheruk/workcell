@@ -361,7 +361,16 @@ Single user and no auth still need these, because the API can start processes th
 - Create factory and Write to repo write only under `<repo>/.claude/`. Before any write, every
   target must resolve inside the project, and no path component from `.claude` down to it may be
   a symlink (a broken one included), or the request is refused with `409` and nothing is written.
-- The server rejects patches over 5 MB and project context over 16 KB with `413`.
+- The server rejects with `413` patches over 5 MB, a project's pinned context or any one
+  context card over 16 KB (`MAX_CONTEXT`), and a project's context over 64 KB in all: the
+  pinned context plus every card, in UTF-8 bytes (`MAX_CONTEXT_TOTAL`).
+- A path read (Context page → **Add from path**, **Reload from path**) reads on the backend's
+  machine, where in Docker only mounted folders exist. It takes only `.md`, `.markdown`, and
+  `.txt` regular files, symlinks followed: the file given, or the ones directly in the folder
+  given, never subfolders. Each is at most 16 KB, at most 50 per folder
+  (`MAX_CONTEXT_FILES`), and must be UTF-8, or the whole read is refused. It writes nothing to
+  disk. Uploads go through the same 16 KB and extension checks, and their name never touches
+  the filesystem.
 - `fctl import-factory` reads only inside `<project>/factory/`, which must resolve inside the project
   root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as
   missing, and a file over 5 MB is refused with `413`.
@@ -418,9 +427,9 @@ src/claude_factories/
 │   ├── git.py      git
 │   └── claude.py   the claude CLI
 ├── domain/         Status, Stage, and Reviewer enums, the §5.2 stage → status map, NotFound / Conflict / Invalid / TooLarge / Failed
-├── lib/            pure parsers and renderers: patch split, diff rows, run log, transcripts, markdown, slug
+├── lib/            pure parsers and renderers: patch split, diff rows, run log, transcripts, markdown, slug, context files
 ├── db/             connection, now(), and schema.sql, applied at startup
-├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT, MAX_BUNDLE, MAX_UNPACKED, MAX_GRAPH
+├── config.py       env and limits: data_dir(), claude_config_dir(), MAX_PATCH, MAX_VIEW, MAX_CONTEXT, MAX_CONTEXT_TOTAL, MAX_CONTEXT_FILES, MAX_BUNDLE, MAX_UNPACKED, MAX_GRAPH
 └── cli/            fctl, stdlib only (§4.2)
 ```
 

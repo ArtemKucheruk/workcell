@@ -283,11 +283,37 @@ Loading, failures, times, and motion are the same on every page:
       **Closed** is the Done column. The tabs show counts, and each tab has an empty state.
     - Each row has `#id title` linking to `/tasks/{id}/review`, its state pill (Open rows
       only), branch, round, verdict chips, and +/−.
-11. **Project context** (`/projects/{id}/context`)
-    - The editor, open on load (`GET`/`PUT /api/projects/{id}/context`): a textarea, a live
-      UTF-8 byte count against the 16 KB cap (`over the limit` disables Save), and **Save**.
-    - Beside it, a **Preview** of the saved `context_html`, refreshed by each Save.
-    - Loaded once, not polled.
+11. **Project context** (`/projects/{id}/context`; wireframe §8.9)
+    - A grid of context cards, loaded once, not polled: `GET /api/projects/{id}/context` for the
+      pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1). Agents get all of
+      them through `fctl show`, in grid order.
+    - The pinned card, **Stack and conventions**, comes first. It shows `Pinned` and
+      `Agents read it at the top of fctl show.`, and has no `⋯` menu, so it can't be moved or
+      deleted. The top-level cards and groups follow in position order, each with its title as a
+      button and its description. A group shows its count (`2 cards`, `1 card`, `0 cards`), and a
+      card read from a path shows that path in mono, muted. A group's cards appear only inside it.
+    - The toolbar: **+ New card**, **+ New group**, **Upload files** (a file input with `multiple`,
+      taking `.md`, `.markdown`, and `.txt`, posted one file per request in selection order), and a
+      **Path** field with **Add from path**, hinted `An absolute path to a .md, .markdown, or .txt
+      file, or a folder of them, on the backend's machine. In Docker, only mounted folders exist.`
+      A folder becomes a group holding a card per file.
+    - A card's title opens it in a modal `<dialog>`. The pinned card's holds 033's editor: a
+      textarea, a live UTF-8 byte count against the 16 KB cap (`over the limit` disables Save), and
+      beside it a **Preview** of the saved `context_html`. Any other card's holds Title,
+      Description, and Content, with the same byte count and Preview. **Save** sends
+      `PUT /api/projects/{id}/context` or `PATCH /api/context/items/{id}`, and a refusal shows
+      inside the dialog, which keeps the draft. **+ New card** opens it empty, and **+ New group**
+      with only Title and Description. Renaming a card is its Title field.
+    - Each other card's `⋯` button opens a native popover menu, like the sidebar's: **Edit**,
+      **Reload from path** (cards read from a path only), a muted `Move to group` caption with a
+      button per other group, **Move out of group** for a card in a group, and, under a divider,
+      **Delete** in `danger`. A group's menu holds **Edit** and **Delete**. Delete opens the
+      `DeleteDialog` of §8.4: the files a card was read from stay on disk.
+    - A group's title opens it in a modal `<dialog>`: its description, its cards with their `⋯`
+      menus, **+ New card**, Upload files, and Add from path, each adding into the group, and
+      **Close**.
+    - A refused move, reload, upload (`<file name>: <detail>`), or path read shows its detail in
+      an alert, the group modal's when it came from there.
 12. **Project settings** (`/projects/{id}/settings`)
     - At the top of Repository, one form: **Name** and **Test command** (empty when not set),
       with one **Save** sending both as typed (`PATCH /api/projects/{id}`). A blank test command
@@ -651,4 +677,62 @@ agents: the orchestrator first, then each spawned agent in spawn order; the type
 (● running): the outlined accent pill; "finished · <duration>", or "finished" when the log gives no duration
 the latest tool line: monospace, muted, one line
 Run log → /tasks/12#run-log · N transcripts → /tasks/11, left out at 0 · [Stop] with its spinner; a refusal is a red alert
+```
+
+### 8.9 Context
+```
+/projects/3/context
+api-server · personal                                                       Factory: ready ✓
+[+ New card] [+ New group]   Upload files [Choose files]   Path [/Users/me/notes______] [Add from path]
+An absolute path to a .md, .markdown, or .txt file, or a folder of them, on the backend's machine. …
+┌ Stack and conventions ────── Pinned ┐ ┌ API conventions ──────────── ⋯ ┐ ┌ Runbooks ─────────────────── ⋯ ┐
+│ Agents read it at the top of fctl   │ │ Every endpoint returns JSON,   │ │ Deploys and rollbacks, step by │
+│ show.                               │ │ errors included.               │ │ step.                          │
+│                                     │ │                                │ │ 2 cards                        │
+└─────────────────────────────────────┘ └────────────────────────────────┘ └────────────────────────────────┘
+┌ api-server ────────────────────── ⋯ ┐
+│ A small FastAPI service: login, …   │
+│ /Users/me/demo/api-server/README.md │
+└─────────────────────────────────────┘
+grid: the pinned card first, then the top-level cards and groups by position; a title is a button
+  that opens the card dialog (a group's, the group modal) · the path under a card read from one: mono, muted
+Upload files: a file input, multiple, accept=".md,.markdown,.txt" · [Add from path]: disabled while Path is blank
+a refusal: a red alert under the project header, "<file name>: <detail>" for an upload
+
+⋯ → a native popover menu
+┌───────────────────┐
+│ Edit              │
+│ Reload from path  │  cards read from a path only
+│ Move to group     │  a muted caption, left out with no group to move to
+│   Runbooks        │  one button per group the card isn't in
+│ Move out of group │  a card in a group only
+├───────────────────┤
+│ Delete            │  danger; opens DeleteDialog (§8.4)
+└───────────────────┘
+a group's ⋯: Edit and Delete only
+
+Runbooks → the group modal, a <dialog>
+┌ Runbooks ─────────────────────────────────────────────────────────────────── [Close] ┐
+│ Deploys and rollbacks, step by step.                                                 │
+│ [+ New card]   Upload files [Choose files]   Path [__________________] [Add from path] │
+│ ┌ Deploy ───────────────────── ⋯ ┐ ┌ Roll back ────────────────── ⋯ ┐                  │
+│ │ Tag main, wait for CI, then    │ │ Redeploy the previous tag.     │                  │
+│ │ roll the tag out.              │ │                                │                  │
+│ └────────────────────────────────┘ └────────────────────────────────┘                  │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+no + New group here: groups are one level deep · each add sends the group's id · Esc or Close closes it
+
+API conventions → the card dialog, a <dialog>
+┌ Edit API conventions ─────────────────────────────────────────────────────── [Close] ┐
+│ Title [API conventions__________________________]                                     │
+│ Description [Every endpoint returns JSON, errors included.]                           │
+│ Content                                      │ Preview                                │
+│ [# API conventions                         ] │ API conventions                        │
+│ [                                          ] │ Every endpoint returns JSON, errors    │
+│ [Every endpoint returns JSON, errors …     ] │ included.                              │
+│ 212 / 16384 bytes                  [Save]    │                                        │
+└──────────────────────────────────────────────────────────────────────────────────────┘
++ New card: "New card", empty, no Preview yet · + New group: "New group", Title and Description only
+the pinned card: "Stack and conventions" with 033's editor · over 16384 bytes: "over the limit" in danger, Save disabled
+a refusal (413 card over 16 KB): inside the dialog, which stays open with what was typed
 ```

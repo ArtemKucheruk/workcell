@@ -15,8 +15,10 @@ from ..adapters.git import Git
 from ..domain.enums import STAGE_STATUS, Reviewer
 from ..domain.errors import Conflict, Failed
 from ..dto.rounds import RoundBody
+from ..lib.context_file import derive
 from ..lib.diff import diff_rows
 from ..lib.slug import slug
+from ..repositories.context_items import ContextItemsRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -71,6 +73,7 @@ class Demo:
     def __init__(self, conn, git: Git, now: str, root: Path):
         self.workspaces, self.projects, self.tasks = WorkspacesRepo(conn), ProjectsRepo(conn), TasksRepo(conn)
         self.rounds, self.reviews, self.runs = RoundsRepo(conn), ReviewsRepo(conn), RunsRepo(conn)
+        self.context_items = ContextItemsRepo(conn)
         self.git, self.root = git, root
         self.now = self.clock = datetime.strptime(now, TIME).replace(tzinfo=UTC)
         self.run: dict | None = None  # the run being logged
@@ -298,6 +301,18 @@ class Demo:
             self.event("user", parent, {"type": "tool_result", "tool_use_id": tool_id, "content": output})
 
 
+    def cards(self, project: dict, days: float) -> None:
+        """057 Q15: two top-level cards, the second read from the repo's README so Reload from path shows, then a
+        Runbooks group with two cards."""
+        add, now = self.context_items.add, self.at(days)
+        add(project["id"], None, "item", "API conventions", API_CARD["description"], API_CARD["content"], None, now)
+        readme = Path(project["path"]) / "README.md"
+        text = readme.read_text(encoding="utf-8")
+        add(project["id"], None, "item", *derive(text, readme.name), text, str(readme), now)
+        group = add(project["id"], None, "group", "Runbooks", "Deploys and rollbacks, step by step.", "", None, now)
+        for title, description, content in RUNBOOKS:
+            add(project["id"], group, "item", title, description, content, None, now)
+
     # --- the story ----------------------------------------------------------------------
 
     def story(self) -> dict:
@@ -306,6 +321,7 @@ class Demo:
         personal, work = self.workspace("personal", 28), self.workspace("work", 13)
         api = self.project(personal, "api-server", "pytest -q", API_COMMITS, "ready", 28)
         self.projects.set_context(api["id"], API_CONTEXT)
+        self.cards(api, 27)
         notes = self.project(personal, "notes-cli", "pytest -q", NOTES_COMMITS, "none", 20)
         shop = self.project(work, "web-shop", "npm test", SHOP_COMMITS, "uncommitted", 13)
 
@@ -571,6 +587,32 @@ API_CONTEXT = """## Stack
 - One module per area under `app/`, each with its own `router`, included in `app/main.py`.
 - Errors are an `HTTPException` with a sentence the caller can act on.
 """
+API_CARD = {
+    "description": "Every endpoint returns JSON, errors included.",
+    "content": """# API conventions
+
+Every endpoint returns JSON, errors included.
+
+- Errors are `{"detail": "<a sentence the caller can act on>"}` with a 4xx status.
+- Paths are plural nouns: `/users`, `/users/{id}`.
+- Lists take `limit` and `offset`, defaulting to 50 and 0.
+""",
+}
+RUNBOOKS = [  # (title, description, content)
+    ("Deploy", "Tag main, wait for CI, then roll the tag out.", """# Deploy
+
+1. Tag main: `git tag v<version> && git push --tags`.
+2. Wait for CI to go green on the tag.
+3. Roll it out: `fly deploy --image-label v<version>`.
+4. Check `/health` answers `{"status": "ok"}`.
+"""),
+    ("Roll back", "Redeploy the previous tag.", """# Roll back
+
+1. Find the previous tag: `git tag --sort=-creatordate | sed -n 2p`.
+2. Redeploy it: `fly deploy --image-label <tag>`.
+3. Say so in #api, with the tag you left.
+"""),
+]
 
 HEALTH = {
     "description": "The load balancer needs an endpoint that answers without a login.\n\n"
