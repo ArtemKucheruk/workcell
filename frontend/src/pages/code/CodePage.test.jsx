@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, test } from 'vitest'
-import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { cls, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const API = '/api/pages/projects/3/code'
 /** 020's CodeProject, with 047's workspace. */
@@ -10,9 +10,11 @@ const TREE = {
   'src/': { 'a.py': { path: 'src/a.py' }, 'lib/': { 'b.py': { path: 'src/lib/b.py' } } },
   'docs/': { 'guide.md': { path: 'docs/guide.md' } },
 }
-/** 020's CodePage view-model: the spec's README landing; `extra` overrides its fields. */
+/** 054 BE1: local branches, then the origin ones with no local twin. */
+const BRANCHES = ['feature-x', 'main', 'origin/old']
+/** 020's CodePage view-model: the spec's README landing, with 054's branches; `extra` overrides its fields. */
 const landing = (extra = {}) => ({
-  project: PROJECT, error: null, branch: 'main', tree: TREE, shown: 'README.md',
+  project: PROJECT, error: null, branch: 'main', branches: BRANCHES, tree: TREE, shown: 'README.md',
   view: { text: '# Hi\n', lines: 1 }, lang: 'md', readme_html: '<h1>Hi</h1>\n', ...extra,
 })
 /** A file's view-model: `shown` is its path, with a TextView or NoteView and no readme_html. */
@@ -39,6 +41,19 @@ const BOARD_PAGE = {
   columns: { backlog: [], in_progress: [], review: [], done: [] },
 }
 const h1 = () => document.querySelector('main h1')
+const picker = () => screen.queryByRole('combobox', { name: 'Branch' })
+/** The Branch select's options as [text, value] pairs. */
+const options = () => [...picker().options].map((o) => [o.textContent, o.value])
+const pick = (value) => fireEvent.change(picker(), { target: { value } })
+const hrefs = () => [...files().querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])
+/** FE9's hrefs, with no browsed branch. */
+const PLAIN_HREFS = [
+  ['README.md', '/projects/3/code?path=README.md'],
+  ['a.py', '/projects/3/code?path=src%2Fa.py'],
+  ['b.py', '/projects/3/code?path=src%2Flib%2Fb.py'],
+  ['guide.md', '/projects/3/code?path=docs%2Fguide.md'],
+]
+const FOLLOWING = Node.DOCUMENT_POSITION_FOLLOWING
 const files = () => screen.queryByRole('navigation', { name: 'Files' })
 const link = (name) => within(files()).getByRole('link', { name })
 const column = () => files().nextElementSibling
@@ -66,8 +81,9 @@ test('AC1, FE33: the landing fetches once with no query; the header is the proje
   expect(h1().closest('header')).toBe(header)
   expect(within(h1()).getByRole('link', { name: 'personal' }).getAttribute('href')).toBe('/workspaces/2')
   expect(within(header).getByText('Factory: ready ✓')).toBeTruthy()
-  const branch = within(header).getByText(fullText('Branch main'))
-  expect(within(header).getByText('Factory: ready ✓').compareDocumentPosition(branch) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  // FE12: the Branch select, not the old `Branch main` text, follows the factory state
+  const branch = within(header).getByRole('combobox', { name: 'Branch' })
+  expect(within(header).getByText('Factory: ready ✓').compareDocumentPosition(branch) & FOLLOWING).toBeTruthy()
   await waitFor(() => expect(document.title).toBe('api · Code · Claude Factories'))
   await new Promise((r) => setTimeout(r, 50)) // Q1: no polling, so nothing more arrives
   expect(loads(fetch)).toEqual([API])
@@ -122,15 +138,129 @@ test('047 FE4: the breadcrumb personal › api › Code sits above the project h
   }
 })
 
-test('AC2: the branch in a <code>, "detached HEAD" as is, and no Branch text without one', async () => {
-  for (const branch of ['main', 'detached HEAD']) {
-    const { unmount } = await open({ [`GET ${API}`]: [200, landing({ branch })] })
-    const line = screen.getByText(fullText(`Branch ${branch}`))
-    expect(line.querySelector('code').textContent).toBe(branch)
+test('FE1: the header has a Branch select after the factory state: the checked-out branch as "", then the others', async () => {
+  await open({ [`GET ${API}`]: [200, landing()], [`GET ${BOARD}`]: [200, BOARD_PAGE] })
+  const header = document.querySelector('main header')
+  const factory = await within(header).findByText('Factory: ready ✓')
+  const select = within(header).getByRole('combobox', { name: 'Branch' })
+  expect(select.tagName).toBe('SELECT')
+  expect(factory.compareDocumentPosition(select) & FOLLOWING).toBeTruthy()
+  expect(options()).toEqual([['main', ''], ['feature-x', 'feature-x'], ['origin/old', 'origin/old']])
+  expect(select.value).toBe('')
+  expect(select.selectedOptions[0].textContent).toBe('main')
+  expect(screen.queryByText(fullText('Branch main'))).toBeNull()
+  expect(header.querySelector('code')).toBeNull()
+  // round-1 review-ui: the header's flex item shrinks (min-w-0), so the select's max width holds on a 390 px screen
+  expect(select.parentElement.className).toMatch(cls('min-w-0'))
+  expect(select.className).toMatch(cls('max-w-[min(100%,28rem)]'))
+})
+
+test('AC2, FE2, FE3, FE12: "detached HEAD" is the first option, before every listed branch; no select and no Branch text without one', async () => {
+  const { unmount } = await open({ [`GET ${API}`]: [200, landing({ branch: 'detached HEAD' })] })
+  expect(options()).toEqual([['detached HEAD', ''], ...BRANCHES.map((b) => [b, b])])
+  expect(picker().value).toBe('')
+  unmount()
+  await open({ [`GET ${API}`]: [200, landing({ branch: null, branches: [] })] })
+  expect(picker()).toBeNull()
+  expect(document.querySelector('main select')).toBeNull()
+  expect(document.querySelector('main').textContent).not.toContain('Branch')
+})
+
+test('FE4: ?branch=feature-x is fetched and selected; ?branch=<the checked-out branch> selects the "" option', async () => {
+  const { fetch, unmount } = await open({ [`GET ${API}?branch=feature-x`]: [200, landing()] }, '/projects/3/code?branch=feature-x')
+  expect(loads(fetch)).toEqual(['/api/pages/projects/3/code?branch=feature-x'])
+  expect(picker().value).toBe('feature-x')
+  unmount()
+  const main = await open({ [`GET ${API}?branch=main`]: [200, landing()] }, '/projects/3/code?branch=main')
+  expect(loads(main.fetch)).toEqual(['/api/pages/projects/3/code?branch=main'])
+  expect(picker().value).toBe('')
+  expect(hrefs()).toEqual(PLAIN_HREFS) // no browsed branch, so no &branch=
+})
+
+test('FE5 (Q3): choosing origin/old, from the landing or a file, moves to ?branch=origin%2Fold with no ?path= and fetches it', async () => {
+  for (const at of ['/projects/3/code', '/projects/3/code?path=src/a.py']) {
+    const { fetch, router, unmount } = await open({
+      [`GET ${API}`]: [200, landing()],
+      [`GET ${API}?path=src%2Fa.py`]: [200, file('src/a.py', text('x = 1\n'), 'py')],
+      [`GET ${API}?branch=origin%2Fold`]: [200, landing({ readme_html: '<h1>Old</h1>\n' })],
+    }, at)
+    pick('origin/old')
+    await waitFor(() => expect(column().querySelector('.markdown')?.textContent.trim()).toBe('Old'))
+    expect(router.state.location.pathname).toBe('/projects/3/code')
+    expect(router.state.location.search).toBe('?branch=origin%2Fold')
+    expect(loads(fetch)).toEqual([at === '/projects/3/code' ? API : `${API}?path=src%2Fa.py`, `${API}?branch=origin%2Fold`])
+    expect(picker().value).toBe('origin/old')
     unmount()
   }
-  await open({ [`GET ${API}`]: [200, landing({ branch: null })] })
-  expect(document.querySelector('main').textContent).not.toContain('Branch')
+})
+
+test('FE6: from ?path=src/a.py&branch=feature-x, the first option moves to /projects/3/code with no query and fetches it', async () => {
+  const { fetch, router } = await open({
+    [`GET ${API}?path=src%2Fa.py&branch=feature-x`]: [200, file('src/a.py', text('x = 1\n'), 'py')],
+    [`GET ${API}`]: [200, landing()],
+  }, '/projects/3/code?path=src/a.py&branch=feature-x')
+  expect(picker().value).toBe('feature-x')
+  pick('')
+  await waitFor(() => expect(fileHeader().textContent).toBe('README.md'))
+  expect(router.state.location.pathname).toBe('/projects/3/code')
+  expect(router.state.location.search).toBe('')
+  expect(loads(fetch)).toEqual([`${API}?path=src%2Fa.py&branch=feature-x`, API])
+  expect(picker().value).toBe('')
+})
+
+test('FE7: while a branch is browsed every Files link keeps &branch=, and a click fetches it; with none they stay as today', async () => {
+  const { fetch, router } = await open({
+    [`GET ${API}`]: [200, landing()],
+    [`GET ${API}?branch=feature-x`]: [200, landing()],
+    [`GET ${API}?path=src%2Fa.py&branch=feature-x`]: [200, file('src/a.py', text('x = 1\n'), 'py')],
+  })
+  expect(hrefs()).toEqual(PLAIN_HREFS)
+  pick('feature-x')
+  await waitFor(() => expect(loads(fetch)).toHaveLength(2))
+  await waitFor(() => expect(hrefs()).toEqual(PLAIN_HREFS.map(([name, href]) => [name, `${href}&branch=feature-x`])))
+  openSrc()
+  fireEvent.click(link('a.py'))
+  await waitFor(() => expect(fileHeader().textContent).toBe('src/a.py'))
+  expect(router.state.location.search).toBe('?path=src%2Fa.py&branch=feature-x')
+  expect(loads(fetch).at(-1)).toBe(`${API}?path=src%2Fa.py&branch=feature-x`)
+  expect(picker().value).toBe('feature-x')
+  expect(link('a.py').getAttribute('aria-current')).toBe('page')
+})
+
+test('FE8: a branch named origin/feat#1&x round-trips through the select, the URL, the file links, and the API', async () => {
+  const name = 'origin/feat#1&x'
+  const q = 'branch=origin%2Ffeat%231%26x'
+  const { fetch, router } = await open({
+    [`GET ${API}`]: [200, landing({ branches: [...BRANCHES, name] })],
+    [`GET ${API}?${q}`]: [200, landing({ branches: [...BRANCHES, name] })],
+    [`GET ${API}?path=README.md&${q}`]: [200, file('README.md', text('# Feat\n'), 'md', { branches: [...BRANCHES, name] })],
+  })
+  expect(options().at(-1)).toEqual([name, name])
+  pick(name)
+  await waitFor(() => expect(loads(fetch)).toEqual([API, `${API}?${q}`]))
+  expect(router.state.location.search).toBe(`?${q}`)
+  expect(picker().value).toBe(name)
+  await waitFor(() => expect(link('README.md').getAttribute('href')).toBe(`/projects/3/code?path=README.md&${q}`))
+  fireEvent.click(link('README.md'))
+  await waitFor(() => expect(loads(fetch).at(-1)).toBe(`${API}?path=README.md&${q}`))
+  expect(router.state.location.search).toBe(`?path=README.md&${q}`)
+  expect(picker().value).toBe(name)
+})
+
+test('FE9: a 404 for an unknown ?branch= is the not-found state with its detail and no Files nav', async () => {
+  const detail = 'nope is not a branch in api'
+  const { fetch } = await open({ [`GET ${API}?branch=nope`]: [404, { detail }] }, '/projects/3/code?branch=nope')
+  expect(loads(fetch)).toEqual([`${API}?branch=nope`])
+  expect(h1().textContent).toBe(detail)
+  expect(files()).toBeNull()
+  expect(picker()).toBeNull()
+})
+
+test('FE10: an empty ?branch= fetches the code view-model with no query', async () => {
+  const { fetch } = await open({ [`GET ${API}`]: [200, landing()] }, '/projects/3/code?branch=')
+  expect(loads(fetch)).toEqual([API])
+  expect(picker().value).toBe('')
+  expect(hrefs()).toEqual(PLAIN_HREFS)
 })
 
 test('AC3: ?path= is sent encoded and titles the page; an empty ?path= is the landing with no query', async () => {
@@ -155,13 +285,7 @@ test('FE9 (AC4): the Files nav is FileTree, nested in the view-model order, with
   expect(within(files()).getAllByRole('button').map((b) => [b.textContent, b.getAttribute('aria-expanded')])).toEqual([
     ['src/', 'false'], ['docs/', 'false'],
   ])
-  const hrefs = [...files().querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])
-  expect(hrefs).toEqual([
-    ['README.md', '/projects/3/code?path=README.md'],
-    ['a.py', '/projects/3/code?path=src%2Fa.py'],
-    ['b.py', '/projects/3/code?path=src%2Flib%2Fb.py'],
-    ['guide.md', '/projects/3/code?path=docs%2Fguide.md'],
-  ])
+  expect(hrefs()).toEqual(PLAIN_HREFS)
 })
 
 test('FE10 (AC5): nothing open on the landing; the URL\'s file opens its directories and is the current page', async () => {
@@ -320,7 +444,7 @@ test('AC17: a path the backend refuses is the not-found state with its detail an
 
 test('AC18: a git failure shows the alert under the header, with no Files nav', async () => {
   const page = landing({
-    project: { ...PROJECT, path: '/Users/me/gone' }, error: 'fatal: not a git repository', branch: null, tree: {},
+    project: { ...PROJECT, path: '/Users/me/gone' }, error: 'fatal: not a git repository', branch: null, branches: [], tree: {},
     shown: '', view: null, lang: null, readme_html: null,
   })
   await open({ [`GET ${API}`]: [200, page] })

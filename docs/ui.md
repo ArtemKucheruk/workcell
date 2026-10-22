@@ -222,13 +222,20 @@ Loading, failures, times, and motion are the same on every page:
 6. **Project code** (`/projects/{id}/code`)
    - The breadcrumb `workspace › project › Code` above the project header, both from the
      code view-model's project.
-   - Left: the file tree (wireframe §8.6) of `git ls-files` in the main checkout. The
+   - Left: the file tree (wireframe §8.6) of `git ls-files` in the main checkout, or of the
+     picked branch's `git ls-tree -r --name-only`. The
      directories of the file shown open, and the file is marked as the current page. Every
      other directory starts closed, and its `+/−` toggle opens it. Opening another file opens
      its directories and leaves the ones I opened or closed as they were.
    - The landing view renders `README.md`.
    - Clicking a file opens a highlighted view with line numbers. Binary files and files
-     over 1 MB show "not shown". The header shows the current branch.
+     over 1 MB show "not shown".
+   - The header has a **Branch** picker, a native `<select>`: first the checked-out branch (or
+     `detached HEAD`), which is the working tree, then the other listed branches (local ones,
+     then `origin/<name>` for each origin branch with no local twin). Picking one sets
+     `?branch=` and opens that branch's README landing, and file links and `?path=` deep links
+     keep `?branch=`. Its files come from `git cat-file blob <ref>:<path>`, with the same landing and
+     not-shown rules, and a symlink shows its target path. An unknown `?branch=` is not found.
 7. **fctl reference** (`/docs/fctl`)
    - Linked from the sidebar. A table of contents is built from its headings.
    - One anchored section per §7.2 command: synopsis, arguments and flags, stdin, output,
@@ -554,7 +561,7 @@ each row links to /tasks/{id}/review · Closed: the Done column, rows without th
 ```
 personal › api-server › Code
 api-server · personal                                         Factory: ready ✓
-Branch main
+Branch [main ▾]
  README.md            │ app/limits.py
  [−] app/             │ ┌────┬─────────────────────────────────────────────────────┐
   │  auth.py          │ │  1 │ import time                                         │
@@ -569,6 +576,8 @@ tree: Preline Tree View's rows, as in §8.3. The file shown (app/limits.py) is t
   [+] opens a directory and [−] closes it; another file opens its own and leaves the rest as they were.
 viewer: the file's path, then a highlighted view with an aria-hidden gutter of line numbers; binary
   files and files over 1 MB show "not shown". The landing (no ?path=) renders README.md.
+Branch [main ▾]: a native <select>, the checked-out branch first (the working tree), then the other
+  listed branches. Picking one sets ?branch= and opens its README landing; ?path= links keep ?branch=.
 ```
 
 ### 8.7 Factory designer

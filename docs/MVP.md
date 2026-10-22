@@ -356,7 +356,8 @@ Single user and no auth still need these, because the API can start processes th
 - The SPA inserts HTML only from the backend's `*_html` fields and highlight.js output.
   Everything else renders as text, because React escapes it.
 - The code page resolves paths inside the project root only: no `..`, and no symlinks that
-  point outside it.
+  point outside it. Its `?branch=` accepts only a listed branch, passed to git by its full
+  refname (`refs/heads/x`, `refs/remotes/origin/x`), and only paths that branch's tree lists.
 - Create factory and Write to repo write only under `<repo>/.claude/`. Before any write, every
   target must resolve inside the project, and no path component from `.claude` down to it may be
   a symlink (a broken one included), or the request is refused with `409` and nothing is written.
@@ -470,7 +471,7 @@ Rules:
   `claude --resume`.
 - Review page: rounds, verdict chips, unified diff, inline comments, Approve, Request changes.
 - `/factory-submit` for changes made without the factory.
-- Dashboard, project code page with README landing.
+- Dashboard, project code page with README landing and a branch picker.
 - The local safety measures in §4.5.
 
 **Later**
@@ -490,7 +491,7 @@ Rules:
 - SSE instead of polling, and desktop notifications when a review is waiting.
 - Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
-- Branch and worktree browsing on the code page.
+- Worktree browsing on the code page.
 - Scheduled runs (cron checkup agents, other codebase automations), each a run of its own kind
   beside `factory` on the Agents page.
 
