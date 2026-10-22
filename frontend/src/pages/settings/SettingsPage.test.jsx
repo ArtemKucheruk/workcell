@@ -122,7 +122,7 @@ test('FE2: Make active only on inactive items, Log in again or Log in by sign-in
   expect(follows(within(section).getByRole('list'), add)).toBe(true)
 })
 
-test('FE3: below the list, whether runs are enabled, from the active account', async () => {
+test('FE3, round 2 review-ui: below the list and + Add account, whether runs are enabled, from the active account', async () => {
   for (const [accounts, text, red] of [
     [[ONE, TWO], 'Runs enabled', false],
     [[{ ...ONE, active: false }, TWO], 'No active account — runs disabled', true],
@@ -131,17 +131,21 @@ test('FE3: below the list, whether runs are enabled, from the active account', a
     const { section, unmount } = await open(accounts)
     const line = within(section).getByText(text)
     expect(follows(within(section).getByRole('list'), line)).toBe(true)
+    expect(follows(within(section).getByRole('button', { name: '+ Add account' }), line)).toBe(true)
     expect(cls('text-danger').test(line.className)).toBe(red)
     unmount()
   }
 })
 
-test('FE4: an empty list says so, with + Add account and no active account', async () => {
+test('FE4, round 2 review-ui: an empty list says so, then + Add account, then no active account', async () => {
   const { section } = await open([])
-  expect(within(section).getByText('No Claude accounts yet.')).toBeTruthy()
+  const empty = within(section).getByText('No Claude accounts yet.')
+  const add = within(section).getByRole('button', { name: '+ Add account' })
+  const line = within(section).getByText('No active account — runs disabled')
   expect(within(section).queryAllByRole('listitem')).toEqual([])
-  expect(within(section).getByRole('button', { name: '+ Add account' })).toBeTruthy()
-  expect(within(section).getByText('No active account — runs disabled').className).toMatch(cls('text-danger'))
+  expect(follows(empty, add)).toBe(true)
+  expect(follows(add, line)).toBe(true)
+  expect(line.className).toMatch(cls('text-danger'))
 })
 
 test('FE5: Make active posts once, reloads the list, and moves the pill; focus goes to its login button', async () => {

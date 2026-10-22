@@ -52,6 +52,17 @@ def test_api_error_status(server, capsys):  # AC27
     assert capsys.readouterr().err == "fctl: 409 run #41 active\n"
 
 
+def test_api_not_on_subscription_auth_says_what_next(server, capsys):  # 056 round 3 review-ux
+    server.reply = (409, "application/json", json.dumps({"detail": "not on subscription auth"}).encode())
+    with pytest.raises(SystemExit) as e:
+        api("POST", "/api/tasks/12/run")
+    assert e.value.code == 1
+    assert capsys.readouterr().err == (
+        "fctl: 409 not on subscription auth\n"
+        "Sign in to a Claude account, or make one active, under Settings → Claude accounts, then run again.\n"
+    )
+
+
 @pytest.mark.parametrize(
     "ctype, body, expected",
     [

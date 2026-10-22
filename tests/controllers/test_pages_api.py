@@ -626,6 +626,8 @@ def test_accounts_refused_while_running(client, project, fake_login):  # 056 BE1
     add_run(add_task(project, status="in_progress"), "running")
     assert activate(client, two, 409) == {"detail": "a run is active"}
     assert active_ids() == [1]
+    activate(client, 1)  # already active: 200, nothing changes, even during a run (§6.4)
+    assert active_ids() == [1]
     assert disconnect(client, two, 409) == {"detail": "a run is active"}
     assert fake_login.logouts() == []
     assert account_dir(two).is_dir() and account_count() == 2

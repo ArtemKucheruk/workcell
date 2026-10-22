@@ -258,8 +258,8 @@ interactive sessions.
 - Before every run, the app runs `claude auth status` with the same environment and working
   directory, which carries the active Claude account's `CLAUDE_CONFIG_DIR` (§4.6). If the result
   is not `"authMethod": "claude.ai"`, or no account is active, the run is refused with
-  `409 not on subscription auth`. With no active account, claude isn't called at all. The app header shows the reported plan,
-  `subscriptionType: "pro"`.
+  `409 not on subscription auth`. With no active account, claude isn't called at all. The app
+  header shows the reported plan, `subscriptionType: "pro"`.
 - Runs never use `--bare`, which accepts only API keys, or the Agent SDK, which needs an API
   key. Headless `claude -p` is the only way a run starts.
 - There is no dollar budget, because the Pro usage limits are the budget. That is why only
@@ -335,7 +335,8 @@ claude -p "/factory 12" \
   indexes each in `transcripts`. Claude Code prunes old transcripts and the worktree gets
   removed, so the copy is the record. They come from the worktree's folder under the active
   account's `<config dir>/projects/`: the run's own session, its teammates, and their subagents.
-  Make active and Disconnect are refused during a run, so that is the run's own account. A failed copy leaves that file out and never fails the run.
+  Make active and Disconnect are refused during a run, so that is the run's own account. A
+  failed copy leaves that file out and never fails the run.
 
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.

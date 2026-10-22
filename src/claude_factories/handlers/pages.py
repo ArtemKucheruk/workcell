@@ -210,13 +210,15 @@ def accounts(claude: Claude, accounts: ClaudeAccountsRepo) -> list[dict]:
 
 def activate(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo, account_id: int) -> dict:
     """056: make the account the one runs use, and answer /api/auth for it, checked afresh. Q14: a signed-out
-    account may be made active. Refused while a run is active (§4.4), changing nothing. The check comes before
-    the switch, so no write transaction waits on claude, and it refills the auth cache."""
+    account may be made active. Switching is refused while a run is active (§4.4), changing nothing; the
+    already-active account answers 200 even then (§6.4). The check comes before the switch, so no write
+    transaction waits on claude, and it refills the auth cache."""
     found = account(accounts, account_id)
-    if runs.any_running():
+    if not found["active"] and runs.any_running():
         raise Conflict("a run is active")
     info = status(claude, found["config_dir"])
-    accounts.activate(account_id)
+    if not found["active"]:  # no write when already active, so a stale read can't switch accounts mid-run
+        accounts.activate(account_id)
     LOGIN.update(at=monotonic(), dir=found["config_dir"], value=info)
     return described(info)
 

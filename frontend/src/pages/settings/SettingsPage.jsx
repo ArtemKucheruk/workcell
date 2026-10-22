@@ -219,12 +219,6 @@ export function SettingsPage() {
           ) : (
             <p className={muted}>No Claude accounts yet.</p>
           )}
-          <RunsLine accounts={shown} />
-          {status && (
-            <p role="status" className="font-semibold text-success">
-              {status}
-            </p>
-          )}
           <ActionButton
             ref={addButton}
             action={() => begin(adding ? pending.accountId : undefined)}
@@ -233,6 +227,13 @@ export function SettingsPage() {
             {adding ? 'Start over' : '+ Add account'}
           </ActionButton>
           {adding && form}
+          {/* docs/ui.md §8 item 9: below + Add account, whether runs are enabled */}
+          <RunsLine accounts={shown} />
+          {status && (
+            <p role="status" className="font-semibold text-success">
+              {status}
+            </p>
+          )}
           {failure && <ErrorMessage error={failure} />}
           {asking && (
             <DeleteDialog
