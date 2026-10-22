@@ -680,7 +680,10 @@ branch `factory/12-rate-limit-login` from the default branch. Later runs reuse i
 - `fctl: 409 factory isn't committed on main: …`: the message names the next step, exit `1`.
 - `fctl: 409 worktree <path> is missing` and `fctl: 409 git worktree add failed: <git's error>`,
   exit `1`.
-- `fctl: 409 not on subscription auth`: Claude is logged in with an API key, exit `1`.
+- `fctl: 409 not on subscription auth`, then a second line,
+  `Sign in to a Claude account, or make one active, under Settings → Claude accounts, then run again.`:
+  no Claude account is active, the active one isn't signed in, or it is logged in with an API key,
+  exit `1`.
 - `fctl: 500 can't start claude: <reason>`, exit `1`.
 - `next` only: `fctl: 404 backlog is empty` and
   `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
@@ -734,8 +737,11 @@ none
 - `fctl: 409 run #41 active`: a factory task is refused while any run is active, before anything
   is recorded, exit `1`.
 - A factory task's rework run can still be refused after the note is recorded, with
-  [fctl run](#fctl-run)'s messages, for example `fctl: 409 not on subscription auth`, exit `1`.
-  The note and the move stay; start the run again with `fctl run <id>`.
+  [fctl run](#fctl-run)'s messages, for example `fctl: 409 not on subscription auth` and its
+  second line,
+  `Sign in to a Claude account, or make one active, under Settings → Claude accounts, then run again.`,
+  exit `1`. The note and the move stay; fix the cause, then start the run again with
+  `fctl run <id>`.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 

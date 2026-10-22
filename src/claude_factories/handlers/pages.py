@@ -1,10 +1,12 @@
 """Page data for the dashboard, workspace, board, task, review, and agents pages (docs/ui.md §8), the sidebar
-(041), its login badge, the Settings page's Claude login and Disconnect (§8 item 9), and the fctl reference
+(041), its login badge, the Settings page's Claude accounts (§8 item 9, 056), and the fctl reference
 (§8 item 7). Each page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
 import re
 import shlex
+import shutil
 import subprocess
+import tempfile
 from contextlib import suppress
 from itertools import groupby
 from pathlib import Path
@@ -18,6 +20,7 @@ from ..domain.errors import Conflict, Failed, Invalid, NotFound
 from ..lib.diff import diff_rows, file_tree
 from ..lib.markdown import render_with_headings
 from ..lib.run_log import run_agents
+from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -41,8 +44,8 @@ TILES = {
     "done_week": "Done this week", "runs_week": "Runs this week",
 }
 RECENT = 20  # 053: the Agents page's ended runs
-LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "value": auth_status()'s answer}
-# 039: the one `claude auth login` waiting for its code, {"proc", "url"}.
+LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "dir": the active config dir it was filled for (056), "value": …}
+# 039: the one `claude auth login` waiting for its code, {"proc", "url", "account_id"}.
 # ponytail: no lock (Q9): one user, one pending login, and a new login stops the old one first
 PENDING: dict = {}
 LOGIN_CODE_TIMEOUT = 60  # 039 Q4: seconds for claude to exchange the code and exit
@@ -78,50 +81,57 @@ def login_stop(claude: Claude) -> None:
         PENDING.clear()
 
 
-def logout(claude: Claude, runs: RunsRepo) -> dict:
-    """055: `claude auth logout` with the runs' stripped env from the data dir (MVP §4.3), stopping a pending
-    login first. Q2: refused while a run is active (§4.4), changing nothing. Q4: the auth cache is cleared
-    either way, since claude may have logged out partway. Answers /api/auth afresh."""
-    if runs.any_running():
-        raise Conflict("a run is active")
-    login_stop(claude)
-    try:
-        returncode, out = claude.logout(str(config.data_dir()), stripped_env())
-    except OSError as e:
-        raise Failed(f"claude auth logout didn't start: {e}") from None
-    except subprocess.TimeoutExpired:
-        raise Failed("claude auth logout didn't finish") from None
-    finally:
-        LOGIN.clear()
-    if returncode:
-        line = last_line(out)
-        raise Failed(f"claude auth logout failed: {line}" if line
-                     else f"claude auth logout exited with code {returncode}")
-    return auth(claude)
+def env(config_dir: str) -> dict:
+    """056: the runs' stripped env (MVP §4.3) with the account's CLAUDE_CONFIG_DIR. Every claude call for an
+    account takes it, with the neutral data dir as cwd (014 Q1)."""
+    return stripped_env() | {"CLAUDE_CONFIG_DIR": config_dir}
 
 
-def login_start(claude: Claude) -> dict:
-    """039 Q1: `claude auth login --claudeai` with the runs' stripped env from the data dir (MVP §4.3), and
-    its sign-in URL. Q5: allowed while runs are active."""
-    login_stop(claude)
-    try:
-        proc, url, out = claude.login(str(config.data_dir()), stripped_env())
-    except OSError as e:
-        raise Failed(f"claude auth login didn't start: {e}") from None
-    if url is None:
-        claude.stop(proc.pid)
-        reap(proc)
-        line = last_line(out)
-        raise Failed("claude auth login printed no sign-in URL" + (f": {line}" if line else ""))
-    PENDING.update(proc=proc, url=url)
-    return {"url": url}
-
-
-def login_code(claude: Claude, code: str) -> dict:
-    """039 Q1: write `<code>#<state>` to the pending login's stdin, kept open, and wait for claude to exit.
-    Exit 0 answers /api/auth afresh; otherwise claude's `Login failed: …` line is the 422's detail (Q4)."""
-    found = pending()
+def account(accounts: ClaudeAccountsRepo, account_id: int):
+    found = accounts.get(account_id)
     if found is None:
+        raise NotFound(f"Claude account #{account_id} not found")
+    return found
+
+
+def login_start(claude: Claude, accounts: ClaudeAccountsRepo, account_id: int | None) -> dict:
+    """039 Q1: `claude auth login --claudeai` and its sign-in URL. Q5: allowed while runs are active.
+    056 Q3: for account `account_id`, in its dir; with none, a new account in a fresh dir under
+    FCTL_HOME/claude-accounts/ (0700: it will hold OAuth credentials), whose row is added only once the URL
+    has arrived, so no write transaction waits on claude. No URL: the fresh dir goes, and no row is added."""
+    if account_id is not None:
+        config_dir = account(accounts, account_id)["config_dir"]
+    else:
+        root = config.data_dir() / "claude-accounts"
+        root.mkdir(mode=0o700, exist_ok=True)
+        config_dir = tempfile.mkdtemp(dir=root)  # mode 0700
+    login_stop(claude)
+    try:
+        try:
+            proc, url, out = claude.login(str(config.data_dir()), env(config_dir))
+        except OSError as e:
+            raise Failed(f"claude auth login didn't start: {e}") from None
+        if url is None:
+            claude.stop(proc.pid)
+            reap(proc)
+            line = last_line(out)
+            raise Failed("claude auth login printed no sign-in URL" + (f": {line}" if line else ""))
+    except Failed:
+        if account_id is None:
+            shutil.rmtree(config_dir, ignore_errors=True)
+        raise
+    if account_id is None:
+        account_id = accounts.add(config_dir)
+    PENDING.update(proc=proc, url=url, account_id=account_id)
+    return {"url": url, "account_id": account_id}
+
+
+def login_code(claude: Claude, accounts: ClaudeAccountsRepo, code: str, account_id: int | None) -> dict:
+    """039 Q1: write `<code>#<state>` to the pending login's stdin, kept open, and wait for claude to exit.
+    Exit 0 answers /api/auth afresh; otherwise claude's `Login failed: …` line is the 422's detail (Q4).
+    056 Q5: an `account_id` other than the pending login's is a 409, and that login stays pending."""
+    found = pending()
+    if found is None or account_id is not None and account_id != found["account_id"]:
         raise Conflict("no login in progress")
     code = code.strip()
     if len(code) > 2048 or not CODE.fullmatch(code):  # AC12: claude would only re-prompt; the login stays
@@ -139,37 +149,113 @@ def login_code(claude: Claude, code: str) -> dict:
     pending()  # drops it and the auth cache
     if returncode:
         raise Invalid(last_line(out) or f"claude auth login exited with code {returncode}")
-    return auth(claude)
+    return auth(claude, accounts)
 
 
-def auth_status(claude: Claude) -> dict | None:
-    """MVP §4.3: `claude auth status`'s parsed claude.ai answer, or None, checked with the runs' stripped
-    env from the neutral data dir (014 Q1), cached 60 s (014 Q3) for the badge and /api/auth alike (020 Q3).
-    A pending login that has exited clears the cache first (039).
+def status(claude: Claude, config_dir: str) -> dict | None:
+    """§4.3: `claude auth status`'s parsed claude.ai answer for the account in `config_dir`, or None."""
+    return claude.auth_status(str(config.data_dir()), env(config_dir))
+
+
+def auth_status(claude: Claude, accounts: ClaudeAccountsRepo) -> dict | None:
+    """MVP §4.3: the active account's status (056), cached 60 s (014 Q3) for the badge and /api/auth alike
+    (020 Q3), and only for the dir it was filled for, so a switch never serves the old account. No active
+    account: None, without calling claude (056 Q7). A pending login that has exited clears the cache first (039).
     ponytail: no lock, so two cold requests may both run the check."""
     pending()
+    found = accounts.active()
+    if found is None:
+        return None
     now = monotonic()
-    if not LOGIN or now - LOGIN["at"] >= 60:
-        LOGIN.update(at=now, value=claude.auth_status(str(config.data_dir()), stripped_env()))
+    if LOGIN.get("dir") != found["config_dir"] or now - LOGIN["at"] >= 60:
+        LOGIN.update(at=now, dir=found["config_dir"], value=status(claude, found["config_dir"]))
     return LOGIN["value"]
 
 
-def claude_login(claude: Claude) -> tuple[str, bool]:
+def claude_login(claude: Claude, accounts: ClaudeAccountsRepo) -> tuple[str, bool]:
     """docs/ui.md §8: the header's login and whether runs are allowed. 014 Q2: the plan capitalized."""
-    info = auth_status(claude)
+    info = auth_status(claude, accounts)
     if info is None:
         return "Not signed in — runs disabled", False  # 055 Q1: the sidebar badge's wording
     plan = info.get("subscriptionType")
     return f"Claude: {plan.capitalize() if isinstance(plan, str) and plan else 'subscription'} ✓", True
 
 
-def auth(claude: Claude) -> dict:
-    """docs/data-model-and-api.md §6.4's /api/auth. 020 Q3: a non-claude.ai login's method is unknown, so null;
-    `plan` is the raw subscriptionType. 039 Q3: `email` is the claude.ai login's account, else null."""
-    info = auth_status(claude) or {}
+def described(info: dict | None) -> dict:
+    """docs/data-model-and-api.md §6.4's /api/auth body for a status. 020 Q3: a non-claude.ai login's method
+    is unknown, so null; `plan` is the raw subscriptionType. 039 Q3: `email` is the claude.ai login's account,
+    else null."""
+    info = info or {}
     plan, email = info.get("subscriptionType"), info.get("email")
     return {"auth_method": info.get("authMethod"), "plan": plan if isinstance(plan, str) else None,
             "runs_enabled": bool(info), "email": email if isinstance(email, str) else None}
+
+
+def auth(claude: Claude, accounts: ClaudeAccountsRepo) -> dict:
+    """/api/auth: the active account (056)."""
+    return described(auth_status(claude, accounts))
+
+
+def accounts(claude: Claude, accounts: ClaudeAccountsRepo) -> list[dict]:
+    """056: every account by id, each checked afresh in its own dir (Q15).
+    ponytail: one sequential, uncached `claude auth status` per account per load, since Settings loads the list
+    once and never polls; check them in parallel if accounts pile up."""
+    found = []
+    for row in accounts.all():
+        info = described(status(claude, row["config_dir"]))
+        found.append({"id": row["id"], "config_dir": row["config_dir"], "active": bool(row["active"]),
+                      "signed_in": info.pop("runs_enabled")} | info)
+    return found
+
+
+def activate(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo, account_id: int) -> dict:
+    """056: make the account the one runs use, and answer /api/auth for it, checked afresh. Q14: a signed-out
+    account may be made active. Switching is refused while a run is active (§4.4), changing nothing; the
+    already-active account answers 200 even then (§6.4). The check comes before the switch, so no write
+    transaction waits on claude, and it refills the auth cache."""
+    found = account(accounts, account_id)
+    if not found["active"] and runs.any_running():
+        raise Conflict("a run is active")
+    info = status(claude, found["config_dir"])
+    if not found["active"]:  # no write when already active, so a stale read can't switch accounts mid-run
+        accounts.activate(account_id)
+    LOGIN.update(at=monotonic(), dir=found["config_dir"], value=info)
+    return described(info)
+
+
+def delete_account(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo, account_id: int) -> None:
+    """056 (055's logout, per account): refused while a run is active (§4.4), changing nothing. Q12: stops a
+    pending login only if it is this account's. `claude auth logout` in the account's dir; 055 Q4: the auth
+    cache is cleared either way, since claude may have logged out partway. Q2: the dir is deleted only if the
+    app made it, inside FCTL_HOME/claude-accounts/ and not a symlink; already missing is fine. Then the row
+    goes, which leaves none active if it was the active one. On any failure the row stays."""
+    found = account(accounts, account_id)
+    if runs.any_running():
+        raise Conflict("a run is active")
+    if PENDING.get("account_id") == account_id:
+        login_stop(claude)
+    config_dir = found["config_dir"]
+    try:
+        returncode, out = claude.logout(str(config.data_dir()), env(config_dir))
+    except OSError as e:
+        raise Failed(f"claude auth logout didn't start: {e}") from None
+    except subprocess.TimeoutExpired:
+        raise Failed("claude auth logout didn't finish") from None
+    finally:
+        LOGIN.clear()
+    if returncode:
+        line = last_line(out)
+        raise Failed(f"claude auth logout failed: {line}" if line
+                     else f"claude auth logout exited with code {returncode}")
+    path = Path(config_dir)
+    if not path.is_symlink() and (config.data_dir() / "claude-accounts").resolve() in path.resolve().parents:
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            raise Failed(f"can't delete {config_dir}: {e.strerror or e}") from None
+    accounts.delete(account_id)
 
 
 def fctl_doc() -> dict:
@@ -237,7 +323,7 @@ def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, work
 
 
 def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
-          workspaces: WorkspacesRepo, git: Git, claude: Claude, project_id: int) -> dict:
+          workspaces: WorkspacesRepo, git: Git, claude: Claude, accounts: ClaudeAccountsRepo, project_id: int) -> dict:
     # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
     # add a /projects/{id}/board fragment route if that shows up in profiling
     project = projects.for_board(project_id)
@@ -259,7 +345,7 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
     return {
         "project": project, "workspaces": workspaces.all(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
-        "can_run": factory == "ready" and claude_login(claude)[1],  # Q4: the server's checks still decide
+        "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4: the server's checks still decide
     }
 
 
@@ -284,7 +370,7 @@ def page_task(tasks: TasksRepo, task_id: int):
 
 
 def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, transcripts: TranscriptsRepo,
-         git: Git, claude: Claude, task_id: int) -> dict:
+         git: Git, claude: Claude, accounts: ClaudeAccountsRepo, task_id: int) -> dict:
     """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, spec,
     rounds with build notes, verdict popovers, and agents (030), the approver's latest decision, the status
     history, the takeover command (Q9), and the run log."""
@@ -294,11 +380,15 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
     takeover = None  # Q9: only for a run that isn't running, in the task's stored worktree
     if run and found["worktree_path"] and run["status"] != "running":
         wt, session = shlex.quote(found["worktree_path"]), shlex.quote(run["session_id"])
-        takeover = (f"docker compose exec -w {wt} backend claude --resume {session}" if config.in_docker()  # 028 Q7
-                    else f"cd {wt} && claude --resume {session}")
+        # 056: the active account's dir, or nothing with none active (Q7).
+        # ponytail (Q8): the account active now is the run's own unless one was made active since; runs.account_id
+        active = accounts.active()
+        named = f"CLAUDE_CONFIG_DIR={shlex.quote(active['config_dir'])} " if active else ""
+        takeover = (f"docker compose exec -w {wt} {named and f'-e {named}'}backend claude --resume {session}"
+                    if config.in_docker() else f"cd {wt} && {named}claude --resume {session}")  # 028 Q7
     return {
         "run": run, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
-        "can_run": factory == "ready" and claude_login(claude)[1],  # Q4
+        "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4
         "task": found, "rounds": summaries(rounds, reviews, task_id), "posted": posted_verdicts(reviews, task_id),
         "build": {r["n"]: r["build_md"] for r in rounds.all(task_id)},
         "reviewers": REVIEWERS, "approver": reviews.approver_latest(task_id),

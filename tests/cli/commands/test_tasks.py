@@ -113,7 +113,7 @@ def test_task_add_run_refused(server, repo, monkeypatch, capsys):  # 015 AC16
     assert e.value.code == 1
     out, err = capsys.readouterr()
     assert out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
-    assert err == "fctl: 409 not on subscription auth\n"
+    assert err.startswith("fctl: 409 not on subscription auth\nSign in to a Claude account")  # 056: next step
 
 
 def test_task_add_without_run(server, repo, monkeypatch, capsys):  # 015 AC17

@@ -18,6 +18,7 @@ from ..domain.errors import Conflict, DomainError, Failed, NotFound
 from ..dto.runs import LogOut, RunNextOut, RunStarted, StopOut
 from ..lib.run_log import last_result, log_items
 from ..lib.slug import slug
+from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TasksRepo
@@ -74,7 +75,8 @@ def worktree(tx, git: Git, task) -> str:
 def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStarted:
     """Q2's order: 404, run active, status (Q1), factory (Q12), worktree (Q4), auth; then the run row,
     the move, and the event in one transaction, then the spawn (§4.4). `base_url` becomes FCTL_URL: the
-    controller's loopback URL on the server's own port (028 Q5)."""
+    controller's loopback URL on the server's own port (028 Q5). 056: the auth check and the spawn run in
+    the active account's CLAUDE_CONFIG_DIR; with none active, the run is refused without calling claude (Q7)."""
     with tx() as conn:
         task = TasksRepo(conn).for_run(task_id)
     if task is None:
@@ -87,7 +89,14 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
     if hint := factory_hint(factory_state(git, task["path"], branch), branch):
         raise Conflict(hint)
     wt = worktree(tx, git, task)
-    env = stripped_env() | {"FCTL_URL": base_url.rstrip("/")}  # §4.3, passed to both exactly as built
+    # ponytail (Q8): an account made active between this read and the run row's insert goes unnoticed, and
+    # the run uses this one; runs.account_id would pin it
+    with tx() as conn:
+        account = ClaudeAccountsRepo(conn).active()
+    if account is None:
+        raise Conflict("not on subscription auth")
+    env = stripped_env() | {"FCTL_URL": base_url.rstrip("/"),  # §4.3, passed to both exactly as built
+                            "CLAUDE_CONFIG_DIR": account["config_dir"]}
     if claude.auth_status(wt, env) is None:  # each run's own check, never cached (§4.3: before every run)
         raise Conflict("not on subscription auth")
     session_id = str(uuid.uuid4())

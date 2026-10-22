@@ -114,9 +114,17 @@ CREATE TABLE factories (                  -- a project's named factory designs (
   graph TEXT NOT NULL,                    -- the compact JSON of §6.1's <Graph>
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE UNIQUE INDEX factories_name ON factories(project_id, name);  -- a name once per project
+
+CREATE TABLE claude_accounts (            -- Claude logins (MVP §4.6), each in its own CLAUDE_CONFIG_DIR
+  id INTEGER PRIMARY KEY,
+  config_dir TEXT NOT NULL UNIQUE,        -- absolute: ~/.claude for the first, FCTL_HOME/claude-accounts/… if added
+  active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
+  created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX one_active_account ON claude_accounts(active) WHERE active = 1;  -- the one runs use, or none
 ```
 Relations: workspace 1–n project 1–n task. A project has 0–n factories, removed with it (ON DELETE CASCADE).
-A task has 1–n runs and 1–n rounds. A run has 0–n
+A task has 1–n runs and 1–n rounds. A run uses the active Claude account's config dir, and no column records
+which. A run has 0–n
 transcripts. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
@@ -473,32 +481,62 @@ The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces
 Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
 rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.
 ```
-GET  /api/auth                                                    (the sidebar's badge, /settings)
+GET  /api/auth                                                    (the sidebar's badge)
 ← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true,"email":"artem@example.com"}
-  # auth_method, plan, and email are null unless the login is claude.ai
+  # the active Claude account, checked in its config dir and cached 60 s; auth_method, plan, and
+  #   email are null unless its login is claude.ai
+  # no active account → {"auth_method":null,"plan":null,"runs_enabled":false,"email":null}, claude not called
 
-POST /api/auth/login                                              (Settings: Log in with Claude)
-← 200 {"url":"https://claude.ai/oauth/authorize?…"}
-  # starts `claude auth login --claudeai` (§4.3), stopping a pending one first
-  # 500 {"detail":"claude auth login printed no sign-in URL: Error: …"} with claude's last line
+POST /api/auth/login                                              (Settings: + Add account, Log in, Log in again)
+→ {"account_id":2}                      log account #2 in again, in its own config dir
+→ no body, {}, or {"account_id":null}   a new account, in a fresh dir under FCTL_HOME/claude-accounts/ (0700)
+← 200 {"url":"https://claude.ai/oauth/authorize?…","account_id":3}
+  # starts `claude auth login --claudeai` (§4.3), stopping a pending one first; account_id is the
+  #   account the login is for, the new row's for a new account, which is added once the URL has arrived
+  #   and is active only if no account is
+  # 404 {"detail":"Claude account #9 not found"}
+  # 500 {"detail":"claude auth login printed no sign-in URL: Error: …"} with claude's last line; for a
+  #     new account, no row is added and its fresh dir is removed
 
 POST /api/auth/login/code                                         (Settings: Submit code)
-→ {"code":"<code>#<state>"}
+→ {"code":"<code>#<state>","account_id":3}                        account_id optional
 ← 200 {"auth_method":"claude.ai","plan":"pro","runs_enabled":true,"email":"artem@example.com"}
-  # the code goes to the pending login's stdin; the 200 is GET /api/auth's body, checked afresh
-  # 409 {"detail":"no login in progress"}
+  # the code goes to the pending login's stdin; the 200 is GET /api/auth's body (the active account),
+  #   checked afresh
+  # 409 {"detail":"no login in progress"}: none is pending, or account_id isn't the pending login's,
+  #     which then stays pending
   # 422 {"detail":"Login failed: Invalid code"}: claude refused it; or the code isn't
   #     <code>#<state>, and the login stays pending
   # 500 {"detail":"claude auth login didn't finish"}: no exit within 60 s, so the login is stopped
 
-POST /api/auth/logout                                             (Settings: Disconnect)
-← 200 {"auth_method":null,"plan":null,"runs_enabled":false,"email":null}
-  # stops a pending login, then runs `claude auth logout` (§4.3); the 200 is GET /api/auth's body,
-  # checked afresh (the 60 s cache is cleared, after a failed logout too)
+GET  /api/auth/accounts                                           (Settings: the list, loaded once)
+← 200 [{"id":1,"config_dir":"/home/me/.claude","active":true,"signed_in":true,
+        "auth_method":"claude.ai","plan":"pro","email":"artem@example.com"},
+       {"id":3,"config_dir":"/home/me/.claude-factories/claude-accounts/k3j2h1x9","active":false,
+        "signed_in":false,"auth_method":null,"plan":null,"email":null}]
+  # every account by id, [] with none; each checked afresh with `claude auth status` in its own
+  #   config dir, uncached; signed_in, auth_method, plan, and email follow GET /api/auth's rules for
+  #   runs_enabled, auth_method, plan, and email
+
+POST /api/auth/accounts/{id}/activate                             (Settings: Make active)
+← 200 {"auth_method":"claude.ai","plan":"max","runs_enabled":true,"email":"me@work.example"}
+  # the account runs use from now on; the 200 is GET /api/auth's body, now for it, checked afresh
+  # already active: 200, nothing changes · a signed-out account may be made active
+  # 404 {"detail":"Claude account #9 not found"}
+  # 409 {"detail":"a run is active"}: a run has status running (§4.4), and nothing changes
+
+DELETE /api/auth/accounts/{id}                                    (Settings: Disconnect)
+← 204
+  # stops a pending login for this account, runs `claude auth logout` (§4.3) in its config dir, deletes
+  #   the dir only if it lies inside FCTL_HOME/claude-accounts/ and isn't a symlink (so never ~/.claude),
+  #   then the row; deleting the active account leaves none active. The 60 s cache is cleared, after a
+  #   failed logout too
+  # 404 {"detail":"Claude account #9 not found"}
   # 409 {"detail":"a run is active"}: a run has status running (§4.4), and nothing else happens
   # 500 {"detail":"claude auth logout failed: Error: …"} with claude's last line, or
   #     "claude auth logout exited with code <n>" when it printed nothing
   # 500 {"detail":"claude auth logout didn't start: …"} / "claude auth logout didn't finish" (30 s)
+  # 500 {"detail":"can't delete <config_dir>: <reason>"}; on any 500 the row stays
 
 GET  /api/pages/dashboard                       tiles, the waiting and escalated lists ({id, title, project_id,
                                                 project, round, since}, newest since first), open tasks per

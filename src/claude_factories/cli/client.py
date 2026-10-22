@@ -39,6 +39,9 @@ def api(method: str, path: str, body=None, data: bytes | None = None, content_ty
             detail = text or e.reason
         if not isinstance(detail, str):
             detail = json.dumps(detail)
+        if detail == "not on subscription auth":  # 056: the API detail is pinned (BE15); add the next step here
+            detail += ("\nSign in to a Claude account, or make one active, under Settings → Claude accounts,"
+                       " then run again.")
         fail(f"{e.code} {detail}")
     except OSError:  # URLError (refused, DNS) and resets mid-response
         fail(f'can\'t reach {base} — is "fctl serve" running?')

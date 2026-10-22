@@ -34,10 +34,10 @@ def test_schema_has_every_table_and_index():  # AC10
     start_app()
     with closing(db.connect()) as conn:
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
-    tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files",
-              "verdicts", "comments", "decisions", "events", "transcripts", "factories"}  # 030 AC15, 051 BE1
+    tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
+              "decisions", "events", "transcripts", "factories", "claude_accounts"}  # 030 AC15, 051 BE1, 056
     assert {("table", t) for t in tables} <= rows
-    assert ("index", "one_active_run") in rows
+    assert {("index", "one_active_run"), ("index", "one_active_account")} <= rows
 
 
 def test_journal_mode_is_wal():  # AC11
@@ -215,3 +215,42 @@ def test_old_db_gets_factories_table():  # 051 BE1: a factory.db made before thi
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]
         assert conn.execute("SELECT id FROM workspaces").fetchall() == [(1,)]
+
+
+def accounts() -> list[tuple]:
+    with closing(db.connect()) as conn:
+        return conn.execute("SELECT config_dir, active FROM claude_accounts ORDER BY id").fetchall()
+
+
+def test_old_db_gets_first_account(tmp_path, monkeypatch):  # 056 BE1, Q1
+    db.init()
+    with closing(db.connect()) as conn, conn:
+        conn.execute("DROP TABLE claude_accounts")
+        conn.execute("INSERT INTO workspaces (name, created_at) VALUES ('personal', ?)", (NOW,))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "old"))
+    db.init()
+    assert accounts() == [(str(tmp_path / "old"), 1)]
+    db.init()
+    assert accounts() == [(str(tmp_path / "old"), 1)]
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT name, created_at FROM workspaces").fetchall() == [("personal", NOW)]
+
+
+def test_fresh_db_gets_first_account(tmp_path, monkeypatch):  # 056 BE2, Q1
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    db.init()
+    assert accounts() == [(str(config.claude_config_dir()), 1)] == [(str(tmp_path / "home" / ".claude"), 1)]
+    with closing(db.connect()) as conn, conn:
+        conn.execute("DELETE FROM claude_accounts")
+    db.init()
+    assert accounts() == []
+
+
+def test_one_active_account():  # 056 BE3
+    db.init()
+    with closing(db.connect()) as conn:
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO claude_accounts (config_dir, active, created_at) VALUES ('/b', 1, ?)", (NOW,))
+        [(first,)] = conn.execute("SELECT config_dir FROM claude_accounts").fetchall()
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?)", (first, NOW))

@@ -28,7 +28,15 @@ def init() -> None:
     config.data_dir().mkdir(parents=True, exist_ok=True)
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")
+        fresh = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'claude_accounts'").fetchone() is None
         conn.executescript(SCHEMA.read_text())
+        # 056 Q1: the login runs used so far (CLAUDE_CONFIG_DIR, else ~/.claude) becomes the first, active account,
+        # once: when the table is new, so a deleted account never comes back
+        if fresh:
+            with conn:
+                conn.execute("INSERT INTO claude_accounts (config_dir, active, created_at) VALUES (?, 1, ?)",
+                             (str(config.claude_config_dir()), now()))
         # 033 Q1: CREATE TABLE IF NOT EXISTS skips a factory.db made before projects.context_md
         if "context_md" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
             conn.execute("ALTER TABLE projects ADD COLUMN context_md TEXT NOT NULL DEFAULT ''")

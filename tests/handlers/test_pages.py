@@ -9,6 +9,7 @@ from claude_factories.adapters.claude import SubprocessClaude
 from claude_factories.adapters.git import SubprocessGit
 from claude_factories.domain.errors import NotFound
 from claude_factories.handlers import code, pages
+from claude_factories.repositories.claude_accounts import ClaudeAccountsRepo
 from claude_factories.repositories.projects import ProjectsRepo
 from claude_factories.repositories.reviews import ReviewsRepo
 from claude_factories.repositories.rounds import RoundsRepo
@@ -36,10 +37,12 @@ def detail(call) -> str:
 def test_page_handlers_raise_not_found(conn, repo):  # 036 AC11
     git, claude = SubprocessGit(), SubprocessClaude()
     projects, tasks, rounds, reviews = ProjectsRepo(conn), TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn)
-    runs, workspaces = RunsRepo(conn), WorkspacesRepo(conn)
+    runs, workspaces, accounts = RunsRepo(conn), WorkspacesRepo(conn), ClaudeAccountsRepo(conn)
     assert detail(lambda: pages.workspace(workspaces, projects, git, 999)) == "Not Found"
-    assert detail(lambda: pages.board(projects, tasks, rounds, reviews, runs, workspaces, git, claude, 999)) == "Not Found"
-    assert detail(lambda: pages.task(tasks, rounds, reviews, runs, TranscriptsRepo(conn), git, claude, 999)) == "Task #999 not found"
+    assert detail(lambda: pages.board(projects, tasks, rounds, reviews, runs, workspaces, git, claude, accounts,
+                                      999)) == "Not Found"
+    assert detail(lambda: pages.task(tasks, rounds, reviews, runs, TranscriptsRepo(conn), git, claude, accounts,
+                                     999)) == "Task #999 not found"
     assert detail(lambda: pages.review(tasks, rounds, reviews, 999, "latest", "")) == "Task #999 not found"
     assert detail(lambda: code.code(projects, git, 999, "")) == "Project #999 not found"
     commit(repo, {"README.md": "# hi\n"})

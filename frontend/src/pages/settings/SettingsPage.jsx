@@ -1,98 +1,179 @@
 import { useEffect, useRef, useState } from 'react'
-import { getAuth, logout, planName, sendLoginCode, startLogin } from '../../api/auth.js'
+import { activateAccount, deleteAccount, getAccounts, planName, sendLoginCode, startLogin } from '../../api/auth.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
+import { ActivePill } from '../../components/Badge.jsx'
 import { DeleteDialog } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Block, ButtonBlock, Rows, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
-/** 055 Q5: what Disconnect does, and that outside Docker it is the machine's own claude login too. */
-const DISCONNECT_TEXT = (
+/** 056 Q11: what Disconnect does; the active account's adds that runs stop with it. */
+const disconnectText = (account) => (
   <>
-    This signs the app out of Claude with <code>claude auth logout</code>. Runs stay disabled until you log in again.
-    Outside Docker, this is also your own claude login on this machine.
+    This signs the account out with <code>claude auth logout</code> and removes it from the app, with its config folder
+    if the app created it.{account.active && ' Runs stay disabled until you make another account active.'}
   </>
 )
 
-/** 039: GET /api/auth's answer as rows; Q3: a login that isn't claude.ai reports no method, plan, or account. */
-function LoginRows({ auth }) {
-  const rows = [
-    ['Auth method', auth.auth_method ?? '—'],
-    ['Plan', auth.runs_enabled ? planName(auth.plan) : '—'],
-    ['Account', auth.email ?? '—'],
-  ]
+/** FE3: whether runs can start, from the active account; the run's own auth check is what decides (Q14). */
+function RunsLine({ accounts }) {
+  const active = accounts.find((a) => a.active)
+  if (active?.signed_in) return <p>Runs enabled</p>
   return (
-    <>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1">
-        {rows.map(([name, value]) => (
-          <div key={name} className="contents">
-            <dt className={muted}>{name}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      {auth.runs_enabled ? (
-        <p className="mt-2">Runs enabled</p>
-      ) : (
-        <p className="mt-2 font-semibold text-danger">
-          Not signed in with a Claude subscription — runs disabled
-        </p>
-      )}
-    </>
+    <p className="font-semibold text-danger">
+      {active ? 'Not signed in with a Claude subscription — runs disabled' : 'No active account — runs disabled'}
+    </p>
   )
 }
 
 /**
- * docs/ui.md §8 item 9: the Claude login runs will use, and a claude.ai login done in the browser (039). The page
- * loads /api/auth once; a successful code's or Disconnect's response replaces it. Subscription only (MVP §4.3): no API
- * key field. 055: Disconnect, shown only while runs are enabled (Q8), asks in the delete dialog, then posts the logout.
+ * FE1, FE2, Q10, Q11: one account as a card: its email (or that it isn't signed in) and the active pill, its rows, then
+ * Make active (inactive only), its login, and Disconnect. `children` is its pending login's form. After Make active,
+ * focus goes to this item's login button, which stays mounted as Make active goes.
+ */
+function AccountItem({ account, loginLabel, onActivate, onLogin, onDisconnect, children }) {
+  const login = useRef(null)
+  const rows = [
+    ['Auth method', account.auth_method ?? '—'],
+    ['Plan', account.signed_in ? planName(account.plan) : '—'],
+    ['Folder', account.config_dir, `font-mono text-sm wrap-anywhere ${muted}`],
+  ]
+  return (
+    <li className="grid gap-3 rounded-md border border-line px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="m-0 font-semibold wrap-anywhere">{account.email ?? 'Not signed in'}</h3>
+        {account.active && <ActivePill />}
+      </div>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1">
+        {rows.map(([name, value, className]) => (
+          <div key={name} className="contents">
+            <dt className={muted}>{name}</dt>
+            <dd className={className}>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="flex flex-wrap gap-2">
+        {!account.active && (
+          <ActionButton action={async () => (await onActivate()) && login.current?.focus()}>Make active</ActionButton>
+        )}
+        <ActionButton ref={login} action={onLogin}>
+          {loginLabel}
+        </ActionButton>
+        {/* 055: outlined, its danger kept for the dialog's filled confirm */}
+        <button type="button" onClick={onDisconnect} className={`${button} text-danger`}>
+          Disconnect
+        </button>
+      </div>
+      {children}
+    </li>
+  )
+}
+
+/**
+ * docs/ui.md §8 item 9: the Claude accounts the app holds, the one runs use marked active (056). The page loads
+ * /api/auth/accounts once; after a good code, a Make active, or a Disconnect, the shown list is a fresh load. One login
+ * is pending at a time (039): its form sits in its account's item, or under + Add account for a new account the list
+ * doesn't show yet, and that item's button, or + Add account, reads Start over and resends its account_id (Q3).
+ * Subscription only (MVP §4.3): no API key field.
  */
 export function SettingsPage() {
-  const { data: loaded, error } = usePoll(getAuth) // no interval: once
-  const [auth, setAuth] = useState(null) // the code response's body, once there is one
-  const [url, setUrl] = useState(null) // the pending login's sign-in URL
+  const { data: loaded, error } = usePoll(getAccounts) // no interval: once
+  const [list, setList] = useState(null) // the last reload, once there is one
+  const [pending, setPending] = useState(null) // the pending login: { accountId, url }
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState(null)
-  const [loggedIn, setLoggedIn] = useState(false)
-  const [asking, setAsking] = useState(false) // the Disconnect dialog is open
-  const signedOut = useRef(null) // the logout's body, applied once the dialog has closed so its title doesn't change
-  const loginButton = useRef(null)
-  const disconnectButton = useRef(null)
+  const [status, setStatus] = useState(null) // FE7: Logged in as …
+  const [asking, setAsking] = useState(null) // the Disconnect dialog's { account, opener }
+  const addButton = useRef(null)
   useEffect(() => {
     document.title = 'Settings · Claude Factories'
   }, [])
-  const shown = auth ?? loaded
+  const shown = list ?? loaded
 
-  async function begin() {
-    setFailure(null)
-    setLoggedIn(false)
+  /** A fresh list after a code, activate, or delete; a failed one shows in the alert, over the last list. */
+  async function reload() {
     try {
-      setUrl((await startLogin()).url)
+      const fresh = await getAccounts()
+      setList(fresh)
+      return fresh
+    } catch (err) {
+      setFailure(err)
+      return null
+    }
+  }
+
+  async function begin(accountId) {
+    setFailure(null)
+    setStatus(null)
+    try {
+      const started = await startLogin(accountId)
+      setPending({ accountId: started.account_id, url: started.url })
       setCode('')
     } catch (err) {
-      setUrl(null) // the backend stopped the old login before trying this one
+      setPending(null) // the backend stopped the old login before trying this one
       setFailure(err)
     }
   }
 
   async function submit(event) {
     event.preventDefault()
+    const { accountId } = pending
     setBusy(true)
     try {
-      setAuth(await sendLoginCode(code.trim()))
-      setUrl(null)
-      setFailure(null)
-      setLoggedIn(true)
+      await sendLoginCode(code.trim(), accountId)
     } catch (err) {
-      setFailure(err) // AC23: the form and the typed code stay
+      setFailure(err) // 039: the form and the typed code stay
+      return
     } finally {
       setBusy(false)
     }
+    setPending(null)
+    setFailure(null)
+    const email = (await reload())?.find((a) => a.id === accountId)?.email
+    setStatus(email ? `Logged in as ${email}` : 'Logged in')
   }
 
-  const label = url ? 'Start over' : shown?.runs_enabled ? 'Log in again' : 'Log in with Claude'
+  /** FE5: true once activated, so the item can move focus; a refusal shows in the alert and nothing reloads. */
+  async function activate(id) {
+    setFailure(null)
+    try {
+      await activateAccount(id)
+    } catch (err) {
+      setFailure(err)
+      return false
+    }
+    setStatus(null) // round 1 review-ui, review-ux: a Logged in as … line would read as the new active account
+    await reload()
+    return true
+  }
+
+  const form = pending && (
+    <form onSubmit={submit} className="grid gap-2">
+      <p>
+        <a href={pending.url} target="_blank" rel="noopener noreferrer">
+          Open the Claude sign-in page
+        </a>
+        <span className={muted}>, sign in, then paste the code it shows.</span>
+      </p>
+      <label className="grid gap-1">
+        Code
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          className={`${field} font-mono`}
+        />
+      </label>
+      <button disabled={busy || !code.trim()} className={`${button} justify-self-start`}>
+        Submit code
+      </button>
+    </form>
+  )
+  const adding = pending && !shown?.some((a) => a.id === pending.accountId) // a new account, not listed yet
   return (
     <>
       <h1 className="mb-6">Settings</h1>
@@ -100,83 +181,77 @@ export function SettingsPage() {
         error ? (
           <ErrorMessage error={error} />
         ) : (
-          // 046 Q5: under the static h1, the Claude login heading, its three rows, and the login button
+          // 046 Q5: under the static h1, the Claude accounts heading, one account card, and + Add account
           <Skeleton>
             <div className="grid max-w-xl gap-4">
-              <Block className="h-7 w-36" />
-              <Rows n={3} />
-              <ButtonBlock className="w-44" />
+              <Block className="h-7 w-44" />
+              <div className="grid gap-3 rounded-md border border-line px-4 py-3">
+                <Block className="h-6 w-56" />
+                <Rows n={3} />
+                <ButtonBlock className="w-64" />
+              </div>
+              <ButtonBlock className="w-36" />
             </div>
           </Skeleton>
         )
       ) : (
-        <section aria-labelledby="claude-login" className="grid max-w-xl gap-4">
-          <h2 id="claude-login" className="mt-0 mb-0">
-            Claude login
+        <section aria-labelledby="claude-accounts" className="grid max-w-xl gap-4">
+          <h2 id="claude-accounts" className="mt-0 mb-0">
+            Claude accounts
           </h2>
-          <div>
-            <LoginRows auth={shown} />
-          </div>
-          {loggedIn && (
-            <p role="status" className="font-semibold text-success">
-              {shown.email ? `Logged in as ${shown.email}` : 'Logged in'}
-            </p>
+          {shown.length ? (
+            <ul className="grid gap-3">
+              {shown.map((account) => (
+                <AccountItem
+                  key={account.id}
+                  account={account}
+                  loginLabel={
+                    pending?.accountId === account.id ? 'Start over' : account.signed_in ? 'Log in again' : 'Log in'
+                  }
+                  onActivate={() => activate(account.id)}
+                  onLogin={() => begin(account.id)}
+                  onDisconnect={(event) => setAsking({ account, opener: event.currentTarget })}
+                >
+                  {pending?.accountId === account.id && form}
+                </AccountItem>
+              ))}
+            </ul>
+          ) : (
+            <p className={muted}>No Claude accounts yet.</p>
           )}
-          <div className="flex flex-wrap gap-2">
-            <ActionButton ref={loginButton} action={begin}>
-              {label}
-            </ActionButton>
-            {shown.runs_enabled && (
-              // 055: outlined, its danger kept for the dialog's filled confirm
-              <button ref={disconnectButton} type="button" onClick={() => setAsking(true)} className={`${button} text-danger`}>
-                Disconnect
-              </button>
-            )}
-          </div>
-          {url && (
-            <form onSubmit={submit} className="grid gap-2">
-              <p>
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  Open the Claude sign-in page
-                </a>
-                <span className={muted}>, sign in, then paste the code it shows.</span>
-              </p>
-              <label className="grid gap-1">
-                Code
-                <input
-                  type="text"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className={`${field} font-mono`}
-                />
-              </label>
-              <button disabled={busy || !code.trim()} className={`${button} justify-self-start`}>
-                Submit code
-              </button>
-            </form>
+          <ActionButton
+            ref={addButton}
+            action={() => begin(adding ? pending.accountId : undefined)}
+            className={`${button} justify-self-start`}
+          >
+            {adding ? 'Start over' : '+ Add account'}
+          </ActionButton>
+          {adding && form}
+          {/* docs/ui.md §8 item 9: below + Add account, whether runs are enabled */}
+          <RunsLine accounts={shown} />
+          {status && (
+            <p role="status" className="font-semibold text-success">
+              {status}
+            </p>
           )}
           {failure && <ErrorMessage error={failure} />}
           {asking && (
             <DeleteDialog
-              title={shown.email ? `Disconnect ${shown.email}?` : 'Disconnect Claude?'}
-              text={DISCONNECT_TEXT}
+              title={asking.account.email ? `Disconnect ${asking.account.email}?` : 'Disconnect this account?'}
+              text={disconnectText(asking.account)}
               confirmLabel="Disconnect"
-              remove={async () => {
-                signedOut.current = await logout()
-              }}
-              onDeleted={() => {
-                setAuth(signedOut.current)
-                setUrl(null)
-                setLoggedIn(false)
+              remove={() => deleteAccount(asking.account.id)}
+              onDeleted={async () => {
+                const { id } = asking.account
+                setPending((p) => (p?.accountId === id ? null : p)) // Q12: the backend stopped only this one's login
+                setStatus(null)
                 setFailure(null)
-                // Q6: the opener is gone, so focus goes to Log in with Claude; here, as the dialog may have closed already
-                loginButton.current?.focus()
+                await reload()
+                addButton.current?.focus() // Q11: the opener is gone
               }}
               onClose={(done) => {
-                setAsking(false)
-                if (!done) disconnectButton.current?.focus()
+                setAsking(null)
+                if (!done) asking.opener.focus()
               }}
             />
           )}

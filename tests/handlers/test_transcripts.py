@@ -132,6 +132,24 @@ def test_run_exit_copies_main_session(tmp_path, wt):  # AC4
     }]
 
 
+def test_copies_from_active_account(tmp_path, wt):  # 056 BE19, Q8
+    task = add_task(wt)
+    two = tmp_path / "account-2"
+    sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?)", (str(two), OLD))
+    sql("UPDATE claude_accounts SET active = 0")
+    sql("UPDATE claude_accounts SET active = 1 WHERE config_dir = ?", (str(two),))
+    run_id = add_run(task)
+    source = two / "projects" / folder_name(str(wt)) / f"{SID}.jsonl"
+    source.parent.mkdir(parents=True)
+    source.write_text(MAIN)
+    plant(wt, f"{SID}/subagents/agent-a1.jsonl", MAIN)  # only under the server's own CLAUDE_CONFIG_DIR
+    log = tmp_path / "run.jsonl"
+    log.write_text(line(type="result", subtype="success", is_error=False, session_id=SID, result="ok") + "\n")
+    runs.finish(transaction, run_id, SimpleNamespace(wait=lambda: 0), log)
+    assert [r["path"] for r in rows()] == [f"{run_id}/{SID}.jsonl"]
+    assert copy(f"{run_id}/{SID}.jsonl").read_bytes() == source.read_bytes()
+
+
 def test_subagents(ran, wt):  # AC5
     plant(wt, f"{SID}.jsonl", MAIN)
     sub = f"{SID}/subagents"

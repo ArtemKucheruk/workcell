@@ -4,10 +4,13 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from conftest import commit, git, sql, write
@@ -16,7 +19,7 @@ from controllers.test_transcripts import add_transcript
 from fastapi.testclient import TestClient
 from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, wrong_edges
 
-from claude_factories import db
+from claude_factories import config, db
 from claude_factories.adapters.git import SubprocessGit
 from claude_factories.handlers import pages
 from claude_factories.server.app import create_app
@@ -242,30 +245,36 @@ def test_auth_cached_60s(client, tmp_path, monkeypatch):  # AC3, 026 AC13
 # --- POST /api/auth/login, /api/auth/login/code (039) ---------------------------------
 
 SIGN_IN = "https://claude.ai/oauth/authorize?code=true&client_id=c&state=abc"
-# 039 Q1: claude 2.1.304's `auth login`, acted out per the `mode` file; `auth status` prints the `status` file.
+# 039 Q1: claude 2.1.304's `auth login`, acted out per the `mode` file. 056: `auth status` prints the `fake-status`
+# file in its CLAUDE_CONFIG_DIR, which `login` and `logout` write, so each account's dir answers on its own.
 # 055: `auth logout` follows the `logout` file: ok logs out, fail / fail-stderr print an error, silent prints nothing
 LOGIN_FAKE = r'''
 import json, os, sys, time
-d = os.environ["FAKE_LOGIN_DIR"]
-def put(name, text, how="w"):
-    with open(os.path.join(d, name), how) as f:
+d, config_dir = os.environ["FAKE_LOGIN_DIR"], os.environ["CLAUDE_CONFIG_DIR"]
+def put(name, text, how="w", where=d):
+    os.makedirs(where, exist_ok=True)
+    with open(os.path.join(where, name), how) as f:
         f.write(text)
+def record(name):
+    put(name, json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ),
+                          "pgid": os.getpgrp()}) + "\n", "a")
 if sys.argv[1:] == ["auth", "status"]:
-    print(open(os.path.join(d, "status")).read())
+    record("statuses")
+    status = os.path.join(config_dir, "fake-status")
+    print(open(status).read() if os.path.exists(status) else '{"loggedIn":false}')
     sys.exit(0)
 if "logout" in sys.argv:
-    put("logouts", json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ)}) + "\n", "a")
+    record("logouts")
     how = open(os.path.join(d, "logout")).read()
     if how == "ok":
-        put("status", '{"loggedIn":false}')
+        put("fake-status", '{"loggedIn":false}', where=config_dir)
         print("Successfully logged out from your Anthropic account.")
         sys.exit(0)
     if how != "silent":
         print("Logging out…", flush=True)
         print("Error: keychain locked", file=sys.stderr if how == "fail-stderr" else sys.stdout)
     sys.exit(1)
-put("starts", json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "env": dict(os.environ),
-                          "pgid": os.getpgrp()}) + "\n", "a")
+record("starts")
 mode = open(os.path.join(d, "mode")).read()
 url = "SIGN_IN"
 print("Opening browser to sign in…")
@@ -278,7 +287,7 @@ osc = "\x1b]8;;" + url + "\x07" + url + "\x1b]8;;\x07"
 print("If the browser didn't open, visit: " + (osc if mode == "osc" else url))
 print("Paste code here if prompted > ", end="", flush=True)
 if mode == "self":  # Q6: claude's own browser tab finished the sign-in
-    put("status", 'PRO_EMAIL')
+    put("fake-status", 'PRO_EMAIL', where=config_dir)
     sys.exit(0)
 while line := sys.stdin.readline():
     put("stdin", line, "a")
@@ -288,7 +297,7 @@ while line := sys.stdin.readline():
         print("Login failed: Invalid code", file=sys.stderr)
         sys.exit(1)
     if line == "good#state\n":
-        put("status", 'PRO_EMAIL')
+        put("fake-status", 'PRO_EMAIL', where=config_dir)
         print("Login successful.")
         sys.exit(0)
     print("Invalid code", file=sys.stderr)
@@ -296,10 +305,17 @@ while line := sys.stdin.readline():
 NO_LOGIN = {"detail": "no login in progress"}
 
 
+def put_status(config_dir, status):
+    """056: the fake's `auth status` answer for the account in `config_dir`."""
+    Path(config_dir).mkdir(parents=True, exist_ok=True)
+    (Path(config_dir) / "fake-status").write_text(status)
+
+
 @pytest.fixture
 def fake_login(tmp_path, monkeypatch):
-    """039: fake_login(mode, status) sets the fake's behaviour; starts() and stdin() read what it saw."""
-    d = tmp_path / "login"
+    """039: fake_login(mode, status, logout) sets the fake's behaviour, `status` as account 1's (056), whose dir
+    is conftest's CLAUDE_CONFIG_DIR; starts(), statuses(), stdin(), and logouts() read what it saw."""
+    d, one = tmp_path / "login", os.environ["CLAUDE_CONFIG_DIR"]
     d.mkdir()
     monkeypatch.setenv("FAKE_LOGIN_DIR", str(d))
     claude = tmp_path / "bin" / "claude"
@@ -308,27 +324,30 @@ def fake_login(tmp_path, monkeypatch):
 
     def install(mode="ok", status=CONSOLE, logout="ok"):
         (d / "mode").write_text(mode)
-        (d / "status").write_text(status)
         (d / "logout").write_text(logout)
+        put_status(one, status)
 
     def lines(name):
         return (d / name).read_text().splitlines() if (d / name).exists() else []
 
     install()
     install.starts = lambda: [json.loads(line) for line in lines("starts")]
+    install.statuses = lambda: [json.loads(line) for line in lines("statuses")]
     install.stdin = lambda: lines("stdin")
     install.logouts = lambda: [json.loads(line) for line in lines("logouts")]
     return install
 
 
-def start(client, status=200):
-    r = client.post("/api/auth/login", headers=H)
+def start(client, status=200, account=1):
+    """039's login, for account 1 by default; account=None sends no body, which adds an account (056 Q3)."""
+    r = client.post("/api/auth/login", json=None if account is None else {"account_id": account}, headers=H)
     assert r.status_code == status, r.text
     return r.json()
 
 
-def send(client, code, status=200):
-    r = client.post("/api/auth/login/code", json={"code": code}, headers=H)
+def send(client, code, status=200, account=None):
+    r = client.post("/api/auth/login/code", headers=H,
+                    json={"code": code} | ({} if account is None else {"account_id": account}))
     assert r.status_code == status, r.text
     return r.json()
 
@@ -348,7 +367,7 @@ def gone(pgid) -> bool:
 def test_login_start(client, fake_login, monkeypatch):  # 039 AC3
     for name in STRIPPED + ("CLAUDE_CODE_USE_VERTEX",):
         monkeypatch.setenv(name, "x")
-    assert start(client) == {"url": SIGN_IN}
+    assert start(client) == {"url": SIGN_IN, "account_id": 1}
     [seen] = fake_login.starts()
     assert seen["argv"] == ["auth", "login", "--claudeai"]
     assert os.path.realpath(seen["cwd"]) == os.path.realpath(os.environ["FCTL_HOME"])
@@ -380,7 +399,7 @@ def test_login_no_url(client, fake_login, mode):  # 039 AC6
 def test_login_restart_stops_first(client, fake_login):  # 039 AC7
     start(client)
     first = fake_login.starts()[0]["pgid"]
-    assert start(client) == {"url": SIGN_IN}
+    assert start(client) == {"url": SIGN_IN, "account_id": 1}
     assert gone(first)
 
 
@@ -446,38 +465,208 @@ def test_login_stopped_on_shutdown(fake_login):  # 039 AC15
     assert gone(pgid)
 
 
-# --- POST /api/auth/logout (055) -----------------------------------------------------
+# --- /api/auth/accounts (056) ---------------------------------------------------------
 
 SIGNED_OUT = {"auth_method": None, "plan": None, "runs_enabled": False, "email": None}
+TWO = '{"authMethod":"claude.ai","subscriptionType":"max","email":"two@example.com"}'
+TWO_AUTH = {"auth_method": "claude.ai", "plan": "max", "runs_enabled": True, "email": "two@example.com"}
 
 
-def logout(client, status=200):
-    r = client.post("/api/auth/logout", headers=H)
+@pytest.fixture
+def providers(monkeypatch):
+    """The API key and provider variables set, so each claude call's env shows them stripped (§4.3)."""
+    for name in STRIPPED + ("CLAUDE_CODE_USE_VERTEX",):
+        monkeypatch.setenv(name, "x")
+
+
+def add_account(status=None) -> int:
+    """An inactive account in a dir as the app makes them, under FCTL_HOME/claude-accounts/; `status` is its
+    fake `auth status` answer."""
+    root = config.data_dir() / "claude-accounts"
+    root.mkdir(exist_ok=True)
+    path = Path(tempfile.mkdtemp(dir=root))
+    if status:
+        put_status(path, status)
+    return sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?) RETURNING id",
+               (str(path), OLD))[0][0]
+
+
+def account_dir(account_id) -> Path:
+    return Path(sql("SELECT config_dir FROM claude_accounts WHERE id = ?", (account_id,))[0][0])
+
+
+def make_active(account_id):
+    sql("UPDATE claude_accounts SET active = 0")
+    sql("UPDATE claude_accounts SET active = 1 WHERE id = ?", (account_id,))
+
+
+def active_ids() -> list[int]:
+    return [i for (i,) in sql("SELECT id FROM claude_accounts WHERE active = 1")]
+
+
+def account_count() -> int:
+    return sql("SELECT COUNT(*) FROM claude_accounts")[0][0]
+
+
+def in_account(seen, config_dir):
+    """A claude call ran for the account in `config_dir`: its CLAUDE_CONFIG_DIR, the stripped env, and the
+    data dir as cwd (§4.3)."""
+    assert seen["env"]["CLAUDE_CONFIG_DIR"] == str(config_dir)
+    assert [k for k in seen["env"] if k in STRIPPED or k.startswith("CLAUDE_CODE_USE_")] == []
+    assert os.path.realpath(seen["cwd"]) == os.path.realpath(os.environ["FCTL_HOME"])
+
+
+def activate(client, account_id, status=200):
+    r = client.post(f"/api/auth/accounts/{account_id}/activate", headers=H)
     assert r.status_code == status, r.text
     return r.json()
 
 
-def test_logout(client, fake_login, monkeypatch):  # 055 BE1
+def disconnect(client, account_id, status=204):
+    """DELETE /api/auth/accounts/{id}: None for the 204, which has no body, else the JSON."""
+    r = client.delete(f"/api/auth/accounts/{account_id}", headers=H)
+    assert r.status_code == status, r.text
+    return None if status == 204 and r.content == b"" else r.json()
+
+
+def test_accounts(client, fake_login, providers):  # 056 BE4
+    fake_login(status=PRO_EMAIL)
+    two = add_account()
+    one = os.environ["CLAUDE_CONFIG_DIR"]
+    assert api(client, "/api/auth/accounts") == [
+        {"id": 1, "config_dir": one, "active": True, "signed_in": True, "auth_method": "claude.ai",
+         "plan": "pro", "email": "artem@example.com"},
+        {"id": two, "config_dir": str(account_dir(two)), "active": False, "signed_in": False,
+         "auth_method": None, "plan": None, "email": None},
+    ]
+    first, second = fake_login.statuses()
+    in_account(first, one)
+    in_account(second, account_dir(two))
+    sql("DELETE FROM claude_accounts")
+    assert api(client, "/api/auth/accounts") == []
+
+
+def test_auth_is_the_active_account(client, fake_login):  # 056 BE5, Q7
+    fake_login(status=PRO_EMAIL)  # account 1, in the server's own CLAUDE_CONFIG_DIR
+    two = add_account(TWO)
+    make_active(two)
+    assert api(client, "/api/auth") == TWO_AUTH
+    [seen] = fake_login.statuses()
+    assert seen["env"]["CLAUDE_CONFIG_DIR"] == str(account_dir(two)) != os.environ["CLAUDE_CONFIG_DIR"]
+    sql("UPDATE claude_accounts SET active = 0")
+    assert api(client, "/api/auth") == SIGNED_OUT
+    assert len(fake_login.statuses()) == 1
+
+
+def test_add_account(client, fake_login, providers):  # 056 BE6
+    body = start(client, account=None)
+    [(new, path, active)] = sql("SELECT id, config_dir, active FROM claude_accounts WHERE id != 1")
+    assert body == {"url": SIGN_IN, "account_id": new}
+    assert Path(path).parent == config.data_dir() / "claude-accounts" and Path(path).is_dir()
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o700
+    assert (active, active_ids()) == (0, [1])
+    [seen] = fake_login.starts()
+    in_account(seen, path)
+    send(client, "good#state")
+    [listed] = [a for a in api(client, "/api/auth/accounts") if a["id"] == new]
+    assert (listed["signed_in"], listed["email"]) == (True, "artem@example.com")
+
+
+def test_add_account_with_none_active(client, fake_login):  # 056 BE7, Q4
+    sql("UPDATE claude_accounts SET active = 0")
+    new = start(client, account=None)["account_id"]
+    assert active_ids() == [new]
+    send(client, "good#state")
+    assert api(client, "/api/auth")["email"] == "artem@example.com"  # account 1 is CONSOLE, and inactive
+    assert fake_login.statuses()[-1]["env"]["CLAUDE_CONFIG_DIR"] == str(account_dir(new))
+
+
+def test_add_account_no_url(client, fake_login):  # 056 BE8
+    fake_login("fail")
+    assert start(client, 500, account=None) == {
+        "detail": "claude auth login printed no sign-in URL: Error: managed settings forbid this"}
+    assert account_count() == 1
+    assert list((config.data_dir() / "claude-accounts").iterdir()) == []
+
+
+def test_login_again(client, fake_login, monkeypatch, tmp_path):  # 056 BE9
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    assert start(client, 404, account=9) == {"detail": "Claude account #9 not found"}
+    assert fake_login.starts() == []
+    assert start(client) == {"url": SIGN_IN, "account_id": 1}
+    [seen] = fake_login.starts()
+    assert seen["env"]["CLAUDE_CONFIG_DIR"] == str(account_dir(1)) == str(tmp_path / "claude-config")
+    assert account_count() == 1
+
+
+@pytest.mark.parametrize("account", [1, None])
+def test_login_code_for_another_account(client, fake_login, account):  # 056 BE10, Q5
+    start(client)
+    assert send(client, "good#state", 409, account=2) == NO_LOGIN
+    assert fake_login.stdin() == []
+    assert send(client, "good#state", account=account)["runs_enabled"] is True
+
+
+def test_activate(client, fake_login, monkeypatch):  # 056 BE11
     monkeypatch.setattr(pages, "monotonic", lambda: 1000.0)  # every check well within the 60 s cache
     fake_login(status=PRO_EMAIL)
-    assert api(client, "/api/auth")["runs_enabled"] is True  # primes the cache
-    assert logout(client) == SIGNED_OUT
-    assert len(fake_login.logouts()) == 1
-    assert api(client, "/api/auth") == SIGNED_OUT
+    two = add_account(TWO)
+    assert api(client, "/api/auth")["email"] == "artem@example.com"  # primes the cache
+    assert activate(client, two) == TWO_AUTH
+    assert active_ids() == [two]
+    assert api(client, "/api/auth") == TWO_AUTH
+    assert activate(client, two) == TWO_AUTH
+    assert active_ids() == [two]
+    assert activate(client, 9, 404) == {"detail": "Claude account #9 not found"}
 
 
-def test_logout_env_and_cwd(client, fake_login, monkeypatch):  # 055 BE2
-    for name in STRIPPED + ("CLAUDE_CODE_USE_VERTEX",):
-        monkeypatch.setenv(name, "x")
+def test_accounts_refused_while_running(client, project, fake_login):  # 056 BE12, 055 BE4
+    two = add_account(TWO)
+    start(client, account=two)
+    pgid = fake_login.starts()[0]["pgid"]
+    add_run(add_task(project, status="in_progress"), "running")
+    assert activate(client, two, 409) == {"detail": "a run is active"}
+    assert active_ids() == [1]
+    activate(client, 1)  # already active: 200, nothing changes, even during a run (§6.4)
+    assert active_ids() == [1]
+    assert disconnect(client, two, 409) == {"detail": "a run is active"}
+    assert fake_login.logouts() == []
+    assert account_dir(two).is_dir() and account_count() == 2
+    os.killpg(pgid, 0)  # the login is still alive (ProcessLookupError if not)
+    send(client, "good#state", account=two)
+    assert fake_login.stdin() == ["good#state"]
+
+
+def test_disconnect(client, fake_login, providers, monkeypatch):  # 056 BE13, 055 BE2
     calls, real = [], subprocess.run
     monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append((args, kw)) or real(args, **kw))
-    logout(client)
+    two = add_account(TWO)
+    path, one = account_dir(two), sql("SELECT * FROM claude_accounts WHERE id = 1")
+    assert disconnect(client, two) is None
     [seen] = fake_login.logouts()
     assert seen["argv"] == ["auth", "logout"]
-    assert os.path.realpath(seen["cwd"]) == os.path.realpath(os.environ["FCTL_HOME"])
-    assert [k for k in seen["env"] if k in STRIPPED or k.startswith("CLAUDE_CODE_USE_")] == []
+    in_account(seen, path)
     [(args, kw)] = [c for c in calls if "logout" in c[0]]
     assert args == ["claude", "auth", "logout"] and not kw.get("shell")
+    assert not path.exists()
+    assert sql("SELECT * FROM claude_accounts") == one
+
+
+def test_disconnect_keeps_other_dirs(client, fake_login):  # 056 BE14, Q2
+    one = Path(os.environ["CLAUDE_CONFIG_DIR"])
+    (one / "settings.json").write_text("{}")
+    assert disconnect(client, 1) is None
+    assert account_count() == 0
+    assert (one / "settings.json").read_text() == "{}"
+
+
+def test_disconnect_active(client, fake_login):  # 056 BE15 (test_runs.py has its run refusal)
+    two = add_account(TWO)
+    assert disconnect(client, 1) is None
+    assert active_ids() == []
+    assert api(client, "/api/auth") == SIGNED_OUT
+    activate(client, two)
+    assert api(client, "/api/auth") == TWO_AUTH
 
 
 @pytest.mark.parametrize("mode, detail", [
@@ -485,35 +674,45 @@ def test_logout_env_and_cwd(client, fake_login, monkeypatch):  # 055 BE2
     ("fail-stderr", "claude auth logout failed: Error: keychain locked"),
     ("silent", "claude auth logout exited with code 1"),
 ])
-def test_logout_fails(client, fake_login, mode, detail):  # 055 BE3
+def test_disconnect_fails(client, fake_login, monkeypatch, mode, detail):  # 056 BE16, 055 BE3
+    monkeypatch.setattr(pages, "monotonic", lambda: 1000.0)  # every check well within the 60 s cache
     fake_login(status=PRO_EMAIL, logout=mode)
-    assert api(client, "/api/auth")["runs_enabled"] is True  # primes the 60 s cache
-    assert logout(client, 500) == {"detail": detail}
+    two = add_account(TWO)
+    assert api(client, "/api/auth")["runs_enabled"] is True  # primes the cache
+    assert disconnect(client, two, 500) == {"detail": detail}
+    assert account_dir(two).is_dir() and account_count() == 2
     fake_login(status=CONSOLE, logout=mode)
-    assert api(client, "/api/auth")["runs_enabled"] is False  # Q4: cleared on failure too
+    assert api(client, "/api/auth")["runs_enabled"] is False  # 055 Q4: cleared on failure too
+    assert disconnect(client, 9, 404) == {"detail": "Claude account #9 not found"}
 
 
-def test_logout_refused_while_running(client, project, fake_login):  # 055 BE4
-    start(client)
+def test_disconnect_stops_its_login(client, fake_login):  # 056 BE17, Q12
+    two = add_account()
+    start(client, account=two)
     pgid = fake_login.starts()[0]["pgid"]
-    add_run(add_task(project, status="in_progress"), "running")
-    assert logout(client, 409) == {"detail": "a run is active"}
-    assert fake_login.logouts() == []
-    os.killpg(pgid, 0)  # Q2: the login is still alive (ProcessLookupError if not)
-    assert send(client, "good#state")["runs_enabled"] is True
-
-
-def test_logout_stops_pending_login(client, fake_login):  # 055 BE5
-    start(client)
-    pgid = fake_login.starts()[0]["pgid"]
-    assert logout(client) == SIGNED_OUT
+    assert disconnect(client, two) is None
     assert gone(pgid)
     assert send(client, "good#state", 409) == NO_LOGIN
 
 
-def test_logout_needs_header(client, fake_login):  # 055 BE6
-    assert client.post("/api/auth/logout").status_code == 403
-    assert fake_login.logouts() == []
+def test_disconnect_leaves_other_login(client, fake_login):  # 056 BE17, Q12
+    two = add_account()
+    start(client)
+    assert disconnect(client, two) is None
+    assert send(client, "good#state")["runs_enabled"] is True
+    assert fake_login.stdin() == ["good#state"]
+
+
+def test_accounts_need_header(client, fake_login):  # 056 BE21, Q6
+    two = add_account()
+    assert client.post("/api/auth/logout", headers=H).status_code == 404
+    before = sql("SELECT * FROM claude_accounts")
+    for r in (client.post(f"/api/auth/accounts/{two}/activate"), client.delete(f"/api/auth/accounts/{two}"),
+              client.post("/api/auth/login")):
+        assert r.status_code == 403
+    assert sql("SELECT * FROM claude_accounts") == before
+    assert fake_login.starts() == fake_login.logouts() == []
+    assert account_dir(two).is_dir()
 
 
 def section(name, heading):
@@ -543,19 +742,26 @@ def test_login_docs():  # 039 AC16
     assert "Settings page" in login_bullet
 
 
-def test_logout_docs():  # 055 BE7
+def test_accounts_docs():  # 056 BE22, after 055 BE7
+    tables = section("data-model-and-api.md", "### 5.1")
+    table = tables[tables.index("CREATE TABLE claude_accounts"):]
+    assert all(column in table[:table.index(";")] for column in ("config_dir", "active", "created_at"))
+    assert "CREATE UNIQUE INDEX one_active_account ON claude_accounts(active) WHERE active = 1" in tables
     api_doc = section("data-model-and-api.md", "### 6.4")
-    at = api_doc.index("POST /api/auth/logout")
-    assert api_doc.index("POST /api/auth/login/code") < at < api_doc.index("GET  /api/pages/dashboard")
-    row = api_doc[at:api_doc.index("GET  /api/pages/dashboard")]
-    assert '← 200 {"auth_method":null,"plan":null,"runs_enabled":false,"email":null}' in row
-    assert '# 409 {"detail":"a run is active"}' in row and '# 500 {"detail":' in row
+    auth = api_doc[api_doc.index("GET  /api/auth"):api_doc.index("GET  /api/pages/dashboard")]
+    for row in ("GET  /api/auth/accounts", "POST /api/auth/accounts/{id}/activate",
+                "DELETE /api/auth/accounts/{id}", '"account_id"'):
+        assert row in auth, row
+    assert "POST /api/auth/logout" not in auth
     ui = section("ui.md", "## 8.")
-    assert "**Disconnect**" in ui[ui.index("9. **Settings** (`/settings`)"):ui.index("10. **Reviews**")]
-    bottom = ui.split("- Bottom:")[1].split("\n\n")[0]
-    assert "`Not signed in — runs disabled`" in bottom and "API key — runs disabled" not in ui
-    login_bullet = section("MVP.md", "### 4.6").split("- **Login.**")[1].split("\n- ")[0]
-    assert "claude auth logout" in login_bullet and "Settings page" in login_bullet
+    settings = ui[ui.index("9. **Settings** (`/settings`)"):ui.index("10. **Reviews**")]
+    for button in ("**+ Add account**", "**Make active**", "**Disconnect**"):
+        assert button in settings, button
+    assert "CLAUDE_CONFIG_DIR=<account dir> claude --resume <session-id>" in section("MVP.md", "### 4.4")
+    containers = section("MVP.md", "### 4.6")
+    bullet = lambda name: containers.split(f"- **{name}.**")[1].split("\n- ")[0]  # noqa: E731
+    assert "-e CLAUDE_CONFIG_DIR=" in bullet("Takeover")
+    assert "Settings page" in bullet("Login") and "claude auth logout" in bullet("Login")
 
 
 # --- GET /api/pages/sidebar (041) ----------------------------------------------------
@@ -1051,7 +1257,9 @@ def test_task_run_and_takeover(client, project):  # AC15
     page = api(client, f"/api/pages/tasks/{tid}")
     assert page["run"] == {"id": run, "status": "stopped", "error": None, "session_id": session,
                            "started_at": STARTED}
-    assert page["takeover"] == f"cd {shlex.quote(worktree)} && claude --resume {shlex.quote(session)}"
+    one = shlex.quote(os.environ["CLAUDE_CONFIG_DIR"])  # 056: account 1, active
+    assert page["takeover"] == (f"cd {shlex.quote(worktree)} && CLAUDE_CONFIG_DIR={one} claude"
+                                f" --resume {shlex.quote(session)}")
     sql("UPDATE runs SET status = 'running' WHERE id = ?", (run,))
     page = api(client, f"/api/pages/tasks/{tid}")
     assert (page["run"]["status"], page["takeover"]) == ("running", None)
@@ -1062,8 +1270,9 @@ def test_task_run_and_takeover(client, project):  # AC15
 DOCKER_WT, DOCKER_SESSION = "/code/my api/.claude/worktrees/1-t", "sess'1"
 
 
-def test_task_takeover_in_docker(client, project, monkeypatch):  # 028 AC1
+def test_task_takeover_in_docker(client, project, monkeypatch):  # 028 AC1, 056 BE20: no active account
     monkeypatch.setenv("FCTL_IN_DOCKER", "1")
+    sql("DELETE FROM claude_accounts")
     tid = review_task(project, worktree=DOCKER_WT)
     run = add_run(tid, "stopped", session=DOCKER_SESSION)
     takeover = api(client, f"/api/pages/tasks/{tid}")["takeover"]
@@ -1074,13 +1283,29 @@ def test_task_takeover_in_docker(client, project, monkeypatch):  # 028 AC1
 
 
 @pytest.mark.parametrize("value", [None, "0", ""])
-def test_task_takeover_on_host(client, project, monkeypatch, value):  # 028 AC3
+def test_task_takeover_on_host(client, project, monkeypatch, value):  # 028 AC3, 056 BE20: no active account
     if value is not None:
         monkeypatch.setenv("FCTL_IN_DOCKER", value)
+    sql("DELETE FROM claude_accounts")
     tid = review_task(project, worktree=DOCKER_WT)
     add_run(tid, "stopped", session=DOCKER_SESSION)
     assert api(client, f"/api/pages/tasks/{tid}")["takeover"] == (
         f"cd {shlex.quote(DOCKER_WT)} && claude --resume {shlex.quote(DOCKER_SESSION)}")
+
+
+@pytest.mark.parametrize("docker", [False, True])
+def test_task_takeover_names_account(client, project, monkeypatch, docker):  # 056 BE20
+    if docker:
+        monkeypatch.setenv("FCTL_IN_DOCKER", "1")
+    two = sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES ('/home/me/it''s 2', ?) RETURNING id",
+              (OLD,))[0][0]
+    make_active(two)
+    tid = review_task(project, worktree=DOCKER_WT)
+    add_run(tid, "stopped", session=DOCKER_SESSION)
+    wt, session, named = shlex.quote(DOCKER_WT), shlex.quote(DOCKER_SESSION), shlex.quote("/home/me/it's 2")
+    assert api(client, f"/api/pages/tasks/{tid}")["takeover"] == (
+        f"docker compose exec -w {wt} -e CLAUDE_CONFIG_DIR={named} backend claude --resume {session}" if docker
+        else f"cd {wt} && CLAUDE_CONFIG_DIR={named} claude --resume {session}")
 
 
 def test_isolated_unsets_in_docker():  # 028 AC6: fails under `FCTL_IN_DOCKER=1 uv run pytest` without it
