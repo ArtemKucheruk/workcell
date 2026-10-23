@@ -37,7 +37,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl approve <id>` | me | `POST /api/tasks/{id}/approve` |
 | `fctl submit --new --title T` (stdin: description) | `/factory-submit` | `POST /api/projects/{id}/tasks` with `submit` |
 | `fctl submit <id>` (stdin: build notes) | builder | `POST /api/tasks/{id}/rounds` |
-| `fctl show <id> [--round N \| --feedback]` | all agents | `GET /api/tasks/{id}/context`; with no flag, the project context comes first as `## Project context` |
+| `fctl show <id> [--round N \| --feedback]` | all agents | `GET /api/tasks/{id}/context`; with no flag, the project context comes first as `## Project context`: the pinned context, then the project's context cards (`### <title>`, a group's cards as `#### <title>`) |
 | `fctl diff <id> [--round N]` | reviewers, approver | `GET /api/tasks/{id}/rounds/{n}/diff` |
 | `fctl spec <id>` (stdin) | spec-writer | `PATCH /api/tasks/{id}` `spec_md` |
 | `fctl verdict <id> <reviewer> PASS\|CHANGES` (stdin) | reviewers | `PUT …/rounds/latest/verdicts/{reviewer}` |

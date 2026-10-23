@@ -24,6 +24,9 @@ export const EscalatedPill = () => <span className={`${pill} border-danger bg-da
 /** 056 Q11: the Claude account runs use, on Settings; outlined accent like the other state pills. */
 export const ActivePill = () => <span className={`${pill} border-accent text-accent`}>active</span>
 
+/** 057: the Context page's first card, which can't be moved or deleted; a fact, not a state, so muted. */
+export const PinnedPill = () => <span className={`${pill} border-muted text-muted`}>Pinned</span>
+
 /** Q4: a kind of In progress, so accent. The dot pulses only when the system allows motion. */
 export function RunningBadge() {
   return (

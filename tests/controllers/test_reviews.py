@@ -470,6 +470,55 @@ def test_context_from_own_project(client, project):  # 033 AC16
     assert context(client, b).text.startswith(f"## Project context\nStack B\n\n# #{b} b\n")
 
 
+# --- 057: the context cards after the pinned context -------------------------------------
+
+
+def add_card(client, project_id, title, content_md="", kind="item", parent_id=None):
+    body = {"title": title, "content_md": content_md, "kind": kind, "parent_id": parent_id}
+    r = client.post(f"/api/projects/{project_id}/context/items", json=body, headers=H)
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_context_cards(client, project, ctx):  # 057 BE20
+    task = ctx[0]
+    without = context(client, task).text
+    set_project_context(client, project, "Stack")
+    add_card(client, project, "A", "Card A.\n  \n")
+    g = add_card(client, project, "G", kind="group")
+    add_card(client, project, "B", "Card B.", parent_id=g)
+    add_card(client, project, "C", "Card C.\n", parent_id=g)
+    d = add_card(client, project, "D", "  \n")  # a blank body is left out
+    head = ("## Project context\nStack\n\n### A\nCard A.\n\n### G\n\n#### B\nCard B.\n\n#### C\nCard C.\n\n"
+            "### D\n\n")
+    assert context(client, task).text == head + without
+    r = client.patch(f"/api/context/items/{d}", json={"position": 0.5}, headers=H)
+    assert r.status_code == 200, r.text
+    assert context(client, task).text.startswith("## Project context\nStack\n\n### D\n\n### A\nCard A.\n\n### G\n")
+
+
+def test_context_cards_blank_pinned(client, project, ctx):  # 057 BE21
+    task, _, r2 = ctx
+    without = context(client, task).text
+    assert "## Project context" not in without
+    set_project_context(client, project, " \n")
+    add_card(client, project, "A", "Card A.")
+    assert context(client, task).text == "## Project context\n\n### A\nCard A.\n\n" + without
+    add_decision(task, r2, "me", "CHANGES_REQUESTED", "Make it configurable.")
+    for query in ("?round=1", "?round=latest", "?feedback=1"):
+        r = context(client, task, query)
+        assert r.status_code == 200, query
+        assert "## Project context" not in r.text and "Card A." not in r.text, query
+
+
+def test_context_cards_own_project(client, project):  # 057 BE20: another project's cards stay out
+    body = {"path": "/code/web", "workspace": "personal", "name": "web", "default_branch": "main"}
+    other = client.post("/api/projects/connect", json=body, headers=H).json()["id"]
+    add_card(client, other, "Theirs", "Not ours.")
+    task = add_task(project, title="a")
+    assert "Theirs" not in context(client, task).text
+
+
 # --- 009: approve and request changes (026 AC9: from pages/test_review_actions.py) ---
 
 NOTE = "Make the limit configurable via settings."

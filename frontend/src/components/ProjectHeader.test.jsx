@@ -63,6 +63,7 @@ test('FE5: each project page has one h1, api · personal, and Factory: ready ✓
     'GET /api/pages/projects/3': [200, board],
     'GET /api/pages/projects/3/code': [200, code],
     'GET /api/projects/3/context': [200, { context_md: 'x', context_html: '<p>x</p>\n', bytes: 1, max_bytes: 16384 }],
+    'GET /api/projects/3/context/items': [200, []], // 057 FE17: the Context page's cards
   })
   for (const path of ['/projects/3', '/projects/3/code', '/projects/3/reviews', '/projects/3/context', '/projects/3/settings']) {
     const { unmount } = renderAt(path)

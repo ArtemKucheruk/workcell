@@ -113,3 +113,15 @@ CREATE TABLE IF NOT EXISTS claude_accounts (  -- 056: Claude logins, each its ow
   active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
   created_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_account ON claude_accounts(active) WHERE active = 1;  -- at most one
+
+CREATE TABLE IF NOT EXISTS context_items (  -- 057: a project's context cards and groups; IF NOT EXISTS covers old DBs
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES context_items(id) ON DELETE CASCADE,  -- NULL = top level, else its group
+  kind TEXT NOT NULL CHECK (kind IN ('item','group')),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  content_md TEXT NOT NULL DEFAULT '',    -- '' for a group
+  source_path TEXT,                       -- the file or folder it was read from, else NULL
+  position REAL NOT NULL,                 -- order within its parent's list
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);

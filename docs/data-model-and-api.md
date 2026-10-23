@@ -121,8 +121,21 @@ CREATE TABLE claude_accounts (            -- Claude logins (MVP §4.6), each in 
   active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
   created_at TEXT NOT NULL);
 CREATE UNIQUE INDEX one_active_account ON claude_accounts(active) WHERE active = 1;  -- the one runs use, or none
+
+CREATE TABLE context_items (              -- a project's context cards and groups (§6.1), after context_md in fctl show
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES context_items(id) ON DELETE CASCADE,  -- NULL = top level, else its group
+  kind TEXT NOT NULL CHECK (kind IN ('item','group')),
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  content_md TEXT NOT NULL DEFAULT '',    -- '' for a group
+  source_path TEXT,                       -- the file or folder it was read from, else NULL
+  position REAL NOT NULL,                 -- order within its parent's list
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 ```
-Relations: workspace 1–n project 1–n task. A project has 0–n factories, removed with it (ON DELETE CASCADE).
+Relations: workspace 1–n project 1–n task. A project has 0–n factories and 0–n context items, removed with it
+(ON DELETE CASCADE). A context item of kind group holds 0–n items one level deep, removed with it.
 A task has 1–n runs and 1–n rounds. A run uses the active Claude account's config dir, and no column records
 which. A run has 0–n
 transcripts. A round has
@@ -209,14 +222,101 @@ POST /api/projects/3/factory                                      (Create factor
 ← 200 {"written":[".claude/skills/factory/SKILL.md",".claude/agents/builder.md", "…"],
        "skipped":[], "commit_hint":"git add .claude/skills/factory .claude/agents && git commit -m \"Add factory\""}
 
-GET  /api/projects/3/context                                      (fctl context, Context page)
+GET  /api/projects/3/context                                      (fctl context, Context page's pinned card)
 ← 200 {"context_md":"# Stack\n- Python 3.12\n","context_html":"<h1>Stack</h1>\n<ul>…","bytes":22,"max_bytes":16384}
 
-PUT  /api/projects/3/context                                      (fctl context set, Context page)
+PUT  /api/projects/3/context                                      (fctl context set, the pinned card's Save)
 → {"context_md":"# Stack\n- Python 3.12\n"}
 ← 200 {"context_md":"…","context_html":"…","bytes":22,"max_bytes":16384}
   # 413 {"detail":"context over 16 KB"} over 16384 UTF-8 bytes; "" clears it
   # 404 {"detail":"Project #99 not found"} for an unknown id, on GET too
+  # the pinned card, "Stack and conventions", has no context_items row; the cards below don't count here
+
+<ContextItem> = {"id":5,"parent_id":null,"kind":"item","title":"API conventions",
+                 "description":"Every endpoint returns JSON.","content_md":"# API conventions\n\nEvery endpoint…\n",
+                 "content_html":"<h1>API conventions</h1>\n<p>…</p>\n","source_path":null,"position":1.0,
+                 "created_at":"2026-10-23T10:00:00Z","updated_at":"2026-10-23T10:00:00Z"}
+  # id: int · parent_id: int | null (null = top level; else a group's id) · kind: "item" | "group"
+  # title, description: str · content_md: str ("" for a group) · content_html: lib/markdown.render(content_md),
+  #   raw HTML off ("" for a group) · source_path: str | null (the file's or folder's path when read from a path)
+  # position: number, the order within its parent's list · created_at, updated_at: str (db.now() format)
+  # titles and descriptions are stored with each whitespace run as one space, trimmed
+
+GET  /api/projects/3/context/items                                (Context page, loaded once)
+← 200 [<ContextItem>…]
+  # every card and group of the project, groups' cards included, as one flat list ordered by position, then id;
+  #   [] with none. The SPA splits it by parent_id
+  # 404 {"detail":"Project #99 not found"}
+
+POST /api/projects/3/context/items                                (+ New card, + New group)
+→ {"kind":"item","title":"API conventions","description":"…","content_md":"…","parent_id":null}
+  # kind: "item" (default) | "group" · title required · description, content_md default "" · parent_id default null
+← 201 <ContextItem>, last in its parent's list (siblings' max position + 1, else 1), source_path null
+  # 422 FastAPI's list detail: title missing; kind not item/group; title, description, or content_md null or not a string
+  # 422 {"detail":"title must not be blank"}
+  # 422 {"detail":"description over 160 characters"}
+  # 422 {"detail":"a group has no content"}                     kind group with a non-empty content_md
+  # 422 {"detail":"groups are one level deep"}                  kind group with a parent_id
+  # 422 {"detail":"parent_id 7 is not a group of this project"} unknown id, an item, or another project's group
+  # 413 {"detail":"card over 16 KB"}                            content_md over 16384 UTF-8 bytes (MAX_CONTEXT)
+  # 413 {"detail":"project context over 64 KB"}                 context_md plus every card's content_md, in UTF-8
+  #     bytes, measured after the write (MAX_CONTEXT_TOTAL)
+  # 404 {"detail":"Project #99 not found"}
+  # every 4xx writes nothing
+
+POST /api/projects/3/context/items/upload?name=api.md[&parent_id=7]    (Upload files, one request per file)
+→ the file's bytes as the raw body (any Content-Type)
+← 201 <ContextItem>: kind item, source_path null, title and description derived (below), content_md the body as text
+  # 413 {"detail":"card over 16 KB"}                     on Content-Length, else once the stream passes 16384 bytes
+  # 422 {"detail":"only .md, .markdown, and .txt files"} name's extension, case-insensitive
+  # 422 {"detail":"not UTF-8"}
+  # 422 FastAPI's list detail: name missing
+  # parent_id, 64 KB, and 404 refusals as POST above; every 4xx writes nothing
+  # details carry no file name: the SPA prefixes it. The name never touches the filesystem
+
+POST /api/projects/3/context/items/from-path                      (Add from path)
+→ {"path":"/Users/me/notes","parent_id":null}                      # parent_id optional, default null
+← 201 [<ContextItem>…]
+  # a file → [its card]; a folder → [the group, then one card per *.md / *.markdown / *.txt regular file directly
+  #   in it, by name]. The group's title is the folder's name, description "", source_path the folder. Each card's
+  #   source_path is its file's path, its title and description derived (below)
+  # 422 {"detail":"path must be absolute"}
+  # 404 {"detail":"no file or folder at /Users/me/nope"}
+  # 422 {"detail":"/Users/me/a.pdf: only .md, .markdown, and .txt files"}  a file path with another extension
+  # 422 {"detail":"/Users/me/notes/a.md: not UTF-8"}                         alone or in a folder
+  # 413 {"detail":"/Users/me/notes/a.md: card over 16 KB"}                   alone or in a folder
+  # 422 {"detail":"/Users/me/notes: no .md, .markdown, or .txt files"}
+  # 413 {"detail":"/Users/me/notes: 51 files; the limit is 50"}             counts only the files it would take
+  # 422 {"detail":"groups are one level deep"}                               a folder with a parent_id
+  # 422 {"detail":"/Users/me/notes/a.md: Permission denied"}                 any other OS error reading it
+  # parent_id, 64 KB, and 404 refusals as POST above; one transaction, so every 4xx writes nothing
+
+PATCH /api/context/items/5                                        (Edit, Move to group, Move out of group)
+→ any non-empty subset of {"title":"…","description":"…","content_md":"…","parent_id":7|null,"position":1.5}
+← 200 <ContextItem> after the update; updated_at now, created_at unchanged
+  # parent_id null = top level. A parent_id that changes the parent, sent without position, puts it last in the
+  #   new list. The same parent leaves position alone
+  # 422 {"detail":"send at least one of: title, description, content_md, parent_id, position"}  {} or only unknown keys
+  # 422 FastAPI's list detail: title, description, content_md, or position null or the wrong type, or position NaN or ±inf
+  # the title, description, group, parent_id, and 16 KB rules of POST; the 64 KB rule only when content_md is sent,
+  #   so a move or rename is never refused for size
+  # 404 {"detail":"Context item #99 not found"}
+  # every 4xx writes nothing
+
+DELETE /api/context/items/5                                       (Delete)
+← 204, empty body; a group's cards go with it (ON DELETE CASCADE). A file a card was read from stays on disk
+  # 404 {"detail":"Context item #99 not found"}
+
+POST /api/context/items/5/reload                                  (Reload from path)
+← 200 <ContextItem>: content_md (and content_html) read again from source_path; title and description kept;
+      updated_at now
+  # 422 {"detail":"only a card read from a path can be reloaded"}   source_path null, or a group
+  # 404 {"detail":"no file at /Users/me/notes/a.md"}
+  # 422 {"detail":"/Users/me/notes/a.md: not UTF-8"}
+  # 413 {"detail":"/Users/me/notes/a.md: card over 16 KB"}
+  # 413 {"detail":"project context over 64 KB"}
+  # 404 {"detail":"Context item #99 not found"}
+  # every 4xx writes nothing
 
 POST /api/projects/3/import-factory                               (fctl import-factory, /factory approve)
 → {"job":"014-run-ui"}                                            # {} imports every job in factory/board.json
@@ -293,6 +393,12 @@ POST /api/factories/7/write                                       (Files → Wri
              "name":"default","graph":<Graph>,"created_at":"…","updated_at":"…"}
              # project and workspace: the names as they are now (for the breadcrumb)
 ```
+
+**Derived titles and descriptions.** An upload or a path read takes a card's title from the source text of the
+first level-1 heading (ATX or setext, found from markdown-it-py's tokens, so a `# x` line in a code fence doesn't
+count), else the file name as given, extension included. Its description is the first paragraph's source text with
+each whitespace run as one space, cut to its first 160 characters with no ellipsis, or `""` with no paragraph.
+Reload keeps both, since either may have been edited.
 
 **Factory graphs.** A factory is a design: it reaches `.claude/` only through Write to repo, and runs use
 `.claude/skills/factory/` (docs/MVP.md §3.2). The graph uses React Flow's shape. Only the keys below are stored and returned, and any others (`selected`, `measured`,
@@ -374,7 +480,10 @@ GET  /api/tasks/12                                                (fctl round, t
 
 GET  /api/tasks/12/context?round=1 | ?feedback=1                  (fctl show) → text/markdown
 ← 200 "# #12 Rate-limit login endpoint\n## Spec\n…\n## Round 1 — build notes\n…\n## Verdicts\n…"
-  # with no query, a non-blank project context comes first: "## Project context\n…\n\n# #12 …"
+  # with no query, the project context comes first: "## Project context\n…\n\n### API conventions\n…\n\n# #12 …".
+  #   Under the heading, the pinned context_md, then the context cards (§6.1) by position: a top-level card or
+  #   group as "### <title>", a group's cards right after it as "#### <title>", each with its content_md. Blank
+  #   bodies are left out; with a blank context_md and no cards there is no "## Project context"
 
 PATCH /api/tasks/12                                               (fctl spec / fctl stage / board drag)
 → {"spec_md":"## Acceptance criteria\n- 6th failed login within 60s → 429\n…"}
@@ -476,7 +585,9 @@ The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces
 `/agents` loads `GET /api/pages/agents`. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
 `GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does. `/projects/{id}/factories` loads
 `GET /api/projects/{id}/factories` (§6.1), plus `GET /api/pages/projects/{id}` for its header, and the designer at
-`/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1).
+`/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1). `/projects/{id}/context` loads
+`GET /api/projects/{id}/context` for the pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1),
+plus `GET /api/pages/projects/{id}` for its header, once each.
 
 Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
 rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.

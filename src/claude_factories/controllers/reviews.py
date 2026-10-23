@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, Request, Response
 from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, CommentBody, DecisionBody, IdOut, Reviewer,
                            VerdictBody, VerdictOut)
 from ..handlers import reviews as handler
-from ..server.deps import ClaudeAdapter, GitAdapter, Reviews, Rounds, Tasks, transaction
+from ..server.deps import ClaudeAdapter, ContextItems, GitAdapter, Reviews, Rounds, Tasks, transaction
 from .rounds import NOSNIFF
 from .runs import agent_url
 
@@ -42,7 +42,7 @@ def request_changes(task_id: int, body: ChangesBody, request: Request, git: GitA
 
 
 @router.get("/api/tasks/{task_id}/context")
-def task_context(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews,
+def task_context(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, items: ContextItems,
                  n: str | None = Query(None, alias="round"), feedback: bool = False) -> Response:
-    return Response(handler.context(tasks, rounds, reviews, task_id, n, feedback), media_type="text/markdown",
+    return Response(handler.context(tasks, rounds, reviews, items, task_id, n, feedback), media_type="text/markdown",
                     headers=NOSNIFF)

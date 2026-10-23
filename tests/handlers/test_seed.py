@@ -129,6 +129,28 @@ def test_one_project_context(client):  # AC11
     assert page(client, f"/api/tasks/{task['id']}/context").startswith("## Project context\n")
 
 
+def test_context_cards(client, seeded):  # 057 BE22
+    by_name = {p["name"]: p for p in projects(client)}
+    api = by_name.pop("api-server")
+    items = page(client, f"/api/projects/{api['id']}/context/items")
+    top = [i for i in items if i["parent_id"] is None]
+    assert len([i for i in top if i["kind"] == "item"]) >= 2
+    [g] = [i for i in top if i["kind"] == "group"]
+    children = [i for i in items if i["parent_id"] == g["id"]]
+    assert len(children) >= 2
+    [read] = [i for i in items if i["source_path"]]
+    assert read["source_path"].startswith(f"{seeded}/demo/api-server/") and read["parent_id"] is None
+    assert Path(read["source_path"]).read_text(encoding="utf-8") == read["content_md"]
+    task = next(c for c in cards(client) if c["project"]["id"] == api["id"])
+    assert f"\n### {g['title']}\n\n#### {children[0]['title']}\n" in page(client, f"/api/tasks/{task['id']}/context")
+    for other in by_name.values():
+        assert page(client, f"/api/projects/{other['id']}/context/items") == []
+    # the summary line counts only these, so it is unchanged: fctl.md's example line
+    counts = [sql(f"SELECT COUNT(*) FROM {t}")[0][0] for t in ("workspaces", "projects", "tasks", "runs")]
+    assert "{} workspaces, {} projects, {} tasks, {} runs".format(*counts) in (
+        Path(__file__).parents[2] / "src" / "claude_factories" / "fctl.md").read_text(encoding="utf-8")
+
+
 def test_ready_checkout_is_clean(client):  # AC12
     [ready] = [p for p in projects(client) if p["factory"] == "ready"]
     assert git(ready["path"], "status", "--porcelain") == ""

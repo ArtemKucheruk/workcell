@@ -5,7 +5,9 @@ from pathlib import Path
 
 MAX_PATCH = 5 * 1024 * 1024  # 005 Q5: UTF-8 bytes of the patch alone
 MAX_VIEW = 1024 * 1024  # 016 Q5: over this many bytes, the code page doesn't show a file
-MAX_CONTEXT = 16 * 1024  # 033 Q4: UTF-8 bytes of a project's context_md
+MAX_CONTEXT = 16 * 1024  # 033 Q4: UTF-8 bytes of a project's context_md, and 057 of each context card's
+MAX_CONTEXT_TOTAL = 64 * 1024  # 057 Q4: UTF-8 bytes of context_md plus every card's content_md, per project
+MAX_CONTEXT_FILES = 50  # 057: the files one folder read (from-path) may take
 MAX_BUNDLE = 50 * 1024 * 1024  # 032 Q7: the raw body of a task bundle import
 MAX_UNPACKED = 500 * 1024 * 1024  # 032 Q7: the sum of a bundle's declared file sizes
 MAX_GRAPH = 256 * 1024  # 051 rule 1: UTF-8 bytes of a factory graph's compact JSON as stored

@@ -243,6 +243,8 @@ What it writes, all in one transaction:
   inline and conversation comments, decisions, and ended runs (succeeded, failed, and stopped)
   with their logs in `FCTL_HOME/runs/`. Each factory task has its worktree under
   `api-server/.claude/worktrees/`.
+- Context cards on `api-server`: two top-level cards, one read from its `README.md` (so
+  **Reload from path** shows), and a `Runbooks` group with two cards.
 - Timestamps spread over the last 30 days.
 
 The demo is ordinary data. **Run** and **Retry** on a demo task start real runs against the demo
@@ -903,9 +905,11 @@ none
 
 **Output**
 
-Markdown. With no flag, a non-blank project context comes first, as `## Project context`, then
-the task's heading and status, the description, the spec (`_No spec yet._` if none), and every
-round:
+Markdown. With no flag, the project context comes first, as `## Project context`: the pinned
+context set with `fctl context set`, then each card of the project's Context page in its order,
+as `### <title>` and its text, a group's cards under it as `#### <title>`. It is left out when
+the pinned context is blank and there are no cards. Then the task's heading and status, the
+description, the spec (`_No spec yet._` if none), and every round:
 
 ```
 # #12 Rate-limit login endpoint
