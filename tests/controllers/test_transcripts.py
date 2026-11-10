@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 from conftest import commit, sql
-from controllers.test_runs import SKILL, H, connect, fake, started  # noqa: F401
+from controllers.test_runs import READY, SKILL, H, connect, fake, started  # noqa: F401
 from controllers.test_runs import add_task as add_backlog_task
 from fastapi.testclient import TestClient
 from handlers.test_transcripts import (MAIN, SID, add_run, add_task, assistant, copy, jsonl, line, plant, rows,
@@ -85,7 +85,7 @@ def test_startup_cleanup_copies(tmp_path):  # AC10
 
 
 def test_run_without_folder_is_unchanged(client, repo, fake):  # AC12
-    commit(repo, {SKILL: "# factory\n"})
+    commit(repo, {SKILL: READY})
     body = started(client, add_backlog_task(connect(client, repo)))
     assert sql("SELECT status, error, session_id FROM runs WHERE id = ?", (body["run_id"],)) == [
         ("succeeded", None, body["session_id"])]

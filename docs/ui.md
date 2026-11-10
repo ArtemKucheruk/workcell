@@ -85,7 +85,8 @@ pages use the full width beside it, and the other pages keep a max width.
 
 The project pages (Board, Code, Reviews, Context, the Factories list, Settings) share one project header:
 `<name> · <workspace>`, with the workspace linking to `/workspaces/{id}`, then the factory
-state: `Factory: ready ✓`, else `Factory: <state>` linking to the project's Settings.
+state: `Factory: ready ✓`, else `Factory: <state>` (`none`, `uncommitted`, or `legacy`, MVP §3.2
+step 4) in the `warning` token, linking to the project's Settings.
 
 The task, review, code, and transcript pages open with one breadcrumb, a
 `<nav aria-label="Breadcrumb">` reading `workspace › project › #id › page`: the workspace
@@ -143,12 +144,14 @@ Loading, failures, times, and motion are the same on every page:
      inline-SVG bar per task beside them, oldest left, its height rounds / max, in `accent`,
      and the list.
 2. **Workspace** (`/workspaces/{id}`): one row per project with name, path, counts per
-   status, factory state (none / uncommitted / ready), and last activity as a relative time
+   status, factory state (none / uncommitted / legacy / ready, `legacy` in the `warning` token and
+   the others plain text), and last activity as a relative time
    (`3h ago`). **+ Workspace** creates one. For each project, its Settings page (item 12) moves
    it to another workspace. The workspace's own Settings page (item 13, from the sidebar's
    workspace `⋯`) renames or deletes it.
 3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header is the project
-   header plus **+ New task**, **Run next**, and the hint for why runs are off. Under the hint, when
+   header plus **+ New task**, **Run next**, and the hint for why runs are off, `legacy`'s included
+   (`this repo runs the file-based /factory loop: …`, MVP §3.2 step 4). Under the hint, when
    the view-model's `factory_error` is set (the board's automatic `factory/` sync was refused, §6.4),
    one muted line, `factory/: <factory_error>`, not an alert. **+ New task**
    opens its form in a native popover, which Esc or a click outside closes, and a created task
@@ -325,7 +328,13 @@ Loading, failures, times, and motion are the same on every page:
       branch come from `fctl connect`. Rerunning it in the repo also resets the name, and the
       test command when it passes one."
     - The factory state with its hint, plus **Create factory** (with *Overwrite*) unless
-      ready, and its written and skipped lists and commit hint (§3.2).
+      ready, and its written and skipped lists and commit hint (§3.2). For `legacy` only, between
+      the hint and **Create factory**, this line:
+      `Overwrite replaces SKILL.md and the 7 agents with the app's templates. These exist now:`
+      then the view-model's `factory_files` as a list of `code` paths in their order, styled like
+      the written and skipped lists. With `factory_files` empty, the line is
+      `Overwrite replaces SKILL.md and the 7 agents with the app's templates. None of them exist now.`
+      and there is no list. *Overwrite* starts unticked.
     - **Import** takes a task bundle (a `.zip` from **Export**) from a file input, disabled
       until a file is chosen, and posts it raw to `POST /api/projects/{id}/import`.
       `Imported #12 <title>` links to the task, or the refusal's detail shows.

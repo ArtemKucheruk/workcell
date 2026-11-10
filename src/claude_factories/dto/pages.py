@@ -10,7 +10,7 @@ from .tasks import TaskItem
 from .transcripts import TranscriptOut
 from .workspaces import WorkspaceOut
 
-Factory = Literal["ready", "uncommitted", "none"]
+Factory = Literal["ready", "legacy", "uncommitted", "none"]
 
 
 class AuthOut(BaseModel):
@@ -261,6 +261,7 @@ class BoardPage(BaseModel):
     workspaces: list[WorkspaceOut]
     columns: dict[str, list[Card]]  # backlog, in_progress, review, done
     factory_error: str | None  # 058 Q10: the last automatic factory/ sync's refusal
+    factory_files: list[str]  # 059 Q3: Create factory's paths on disk now, the order it writes them
 
 
 # --- GET /api/pages/tasks/{id} (§8 item 4) ---------------------------------------------

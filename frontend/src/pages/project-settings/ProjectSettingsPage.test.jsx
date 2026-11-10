@@ -9,6 +9,8 @@ const PROJECT = {
 }
 const WORKSPACES = [{ id: 2, name: 'personal', projects: 1 }, { id: 4, name: 'work', projects: 0 }]
 const BOARD = '/api/pages/projects/3'
+const LEGACY_HINT = 'this repo runs the file-based /factory loop: Create factory with Overwrite, then commit it on main'
+const OVERWRITE = "Overwrite replaces SKILL.md and the 7 agents with the app's templates."
 const HINT = "factory isn't committed on main: Create factory in the project's Settings, then commit it on main"
 
 /** The board view-model (042's API contract), with no cards: Settings reads only the project and factory. */
@@ -161,6 +163,42 @@ test('FE27: ready has no Create factory; uncommitted and none show the unticked 
     expect(factorySection.getByRole('button', { name: 'Create factory' })).toBeTruthy()
     if (hint) expect(factorySection.getByText(hint)).toBeTruthy()
     else expect(section('Factory').textContent).not.toContain("isn't committed")
+    unmount()
+  }
+})
+
+test('059 FE4: legacy shows the hint, the Overwrite note, the files on disk in order, then Create factory unticked', async () => {
+  const files = ['.claude/skills/factory/SKILL.md', '.claude/agents/spec-writer.md']
+  await open(board({ factory: 'legacy', hint: LEGACY_HINT, can_run: false, factory_files: files }))
+  expect(within(screen.getByRole('main')).getByRole('link', { name: 'Factory: legacy' }).getAttribute('href')).toBe(
+    '/projects/3/settings',
+  )
+  const factorySection = within(section('Factory'))
+  const hint = factorySection.getByText(LEGACY_HINT)
+  const note = factorySection.getByText(`${OVERWRITE} These exist now:`)
+  const list = section('Factory').querySelector('ul')
+  expect([...list.querySelectorAll('li > code')].map((c) => c.textContent)).toEqual(files)
+  const create = factorySection.getByRole('button', { name: 'Create factory' })
+  expect(factorySection.getByRole('checkbox', { name: 'Overwrite existing files' }).checked).toBe(false)
+  const order = [hint, note, list, create]
+  for (let i = 1; i < order.length; i++) {
+    expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  }
+})
+
+test('059 FE5: legacy with no factory files says none of them exist, with no list', async () => {
+  await open(board({ factory: 'legacy', hint: LEGACY_HINT, can_run: false, factory_files: [] }))
+  expect(within(section('Factory')).getByText(`${OVERWRITE} None of them exist now.`)).toBeTruthy()
+  expect(section('Factory').querySelector('ul')).toBeNull()
+})
+
+test('059 FE6: uncommitted, none, and ready have no Overwrite note', async () => {
+  const files = ['.claude/skills/factory/SKILL.md']
+  for (const factory of ['uncommitted', 'none', 'ready']) {
+    const hint = factory === 'none' ? HINT : null
+    const { unmount } = await open(board({ factory, hint, can_run: factory === 'ready', factory_files: files }))
+    expect(section('Factory').textContent).not.toContain('Overwrite replaces')
+    expect(section('Factory').querySelector('ul')).toBeNull()
     unmount()
   }
 })

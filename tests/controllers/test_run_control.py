@@ -4,11 +4,11 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import sql
+from conftest import commit, sql
 from fastapi.testclient import TestClient
 from controllers.test_pages_api import add_round
-from controllers.test_runs import (H, OLD, add_running_run, add_task, events, fake, project, run, run_row,  # noqa: F401
-                       started, task_row, wait)
+from controllers.test_runs import (H, LEGACY, LEGACY_HINT, OLD, SKILL, add_running_run, add_task,  # noqa: F401
+                                   events, fake, project, run, run_row, started, task_row, wait)
 
 from claude_factories.server.app import create_app
 
@@ -389,6 +389,17 @@ def test_rework_spawn_refused(client, factory_task, fake):  # AC21
     assert r.status_code == 202, r.text
     wait(r.json()["run_id"])
     assert stage(task) == ("in_progress", "rework")
+
+
+def test_rework_legacy_factory(client, factory_task, repo, fake):  # 059 BE8
+    task, _ = factory_task
+    commit(repo, {SKILL: LEGACY})  # main now holds the file-based loop's SKILL.md
+    runs = counts()[2]
+    r = rework(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": LEGACY_HINT})
+    assert decisions(task) == [("me", "CHANGES_REQUESTED")]
+    assert stage(task) == ("in_progress", "rework")
+    assert counts()[2] == runs and not fake.invoked()
 
 
 def test_rework_fctl_url_ignores_host(client, factory_task, fake):  # 028 Q5: every spawn, not just /run

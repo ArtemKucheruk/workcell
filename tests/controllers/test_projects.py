@@ -12,6 +12,8 @@ from .test_tasks import OWNED, add_run, add_task, dump, full_task
 
 H = {"X-Requested-By": "fctl"}
 SKILL = ".claude/skills/factory/SKILL.md"
+READY = "# factory\n\n1. spec → `fctl stage <id> spec`.\n"  # 059: the app's template calls fctl stage
+LEGACY = "# factory\n"  # 059: the file-based bootstrap loop doesn't
 TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
 
@@ -35,9 +37,9 @@ def project_workspace(project_id):
     return sql("SELECT workspace_id FROM projects WHERE id = ?", (project_id,))[0][0]
 
 
-def commit_skill(repo):
-    (repo / SKILL).parent.mkdir(parents=True)
-    (repo / SKILL).write_text("# factory\n")
+def commit_skill(repo, text=READY):
+    (repo / SKILL).parent.mkdir(parents=True, exist_ok=True)
+    (repo / SKILL).write_text(text)
     git(repo, "add", SKILL)
     git(repo, "commit", "-q", "-m", "Add factory")
 
@@ -131,29 +133,56 @@ def factory(client, path):
     return r.json()["factory"]
 
 
-def test_factory_ready(client, repo):  # AC12
+def create_factory(client, path, overwrite=False):
+    pid = connect(client, path=str(path))["id"]
+    r = client.post(f"/api/projects/{pid}/factory", json={"overwrite": overwrite}, headers=H)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_factory_ready(client, repo, tmp_path):  # AC12, 059 BE2
     commit_skill(repo)
     assert factory(client, repo) == "ready"
+    templated = tmp_path / "templated"  # the app's own template, committed
+    git(tmp_path, "init", "-q", "-b", "main", str(templated))
+    create_factory(client, templated)
+    git(templated, "add", "-A")
+    git(templated, "commit", "-q", "-m", "Add factory")
+    assert factory(client, templated) == "ready"
+
+
+def test_factory_legacy(client, repo):  # 059 BE1
+    commit_skill(repo, LEGACY)
+    assert factory(client, repo) == "legacy"
 
 
 @pytest.mark.parametrize("how", ["untracked", "other branch"])
-def test_factory_uncommitted(client, repo, how):  # AC13
+def test_factory_uncommitted(client, repo, how):  # AC13, 059 BE3
     if how == "other branch":
         git(repo, "switch", "-q", "-c", "other")
-        commit_skill(repo)
+        commit_skill(repo, LEGACY)
     else:
         (repo / SKILL).parent.mkdir(parents=True)
-        (repo / SKILL).write_text("# factory\n")
+        (repo / SKILL).write_text(READY)
     assert (repo / SKILL).is_file()
     assert factory(client, repo) == "uncommitted"
 
 
-def test_factory_none(client, repo):  # AC14
-    assert factory(client, repo) == "none"
+@pytest.mark.parametrize("how", ["nothing", "gone", "directory"])
+def test_factory_none(client, repo, tmp_path, how):  # AC14, AC15, 059 BE4, Q5
+    if how == "directory":  # SKILL.md is a tree on main, not a blob: not committed, and not a file on disk
+        (repo / SKILL).mkdir(parents=True)
+        (repo / SKILL / "x.md").write_text(READY)
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", "dir")
+    assert factory(client, tmp_path / "gone" if how == "gone" else repo) == "none"
 
 
-def test_factory_missing_path(client, tmp_path):  # AC15
-    assert factory(client, tmp_path / "gone") == "none"
+def test_factory_legacy_until_committed(client, repo):  # 059 BE5, Q2
+    commit_skill(repo, LEGACY)
+    assert SKILL in create_factory(client, repo, overwrite=True)["written"]
+    assert "fctl stage" in (repo / SKILL).read_text()
+    assert factory(client, repo) == "legacy"
 
 
 # --- 034: one transaction per handler call, adapters through Depends --------------------
@@ -167,10 +196,10 @@ def test_connect_is_one_transaction(client):  # 034 AC13
 
 
 class CommittedGit:
-    """A git adapter whose committed check always says yes."""
+    """A git adapter whose every committed blob is the app's template (059: factory_state reads SKILL.md)."""
 
-    def committed(self, path, branch, file):
-        return True
+    def blob(self, root, oid):
+        return READY.encode(), None
 
 
 def test_git_adapter_through_depends(client):  # 034 AC14

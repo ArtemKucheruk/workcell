@@ -3,7 +3,7 @@ import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
 import { createFactory, deleteProject, importBundle, patchProject, syncFactory } from '../../api/projects.js'
 import { DangerZone, PROJECT_TEXT } from '../../components/DeleteDialog.jsx'
-import { FactoryForm, FactoryResult } from '../../components/FactoryResult.jsx'
+import { FactoryForm, FactoryResult, FileList } from '../../components/FactoryResult.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
@@ -204,6 +204,19 @@ function MoveProject({ project, workspaces, onDone }) {
   )
 }
 
+const OVERWRITE = "Overwrite replaces SKILL.md and the 7 agents with the app's templates."
+
+/** 059 FE4, FE5, Q4: for a legacy repo only, what Overwrite would replace: the 8 paths on disk now, or none. */
+function OverwriteNote({ files }) {
+  if (!files.length) return <p>{`${OVERWRITE} None of them exist now.`}</p>
+  return (
+    <div className="grid gap-1">
+      <p>{`${OVERWRITE} These exist now:`}</p>
+      <FileList paths={files} />
+    </div>
+  )
+}
+
 /** One titled block of the page; `id` ties the heading to the region. */
 function Section({ id, title, children }) {
   return (
@@ -304,6 +317,7 @@ function ProjectSettings({ id }) {
           ) : (
             <>
               {page.hint && <p className={muted}>{page.hint}</p>}
+              {factory === 'legacy' && <OverwriteNote files={page.factory_files} />}
               <FactoryForm label="Create factory" create={makeFactory} />
             </>
           )}

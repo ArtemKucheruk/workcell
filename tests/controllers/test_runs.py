@@ -16,6 +16,9 @@ from claude_factories.server.deps import get_claude, get_git
 H = {"X-Requested-By": "fctl"}
 OLD = "2026-01-01T00:00:00Z"
 SKILL = ".claude/skills/factory/SKILL.md"
+READY = "# factory\n\n1. spec → `fctl stage <id> spec`.\n"  # 059: the app's template calls fctl stage
+LEGACY = "# factory\n"  # 059: the file-based bootstrap loop doesn't
+LEGACY_HINT = "this repo runs the file-based /factory loop: Create factory with Overwrite, then commit it on main"
 AUTH_OK = '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"pro"}'
 SYSTEM = '{"type":"system","subtype":"init"}'
 FCTL_ALLOWED = [
@@ -89,7 +92,14 @@ def fake(tmp_path, monkeypatch):
 @pytest.fixture
 def project(client, repo, fake):
     """The repo connected with main, `pytest -q`, and SKILL.md committed on main."""
-    commit(repo, {SKILL: "# factory\n"})
+    commit(repo, {SKILL: READY})
+    return connect(client, repo)
+
+
+@pytest.fixture
+def legacy(client, repo, fake):
+    """059: as `project`, but the committed SKILL.md is the file-based loop's, without `fctl stage`."""
+    commit(repo, {SKILL: LEGACY})
     return connect(client, repo)
 
 
@@ -413,6 +423,16 @@ def test_refused_without_factory(client, repo, fake, on_disk):  # AC19
     assert not fake.invoked() and no_runs()
 
 
+def test_refused_legacy_factory(client, legacy, repo, fake):  # 059 BE6
+    task = add_task(legacy)
+    before = task_row(task), events(task)
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": LEGACY_HINT})
+    assert not (repo / ".claude" / "worktrees").exists()
+    assert not fake.invoked() and no_runs()
+    assert (task_row(task), events(task)) == before and before[0]["status"] == "backlog"
+
+
 @pytest.mark.parametrize("auth, auth_code", [('{"authMethod":"console"}', 0), ("not json", 0), (AUTH_OK, 1)])
 def test_refused_without_subscription(client, project, repo, fake, auth, auth_code):  # AC20
     fake(auth=auth, auth_code=auth_code)
@@ -514,6 +534,15 @@ def test_run_next_empty_or_unknown(client, project, fake):  # AC26
     assert no_runs()
 
 
+def test_run_next_legacy(client, legacy, fake):  # 059 BE7
+    top = add_task(legacy, "top", position=1.0)
+    add_task(legacy, "next", position=2.0)
+    r = client.post(f"/api/projects/{legacy}/run-next", headers=H)
+    assert (r.status_code, r.json()) == (409, {"detail": LEGACY_HINT})
+    assert no_runs() and not fake.invoked()
+    assert task_row(top)["status"] == "backlog"
+
+
 def test_run_next_while_running(client, project, queue):  # AC27
     running = add_running_run(add_task(project, status="in_progress"))
     r = client.post(f"/api/projects/{project}/run-next", headers=H)
@@ -530,8 +559,8 @@ class NoAuth(SubprocessClaude):
 
 
 class Committed(SubprocessGit):
-    def committed(self, path, branch, file):
-        return True
+    def blob(self, root, oid):  # 059: factory_state's one git call; SKILL.md is always the app's template
+        return READY.encode(), None
 
 
 def test_auth_through_adapter(client, project, fake):  # 036 AC9

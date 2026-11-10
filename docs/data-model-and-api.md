@@ -218,7 +218,7 @@ POST /api/projects/connect                                        (fctl connect)
 ← 200 {"id":3,"created":true,"url":"http://127.0.0.1:4545/projects/3"}
 
 GET  /api/projects?path=/Users/artem/code/api-server             (fctl resolves cwd → project)
-← 200 {"id":3,"name":"api-server","default_branch":"main","factory":"ready"}   # none|uncommitted|ready
+← 200 {"id":3,"name":"api-server","default_branch":"main","factory":"ready"}   # none|uncommitted|legacy|ready
 
 POST /api/projects/3/factory                                      (Create factory button)
 → {"overwrite":false}
@@ -522,10 +522,12 @@ DELETE /api/tasks/12                                              (board Delete)
 
 POST /api/tasks/12/run                                            (Run, Retry, fctl run 12)
 ← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login"}
-  # 409 if any run is active, auth isn't claude.ai, or the factory isn't committed on default_branch
+  # 409 if any run is active, auth isn't claude.ai, or the factory isn't committed on default_branch;
+  #   a legacy factory (MVP §3.2 step 4): 409 {"detail":"this repo runs the file-based /factory loop:
+  #   Create factory with Overwrite, then commit it on main"}
 
 POST /api/projects/3/run-next                                     (Run next, fctl run next)
-← 202 {"task_id":14,"run_id":42}                                  # 404 if backlog empty
+← 202 {"task_id":14,"run_id":42}                                  # 404 if backlog empty; 409 as run
 
 POST /api/runs/41/stop
 ← 200 {"id":41,"status":"stopped"}
@@ -670,7 +672,9 @@ GET  /api/pages/dashboard                       tiles, the waiting and escalated
                                                 workspace → project, rounds per task
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
 GET  /api/pages/projects/{id}                   the project (path, remote_url, default branch, test_cmd, workspace),
-                                                factory state and hint, board cards with stage, branch,
+                                                factory state and hint, factory_files (059: which of Create
+                                                factory's 8 paths exist on disk now, in its order; [] when none),
+                                                board cards with stage, branch,
                                                 description_md, chips per round, +/−, waiting, escalated, stalled,
                                                 and factory_error (058): first syncs factory/ (§6.1's {}) when
                                                 board.json's or backlog.md's mtime or size changed; a refusal is

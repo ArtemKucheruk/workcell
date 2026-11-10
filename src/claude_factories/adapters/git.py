@@ -39,7 +39,6 @@ def git_ok(*args: str, env: dict | None = None) -> bytes:
 
 
 class Git(Protocol):
-    def committed(self, path: str, branch: str, file: str) -> bool: ...
     def exclude_path(self, repo: str) -> str: ...
     def add_worktree(self, repo: str, branch: str, path: str, base: str) -> str | None: ...
     def ls_files(self, root: str) -> tuple[bytes | None, str | None]: ...
@@ -57,15 +56,6 @@ class Git(Protocol):
 
 
 class SubprocessGit:
-    def committed(self, path: str, branch: str, file: str) -> bool:
-        """`file` is committed on `branch` of the repo at `path`. Any failure is False."""
-        try:
-            return subprocess.run(
-                ["git", "-C", path, "cat-file", "-e", f"{branch}:{file}"], capture_output=True, timeout=10,
-            ).returncode == 0
-        except (OSError, ValueError, subprocess.TimeoutExpired):  # no git, a NUL in the path, a hung repo
-            return False
-
     def exclude_path(self, repo: str) -> str:
         """012 Q5: the absolute path of the repo's info/exclude. Raises if git fails."""
         return subprocess.run(

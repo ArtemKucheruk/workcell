@@ -32,31 +32,35 @@ export function FactoryForm({ label, create }) {
   )
 }
 
-/**
- * MVP §3.2, 052 FE7, FE12: what a write of factory files wrote and skipped, and the commit command; or its refusal.
- * Settings' Create factory and the designer's Write to repo both show it.
- */
-export function FactoryResult({ out }) {
-  if (out instanceof Error) return <ErrorMessage error={out} />
-  const files = (paths) => (
+/** A bulleted list of repo paths in mono; 059 Settings' legacy note lists `factory_files` with it too. */
+export function FileList({ paths }) {
+  return (
     <ul className="ml-6 list-disc">
       {paths.map((path) => (
         <li key={path}><code>{path}</code></li>
       ))}
     </ul>
   )
+}
+
+/**
+ * MVP §3.2, 052 FE7, FE12: what a write of factory files wrote and skipped, and the commit command; or its refusal.
+ * Settings' Create factory and the designer's Write to repo both show it.
+ */
+export function FactoryResult({ out }) {
+  if (out instanceof Error) return <ErrorMessage error={out} />
   return (
     <div className="grid gap-1 rounded-md border border-line p-3">
       {out.written.length > 0 && (
         <>
           <p>{`Wrote ${plural(out.written.length, 'file')}:`}</p>
-          {files(out.written)}
+          <FileList paths={out.written} />
         </>
       )}
       {out.skipped.length > 0 && (
         <>
           <p>{`Skipped ${plural(out.skipped.length, 'existing file')} (tick Overwrite to replace them):`}</p>
-          {files(out.skipped)}
+          <FileList paths={out.skipped} />
         </>
       )}
       <p>Commit them so runs can see the factory:</p>

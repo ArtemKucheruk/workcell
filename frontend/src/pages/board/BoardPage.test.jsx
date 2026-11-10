@@ -6,6 +6,7 @@ const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', default_branch: 'ma
 const WORKSPACES = [{ id: 2, name: 'personal', projects: 1 }, { id: 4, name: 'work', projects: 0 }]
 const BOARD = '/api/pages/projects/3'
 const HINT = "factory isn't committed on main: Create factory on the project board, then commit it on main"
+const LEGACY_HINT = 'this repo runs the file-based /factory loop: Create factory with Overwrite, then commit it on main'
 const ACTIVE = [409, { detail: 'run #41 active' }]
 
 /** A Card as 020's dto/pages.py has it, with 048's description_md. */
@@ -155,6 +156,15 @@ test('AC3: a hint shows in the header; a null hint shows none', async () => {
   withHint.unmount()
   await open(board())
   expect(screen.queryByText(/factory isn't committed/)).toBeNull()
+})
+
+test('059 FE2: legacy shows the Factory: legacy link and its hint in the header, and Run next is disabled', async () => {
+  await open(board({ backlog: [card(1, 'backlog')] }, { factory: 'legacy', hint: LEGACY_HINT, can_run: false }))
+  const head = within(header())
+  expect(head.getByRole('link', { name: 'Factory: legacy' }).getAttribute('href')).toBe('/projects/3/settings')
+  expect(head.getByText(LEGACY_HINT)).toBeTruthy()
+  expect(head.getByRole('button', { name: 'Run next ▶' }).disabled).toBe(true)
+  expect(screen.getByRole('button', { name: 'Run' }).disabled).toBe(true)
 })
 
 test('058 FE5: a factory_error shows as one muted factory/: line in the header, under the hint, and not as an alert', async () => {

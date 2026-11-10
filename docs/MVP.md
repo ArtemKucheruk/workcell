@@ -100,9 +100,25 @@ node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run
    Existing files are skipped and listed, unless I tick *Overwrite*.
 3. The page shows the files it wrote and the command to commit them:
    `git add .claude/skills/factory .claude/agents && git commit -m "Add factory"`
-4. **Run** stays disabled, with that same hint, until
-   `git cat-file -e main:.claude/skills/factory/SKILL.md` succeeds. Worktrees are created
-   from `main`, so the factory has to be committed there before a run can see it.
+4. **Run** stays disabled, with that same hint, until the factory is `ready`. Worktrees are created
+   from `main`, so the factory has to be committed there before a run can see it. The app reads
+   one of four factory states with one `git cat-file blob main:.claude/skills/factory/SKILL.md`,
+   in this order:
+   - `ready`: SKILL.md is a committed file on `main` containing the bytes `fctl stage`. The app's
+     template always calls `fctl stage`, so a committed Create factory reads `ready`.
+   - `legacy`: SKILL.md is committed on `main` but lacks `fctl stage`. This is the file-based
+     bootstrap loop (this repo's own `/factory`): it keeps its state in `factory/` and reads
+     `/factory <id>` as a new feature, so a run would start the wrong job.
+   - `uncommitted`: SKILL.md isn't committed on `main` (or git fails, or it isn't a file there),
+     but it is on disk.
+   - `none`: neither.
+
+   Every run (Run, Retry, Run next, and Request changes' rework run) refuses a `legacy` repo with
+   `this repo runs the file-based /factory loop: Create factory with Overwrite, then commit it on main`,
+   and the board and task pages show it as the hint. To fix it, Create factory with *Overwrite*,
+   then commit the files on `main`. Until that commit the state stays `legacy`: the committed file
+   decides, not the one on disk. Meanwhile the board's automatic `factory/` sync
+   (`docs/data-model-and-api.md §6.1` import-factory) keeps showing the bootstrap's jobs.
 
 Design a factory: Project → **Factories** → **+ New factory** (a name) → the designer opens on the
 default loop → drag or click agents and conditions from the palette, connect handles, and edit the
