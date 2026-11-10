@@ -325,14 +325,16 @@ def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, work
 
 def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
           transcripts: TranscriptsRepo, workspaces: WorkspacesRepo, git: Git, claude: Claude,
-          accounts: ClaudeAccountsRepo, project_id: int) -> dict:
-    """058: syncs factory/ first when board.json or backlog.md changed, so the columns already hold it."""
+          accounts: ClaudeAccountsRepo, project_id: int, may_sync: bool = True) -> dict:
+    """058: syncs factory/ first when board.json or backlog.md changed, so the columns already hold it. With
+    `may_sync` False (a cross-site request, §4.5) it only reads the stored error."""
     # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
     # add a /projects/{id}/board fragment route if that shows up in profiling
     project = projects.for_board(project_id)
     if project is None:
         raise NotFound()
-    factory_error = sync(projects, tasks, rounds, reviews, runs, transcripts, git, project_id)
+    factory_error = (sync(projects, tasks, rounds, reviews, runs, transcripts, git, project_id) if may_sync
+                     else projects.factory_sync(project_id)["factory_error"])
     listed = [t.model_dump() for t in list_tasks(projects, tasks, rounds, reviews, runs, project_id)]  # 035 Q10
     # Q13, 042 BE4, 048 Q5: the API returns neither position, branch, nor description_md; read them after
     # list_tasks so every listed task has a row

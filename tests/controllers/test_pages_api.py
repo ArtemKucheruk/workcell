@@ -1288,6 +1288,18 @@ def test_board_without_factory_files(client, project, imports):  # BE26
     assert imports == []
 
 
+def test_board_cross_site_skips_sync(client, project, repo, imports):  # 058 round 2 feedback, MVP §4.5
+    write(repo, {"factory/backlog.md": BACKLOG})
+    sql("UPDATE projects SET factory_error = 'stored' WHERE id = ?", (project,))
+    r = client.get(f"/api/pages/projects/{project}", headers={"Sec-Fetch-Site": "cross-site"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["columns"]["backlog"], r.json()["factory_error"]) == ([], "stored")
+    assert imports == [] and sql("SELECT factory_mark FROM projects WHERE id = ?", (project,)) == [(None,)]
+    r = client.get(f"/api/pages/projects/{project}", headers={"Sec-Fetch-Site": "same-origin"})
+    assert [c["title"] for c in r.json()["columns"]["backlog"]] == ["Alpha", "Beta"]
+    assert r.json()["factory_error"] is None and len(imports) == 1
+
+
 # --- GET /api/pages/tasks/{id} --------------------------------------------------------
 
 

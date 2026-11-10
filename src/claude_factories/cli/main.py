@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=setup)
     p = commands.add_parser("seed", help="fill an empty FCTL_HOME with demo workspaces, projects, and tasks")
     p.set_defaults(func=seed)
-    p = commands.add_parser("connect", help="register the current git repo as a project")
+    p = commands.add_parser("connect", help="register the current git repo as a project; syncs its factory/ files if any")
     p.add_argument("--workspace", required=True, help="workspace to put it in (created if new)")
     p.add_argument("--test-cmd", help="the repo's test command, e.g. \"pytest -q\"")
     p.set_defaults(func=connect)

@@ -4,7 +4,7 @@ dto/pages.py (020 Q2): rows become objects, markdown gets `*_html`."""
 
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 
 from ..domain.enums import Reviewer
 from ..dto import pages as dto
@@ -143,10 +143,11 @@ def workspace(workspace_id: int, workspaces: Workspaces, projects: Projects, git
 @router.get("/api/pages/projects/{project_id}")
 def board(project_id: int, projects: Projects, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs,
           transcripts: Transcripts, workspaces: Workspaces, git: GitAdapter, claude: ClaudeAdapter,
-          accounts: ClaudeAccounts) -> dto.BoardPage:
-    """058: Transcripts for the factory/ sync's import."""
+          accounts: ClaudeAccounts, sec_fetch_site: str | None = Header(None)) -> dto.BoardPage:
+    """058: Transcripts for the factory/ sync's import. §4.5: this GET writes when it syncs, which the
+    X-Requested-By check doesn't cover, so a cross-site request gets the page without the sync."""
     page = handler.board(projects, tasks, rounds, reviews, runs, transcripts, workspaces, git, claude, accounts,
-                         project_id)
+                         project_id, sec_fetch_site != "cross-site")
     return page | {"project": obj(page["project"]), "workspaces": objs(page["workspaces"])}
 
 

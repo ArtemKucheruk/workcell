@@ -674,7 +674,8 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 description_md, chips per round, +/−, waiting, escalated, stalled,
                                                 and factory_error (058): first syncs factory/ (§6.1's {}) when
                                                 board.json's or backlog.md's mtime or size changed; a refusal is
-                                                stored as factory_error, not a failed page, until a file changes
+                                                stored as factory_error, not a failed page, until a file changes.
+                                                With Sec-Fetch-Site: cross-site it skips the sync (MVP §4.5)
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts)
