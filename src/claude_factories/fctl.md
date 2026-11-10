@@ -715,6 +715,8 @@ branch `factory/12-rate-limit-login` from the default branch. Later runs reuse i
 - `fctl: 409 run #41 active`: only one run at a time, across all projects, exit `1`.
 - `fctl: 409 #12 is in review` or `fctl: 409 #12 is done`, exit `1`.
 - `fctl: 409 factory isn't committed on main: …`: the message names the next step, exit `1`.
+- `fctl: 409 this repo runs the file-based /factory loop: …`: the committed SKILL.md isn't the app's
+  template, and the message names the fix, exit `1`.
 - `fctl: 409 worktree <path> is missing` and `fctl: 409 git worktree add failed: <git's error>`,
   exit `1`.
 - `fctl: 409 not on subscription auth`, then a second line,

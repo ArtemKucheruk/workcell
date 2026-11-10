@@ -73,7 +73,8 @@ export function WorkspacePage() {
                   <td className={num}>{p.in_progress}</td>
                   <td className={num}>{p.review}</td>
                   <td className={num}>{p.done}</td>
-                  <td>{p.factory}</td>
+                  {/* 059 Q1: legacy can't run, so it's the one state in warning */}
+                  <td className={p.factory === 'legacy' ? 'text-warning' : undefined}>{p.factory}</td>
                   <td><Time iso={p.last_activity} relative /></td>
                 </tr>
               ))}

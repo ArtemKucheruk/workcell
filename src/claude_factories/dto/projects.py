@@ -22,7 +22,7 @@ class ProjectOut(BaseModel):
     id: int
     name: str
     default_branch: str
-    factory: Literal["ready", "uncommitted", "none"]
+    factory: Literal["ready", "legacy", "uncommitted", "none"]
 
 
 class ProjectPatch(BaseModel):

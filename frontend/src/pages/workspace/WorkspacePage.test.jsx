@@ -40,6 +40,18 @@ test('AC27, 046 FE7: /workspaces/2 shows the name, title, and one row per projec
   expect(rows.map((tr) => tr.querySelector('time').getAttribute('title'))).toEqual(['2026-10-18 18:05', '2026-10-01 09:00'])
 })
 
+test('059 FE3: a legacy row reads legacy in text-warning; a ready row reads ready without it', async () => {
+  const legacy = { ...PROJECTS[1], id: 5, name: 'old', factory: 'legacy' }
+  mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal', [PROJECTS[0], legacy]) })
+  renderAt('/workspaces/2')
+  await screen.findByRole('heading', { level: 1, name: 'personal' })
+  const factoryCells = screen.getAllByRole('row').slice(1).map((tr) => tr.querySelectorAll('td')[6])
+  expect(factoryCells.map((td) => td.textContent)).toEqual(['ready', 'legacy'])
+  const warning = /(^|\s)text-warning(\s|$)/
+  expect(factoryCells[0].className).not.toMatch(warning)
+  expect(factoryCells[1].className).toMatch(warning)
+})
+
 test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {
   mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal', PROJECTS) })
   renderAt('/workspaces/2')

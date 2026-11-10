@@ -28,7 +28,7 @@ from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TILE_TASKS, TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
-from .factory import factory_hint, factory_state
+from .factory import factory_files, factory_hint, factory_state
 from .factory_import import sync
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
@@ -352,7 +352,7 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
         "project": project, "workspaces": workspaces.all(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
         "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4: the server's checks still decide
-        "factory_error": factory_error,
+        "factory_error": factory_error, "factory_files": factory_files(project["path"]),  # 059
     }
 
 

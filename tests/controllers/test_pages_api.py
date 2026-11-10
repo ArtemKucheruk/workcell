@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 from conftest import commit, git, sql, write
-from controllers.test_runs import H, OLD, SKILL, add_task, connect, fake, project  # noqa: F401
+from controllers.test_runs import (H, LEGACY, LEGACY_HINT, OLD, SKILL, add_task, connect, fake,  # noqa: F401
+                                   project)
 from controllers.test_transcripts import add_transcript
 from fastapi.testclient import TestClient
 from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, wrong_edges
@@ -181,13 +182,15 @@ def done_task(project_id, days, rounds=0):
 
 @pytest.fixture
 def unready(client, tmp_path, fake):
-    """unready("uncommitted" | "none") → a project on its own repo whose factory is in that state."""
+    """unready("uncommitted" | "legacy" | "none") → a project on its own repo whose factory is in that state."""
     def make(state):
         path = tmp_path / f"repo-{state}"
         git(tmp_path, "init", "-q", "-b", "main", str(path))
         git(path, "commit", "-q", "--allow-empty", "-m", "init")
         if state == "uncommitted":
             write(path, {SKILL: "# factory\n"})
+        if state == "legacy":  # 059: committed on main without `fctl stage`
+            commit(path, {SKILL: LEGACY})
         return connect(client, path)
     return make
 
@@ -1084,6 +1087,13 @@ def test_workspace(client, project, repo):  # AC7
     }
 
 
+def test_workspace_legacy_row(client, project, unready):  # 059 BE11
+    states = ("legacy", "uncommitted", "none")
+    ids = {unready(state): state for state in states} | {project: "ready"}
+    page = api(client, f"/api/pages/workspaces/{ws_id('personal')}")
+    assert {p["id"]: p["factory"] for p in page["projects"]} == ids
+
+
 def test_workspace_last_activity(client):  # 026 AC20: 002 AC19's three cases
     ids = {}
     for name, created in (("a", "2026-01-01T00:00:00Z"), ("b", "2026-05-05T08:09:00Z"), ("c", "2026-02-02T10:20:00Z")):
@@ -1190,10 +1200,29 @@ def test_card_stalled(client, project):  # AC12
     assert flags(found[backlog]) == (False, False, False)
 
 
-@pytest.mark.parametrize("state, hint", [("uncommitted", UNCOMMITTED), ("none", NONE)])
-def test_board_factory_not_ready(client, unready, state, hint):  # 026 AC14, 042 BE5
+@pytest.mark.parametrize("state, hint", [("uncommitted", UNCOMMITTED), ("none", NONE), ("legacy", LEGACY_HINT)])
+def test_board_factory_not_ready(client, unready, state, hint):  # 026 AC14, 042 BE5, 059 BE9
     page = api(client, f"/api/pages/projects/{unready(state)}")
-    assert (page["can_run"], page["hint"]) == (False, hint)
+    assert (page["factory"], page["can_run"], page["hint"]) == (state, False, hint)
+
+
+def test_board_factory_files(client, unready):  # 059 BE12, Q3
+    pid = unready("none")
+    page = api(client, f"/api/pages/projects/{pid}")
+    assert page["factory_files"] == []
+    agents = ".claude/agents/"  # builder-backend.md is the bootstrap's, not one of Create factory's 8
+    write(Path(page["project"]["path"]), {f"{agents}review-code.md": "x", f"{agents}builder-backend.md": "x",
+                                          f"{agents}spec-writer.md": "x", SKILL: "x"})
+    assert api(client, f"/api/pages/projects/{pid}")["factory_files"] == [SKILL, f"{agents}spec-writer.md",
+                                                                          f"{agents}review-code.md"]
+
+
+def test_board_legacy_still_syncs(client, unready):  # 059 BE13, 058
+    pid = unready("legacy")
+    write(Path(api(client, f"/api/pages/projects/{pid}")["project"]["path"]), {"factory/backlog.md": BACKLOG})
+    page = api(client, f"/api/pages/projects/{pid}")
+    assert [c["title"] for c in page["columns"]["backlog"]] == ["Alpha", "Beta"]
+    assert (page["factory"], page["factory_error"]) == ("legacy", None)
 
 
 def test_board_console_auth(client, project, fake):  # 026 AC15
@@ -1410,8 +1439,9 @@ def test_isolated_unsets_in_docker():  # 028 AC6: fails under `FCTL_IN_DOCKER=1 
     assert "FCTL_IN_DOCKER" not in os.environ
 
 
-@pytest.mark.parametrize("case, hint", [("uncommitted", UNCOMMITTED), ("none", NONE), ("console", None)])
-def test_task_runs_disabled(client, project, unready, fake, case, hint):  # 026 AC16, 042 BE5
+@pytest.mark.parametrize("case, hint", [("uncommitted", UNCOMMITTED), ("none", NONE), ("legacy", LEGACY_HINT),
+                                        ("console", None)])
+def test_task_runs_disabled(client, project, unready, fake, case, hint):  # 026 AC16, 042 BE5, 059 BE10
     if case == "console":
         fake(auth=CONSOLE)
     else:

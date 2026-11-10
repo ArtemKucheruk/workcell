@@ -31,15 +31,25 @@ COMMIT_HINT = commit_hint("factory")
 
 
 def factory_state(git: Git, path: str, default_branch: str) -> str:
-    """002 Q6: ready = SKILL.md committed on the default branch (MVP §3.2), uncommitted = only on disk."""
-    if git.committed(path, default_branch, SKILL):
-        return "ready"
+    """MVP §3.2 step 4, 059: SKILL.md committed on the default branch is ready when it calls `fctl stage`
+    (the app's template always does), else legacy (the file-based bootstrap loop). Not committed (or git
+    fails, or it's no blob there, Q5): uncommitted when on disk, else none. One git call."""
+    committed, _ = git.blob(path, f"{default_branch}:{SKILL}")  # branch can't start with `-` (connect)
+    if committed is not None:
+        return "ready" if b"fctl stage" in committed else "legacy"
     return "uncommitted" if os.path.isfile(os.path.join(path, SKILL)) else "none"
+
+
+def factory_files(path: str) -> list[str]:
+    """059 Q3: which of Create factory's paths exist on disk now, by its own skip test, in FACTORY_FILES order."""
+    return [rel for rel in FACTORY_FILES if os.path.lexists(os.path.join(path, rel))]
 
 
 def factory_hint(state: str, branch: str) -> str | None:
     """MVP §3.2 step 4, 014 Q6: why Run is off for this factory state, naming the next step (015 ux
     review); None when ready. run_task's 409 detail and the pages' hint."""
+    if state == "legacy":
+        return f"this repo runs the file-based /factory loop: Create factory with Overwrite, then commit it on {branch}"
     if state == "uncommitted":
         return f"factory isn't committed on {branch}: on {branch}, run {COMMIT_HINT}"
     if state == "none":

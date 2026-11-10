@@ -34,6 +34,13 @@ test('FE2: uncommitted and none link Factory: <state> to the project settings', 
   }
 })
 
+test('059 FE1: legacy links Factory: legacy to the project settings, in warning', () => {
+  const el = header({ project: PROJECT, factory: 'legacy' })
+  const link = within(el).getByRole('link', { name: 'Factory: legacy' })
+  expect(link.getAttribute('href')).toBe('/projects/3/settings')
+  expect(link.className).toMatch(/(^|\s)text-warning(\s|$)/)
+})
+
 test("FE3: the page's own controls render after the factory state, inside the header", () => {
   const el = header({ project: PROJECT, factory: 'ready' }, <button type="button">Run next ▶</button>)
   const state = within(el).getByText('Factory: ready ✓')
