@@ -157,6 +157,26 @@ test('AC3: a hint shows in the header; a null hint shows none', async () => {
   expect(screen.queryByText(/factory isn't committed/)).toBeNull()
 })
 
+test('058 FE5: a factory_error shows as one muted factory/: line in the header, under the hint, and not as an alert', async () => {
+  const error = "factory/board.json isn't valid JSON"
+  await open(board({}, { factory: 'none', hint: HINT, can_run: false, factory_error: error }))
+  const lines = [...header().querySelectorAll('*')].filter((el) => el.textContent.startsWith('factory/: '))
+  expect(lines.map((el) => el.textContent)).toEqual([`factory/: ${error}`])
+  const [line] = lines
+  expect(line.className).toMatch(/(^|\s)text-muted(\s|$)/)
+  expect(line.closest('[role="alert"]')).toBeNull()
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(within(header()).getByText(HINT).compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
+test('058 FE6: a null or missing factory_error shows no factory/: line', async () => {
+  for (const extra of [{ factory_error: null }, {}]) {
+    const { unmount } = await open(board({}, extra))
+    expect(screen.getByRole('main').textContent).not.toContain('factory/:')
+    unmount()
+  }
+})
+
 test('AC4: can_run disables or enables Run next, every Run, and every Retry', async () => {
   const columns = {
     backlog: [card(1, 'backlog'), card(2, 'backlog')],

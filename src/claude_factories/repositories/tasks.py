@@ -122,8 +122,12 @@ class TasksRepo:
         )
 
     def by_import_key(self, key: str) -> sqlite3.Row | None:
+        """058 Q6: `started` is any run or round, or a status other than backlog."""
         return self.conn.execute(
-            "SELECT id, project_id, status FROM tasks WHERE import_key = ?", (key,)
+            "SELECT id, project_id, status, description_md, status != 'backlog'"
+            " OR EXISTS (SELECT 1 FROM runs WHERE task_id = tasks.id)"
+            " OR EXISTS (SELECT 1 FROM rounds WHERE task_id = tasks.id) AS started FROM tasks WHERE import_key = ?",
+            (key,),
         ).fetchone()
 
     def put_imported(self, task_id: int | None, row: dict) -> int:

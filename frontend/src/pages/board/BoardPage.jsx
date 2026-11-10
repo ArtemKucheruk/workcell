@@ -494,6 +494,8 @@ export function BoardPage() {
           Run next ▶
         </ActionButton>
         {page.hint && <p className={`basis-full text-sm ${muted}`}>{page.hint}</p>}
+        {/* 058 FE5, FE6: the last automatic sync's refusal, muted like the hint and not an alert: polls repeat it */}
+        {page.factory_error && <p className={`basis-full text-sm ${muted}`}>{`factory/: ${page.factory_error}`}</p>}
       </ProjectHeader>
       {error && <OfflineBanner />}
       {actionError && <ErrorMessage error={actionError} />}

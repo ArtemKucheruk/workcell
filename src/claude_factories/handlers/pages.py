@@ -29,6 +29,7 @@ from ..repositories.tasks import TILE_TASKS, TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_hint, factory_state
+from .factory_import import sync
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
 from .runs import log_lines
@@ -323,12 +324,15 @@ def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, work
 
 
 def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
-          workspaces: WorkspacesRepo, git: Git, claude: Claude, accounts: ClaudeAccountsRepo, project_id: int) -> dict:
+          transcripts: TranscriptsRepo, workspaces: WorkspacesRepo, git: Git, claude: Claude,
+          accounts: ClaudeAccountsRepo, project_id: int) -> dict:
+    """058: syncs factory/ first when board.json or backlog.md changed, so the columns already hold it."""
     # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
     # add a /projects/{id}/board fragment route if that shows up in profiling
     project = projects.for_board(project_id)
     if project is None:
         raise NotFound()
+    factory_error = sync(projects, tasks, rounds, reviews, runs, transcripts, git, project_id)
     listed = [t.model_dump() for t in list_tasks(projects, tasks, rounds, reviews, runs, project_id)]  # 035 Q10
     # Q13, 042 BE4, 048 Q5: the API returns neither position, branch, nor description_md; read them after
     # list_tasks so every listed task has a row
@@ -346,6 +350,7 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
         "project": project, "workspaces": workspaces.all(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
         "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4: the server's checks still decide
+        "factory_error": factory_error,
     }
 
 

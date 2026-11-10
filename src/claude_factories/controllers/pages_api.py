@@ -142,8 +142,11 @@ def workspace(workspace_id: int, workspaces: Workspaces, projects: Projects, git
 
 @router.get("/api/pages/projects/{project_id}")
 def board(project_id: int, projects: Projects, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs,
-          workspaces: Workspaces, git: GitAdapter, claude: ClaudeAdapter, accounts: ClaudeAccounts) -> dto.BoardPage:
-    page = handler.board(projects, tasks, rounds, reviews, runs, workspaces, git, claude, accounts, project_id)
+          transcripts: Transcripts, workspaces: Workspaces, git: GitAdapter, claude: ClaudeAdapter,
+          accounts: ClaudeAccounts) -> dto.BoardPage:
+    """058: Transcripts for the factory/ sync's import."""
+    page = handler.board(projects, tasks, rounds, reviews, runs, transcripts, workspaces, git, claude, accounts,
+                         project_id)
     return page | {"project": obj(page["project"]), "workspaces": objs(page["workspaces"])}
 
 

@@ -17,3 +17,7 @@ export const projectContext = (id) => api(`/api/projects/${encodeURIComponent(id
 
 export const saveProjectContext = (id, contextMd) =>
   api(`/api/projects/${encodeURIComponent(id)}/context`, { method: 'PUT', body: { context_md: contextMd } })
+
+/** 058: `{}` syncs factory/board.json and factory/backlog.md onto the board; the reply has `imported` and `skipped`. */
+export const syncFactory = (id) =>
+  api(`/api/projects/${encodeURIComponent(id)}/import-factory`, { method: 'POST', body: {} })

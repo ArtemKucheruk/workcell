@@ -285,6 +285,64 @@ test('FE30 (032 AC49): a 413 or 422 shows its detail, and the page stays', async
   }
 })
 
+// --- Sync factory/ (058) -----------------------------------------------------------------
+
+const SYNC = '/api/projects/3/import-factory'
+const SYNC_NOTE =
+  "The repo's factory/board.json and factory/backlog.md as tasks. The board also syncs them when either file changes."
+const job = (n, created) => ({ job: `05${n}-job`, task_id: 70 + n, created, rounds: 0, transcripts: 0 })
+const SYNCED = { imported: [job(1, true), job(2, false), job(3, false)], skipped: 1 }
+const syncButton = () => within(section('Import')).getByRole('button', { name: 'Sync factory/' })
+
+test('058 FE1: Import has Sync factory/ under its muted note; a click sends one POST import-factory with the body {}', async () => {
+  const { fetch } = await open(board(), { [`POST ${SYNC}`]: [200, SYNCED] })
+  const note = within(section('Import')).getByText(fullText(SYNC_NOTE))
+  expect(note.className).toMatch(/(^|\s)text-muted(\s|$)/)
+  expect([...note.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['factory/board.json', 'factory/backlog.md'])
+  expect(note.compareDocumentPosition(syncButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  fireEvent.click(syncButton())
+  await screen.findByText(/^Synced factory\//)
+  expect(sent(fetch, 'POST', SYNC)).toEqual({})
+  expect(fetch.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toHaveLength(1)
+})
+
+test('058 FE2: a 200 says Synced factory/: 1 new, 2 updated, 1 skipped in a polite live region and reloads the page', async () => {
+  const { fetch } = await open(board(), { [`POST ${SYNC}`]: [200, SYNCED] })
+  fireEvent.click(syncButton())
+  const line = await screen.findByText('Synced factory/: 1 new, 2 updated, 1 skipped')
+  expect(line.closest('[aria-live]').getAttribute('aria-live')).toBe('polite')
+  expect(line.closest('section')).toBe(section('Import'))
+  expect(screen.queryByRole('alert')).toBeNull()
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+})
+
+test('058 FE3: a refused sync shows its detail as an alert in Import and does not reload', async () => {
+  const detail = 'factory:001-setup is imported in project #2'
+  const { fetch } = await open(board(), { [`POST ${SYNC}`]: [409, { detail }] })
+  fireEvent.click(syncButton())
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe(detail)
+  expect(alert.closest('section')).toBe(section('Import'))
+  expect(screen.queryByText(/^Synced/)).toBeNull()
+  await waitFor(() => expect(syncButton().disabled).toBe(false))
+  expect(loads(fetch)).toBe(1)
+})
+
+test('058 FE4: Sync factory/ is disabled while its request is pending, and enabled again after', async () => {
+  const { fetch } = await open(board(), { [`POST ${SYNC}`]: [200, SYNCED] })
+  const reply = fetch.getMockImplementation()
+  let release
+  const gate = new Promise((resolve) => (release = resolve))
+  fetch.mockImplementation((url, init) => (url === SYNC ? gate.then(() => reply(url, init)) : reply(url, init)))
+  expect(syncButton().disabled).toBe(false)
+  fireEvent.click(syncButton())
+  expect(syncButton().disabled).toBe(true)
+  release()
+  await screen.findByText('Synced factory/: 1 new, 2 updated, 1 skipped')
+  expect(syncButton().disabled).toBe(false)
+  expect(sends(fetch, 'POST', SYNC)).toHaveLength(1)
+})
+
 // --- Move (board AC27–AC28, moved) -------------------------------------------------------
 
 test('FE31 (AC27), 049 Q13: Move lists the workspaces, patches the chosen one, the header follows the reload, and so does the sidebar', async () => {

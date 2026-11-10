@@ -148,7 +148,9 @@ Loading, failures, times, and motion are the same on every page:
    it to another workspace. The workspace's own Settings page (item 13, from the sidebar's
    workspace `⋯`) renames or deletes it.
 3. **Project board** (`/projects/{id}`): kanban (wireframe below). The header is the project
-   header plus **+ New task**, **Run next**, and the hint for why runs are off. **+ New task**
+   header plus **+ New task**, **Run next**, and the hint for why runs are off. Under the hint, when
+   the view-model's `factory_error` is set (the board's automatic `factory/` sync was refused, §6.4),
+   one muted line, `factory/: <factory_error>`, not an alert. **+ New task**
    opens its form in a native popover, which Esc or a click outside closes, and a created task
    closes it. Clicking a card opens the task detail.
    - Cards move by drag and drop (native HTML5, no library). While a card is dragged it dims,
@@ -327,6 +329,11 @@ Loading, failures, times, and motion are the same on every page:
     - **Import** takes a task bundle (a `.zip` from **Export**) from a file input, disabled
       until a file is chosen, and posts it raw to `POST /api/projects/{id}/import`.
       `Imported #12 <title>` links to the task, or the refusal's detail shows.
+      Below it, a muted line, `The repo's factory/board.json and factory/backlog.md as tasks. The
+      board also syncs them when either file changes.`, and **Sync factory/**, which sends
+      `POST /api/projects/{id}/import-factory` `{}`, disabled while pending. On 200 a polite live
+      region says `Synced factory/: <n> new, <m> updated, <k> skipped` and the page reloads; a
+      refusal's detail shows as an alert in the section.
     - **Move** to another workspace (`PATCH /api/projects/{id}`).
     - **Danger zone**, the last section: **Delete project** (filled `danger`) opens the
       sidebar's project delete dialog (§8.4). On 204 the app goes to `/workspaces/{id}`.

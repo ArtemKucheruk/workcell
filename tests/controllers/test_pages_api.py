@@ -21,7 +21,7 @@ from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, 
 
 from claude_factories import config, db
 from claude_factories.adapters.git import SubprocessGit
-from claude_factories.handlers import pages
+from claude_factories.handlers import factory_import, pages
 from claude_factories.server.app import create_app
 from claude_factories.server.deps import get_git
 
@@ -1200,6 +1200,92 @@ def test_board_console_auth(client, project, fake):  # 026 AC15
     fake(auth=CONSOLE)
     page = api(client, f"/api/pages/projects/{project}")
     assert (page["factory"], page["can_run"], page["hint"]) == ("ready", False, None)
+
+
+# --- 058: the board's factory/ sync ---------------------------------------------------
+
+BACKLOG = "## Next\n\n- [ ] 101-alpha: first\n- [ ] 102-beta: second\n"
+
+
+def sync_board(client, project_id) -> dict:
+    return api(client, f"/api/pages/projects/{project_id}")
+
+
+def alpha(page) -> dict:
+    return next(c for c in page["columns"]["backlog"] if c["title"] == "Alpha")
+
+
+@pytest.fixture
+def imports(monkeypatch):
+    """How many times the board's sync ran 031's import."""
+    calls, real = [], factory_import.import_factory
+    monkeypatch.setattr(factory_import, "import_factory", lambda *a: calls.append(a) or real(*a))
+    return calls
+
+
+def test_board_syncs_new_backlog(client, project, repo):  # BE20
+    add_task(project, position=3.0)
+    write(repo, {"factory/backlog.md": BACKLOG})
+    page = sync_board(client, project)
+    assert [c["title"] for c in page["columns"]["backlog"]] == ["t", "Alpha", "Beta"]
+    assert page["factory_error"] is None
+
+
+def test_board_unchanged_files_dont_sync(client, project, repo, imports):  # BE21
+    write(repo, {"factory/backlog.md": BACKLOG})
+    sync_board(client, project)
+    sql("UPDATE tasks SET description_md = 'edited' WHERE import_key = 'factory:101-alpha'")
+    assert alpha(sync_board(client, project))["description_md"] == "edited"
+    assert len(imports) == 1
+
+
+def test_board_resyncs_on_mtime(client, project, repo):  # BE22
+    write(repo, {"factory/backlog.md": BACKLOG})
+    sync_board(client, project)
+    sql("UPDATE tasks SET description_md = 'edited' WHERE import_key = 'factory:101-alpha'")
+    path = repo / "factory" / "backlog.md"
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 10**9))
+    assert alpha(sync_board(client, project))["description_md"] == "## Next\n\nfirst"
+
+
+def test_board_resyncs_on_size(client, project, repo):  # BE23
+    write(repo, {"factory/backlog.md": BACKLOG})
+    sync_board(client, project)
+    path = repo / "factory" / "backlog.md"
+    old = path.stat()
+    write(repo, {"factory/backlog.md": BACKLOG.replace("first", "first, longer")})
+    os.utime(path, ns=(old.st_atime_ns, old.st_mtime_ns))
+    assert alpha(sync_board(client, project))["description_md"] == "## Next\n\nfirst, longer"
+
+
+def test_board_resyncs_on_board_json(client, project, repo):  # BE24
+    write(repo, {"factory/board.json": json.dumps({"jobs": [{"id": "001-a", "title": "Job A", "status": "backlog"}]})})
+    sync_board(client, project)
+    sql("UPDATE tasks SET title = 'renamed' WHERE import_key = 'factory:001-a'")
+    path = repo / "factory" / "board.json"
+    os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 10**9))
+    assert [c["title"] for c in sync_board(client, project)["columns"]["backlog"]] == ["Job A"]
+
+
+def test_board_refusal_never_fails(client, project, repo, imports):  # BE25, Q10, Q11
+    tid = add_task(project)
+    write(repo, {"factory/board.json": "{not json", "factory/backlog.md": BACKLOG})
+    page = sync_board(client, project)
+    assert [c["id"] for c in page["columns"]["backlog"]] == [tid]
+    assert page["factory_error"] == "factory/board.json isn't valid JSON"
+    assert sync_board(client, project)["factory_error"] == "factory/board.json isn't valid JSON"
+    assert len(imports) == 1
+    write(repo, {"factory/board.json": json.dumps({"jobs": []})})
+    page = sync_board(client, project)
+    assert page["factory_error"] is None
+    assert [c["title"] for c in page["columns"]["backlog"]] == ["t", "Alpha", "Beta"]
+    assert len(imports) == 2
+
+
+def test_board_without_factory_files(client, project, imports):  # BE26
+    assert sync_board(client, project)["factory_error"] is None
+    assert sql("SELECT factory_mark, factory_error FROM projects WHERE id = ?", (project,)) == [(None, None)]
+    assert imports == []
 
 
 # --- GET /api/pages/tasks/{id} --------------------------------------------------------

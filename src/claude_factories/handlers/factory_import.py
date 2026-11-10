@@ -2,19 +2,23 @@
 `factory/jobs/<id>/` (FACTORY.md "Target file system"), become tasks with their events, rounds, round_files,
 verdicts, and decisions, and each job's Claude Code transcripts are copied the 030 way. A rerun rewrites the
 same rows, keyed on `tasks.import_key` `factory:<job id>` (Q3). Everything is read and checked before the
-first write, so a refusal writes nothing (Q7)."""
+first write, so a refusal writes nothing (Q7).
+058: `{}` also reads `factory/backlog.md`, whose lines board.json doesn't list become backlog-only tasks under the
+same key, and the board's view-model runs it when either file changes (`sync`)."""
 
 import json
 import os
 import re
+import stat
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .. import config
 from ..adapters.git import Git
 from ..domain.enums import Reviewer, Stage, Status
-from ..domain.errors import Conflict, Invalid, NotFound, TooLarge
+from ..domain.errors import Conflict, DomainError, Invalid, NotFound, TooLarge
 from ..dto.factory import ImportedJob, ImportOut
+from ..lib.backlog import ID, parse
 from ..lib.patch import split_patch
 from ..lib.transcript import agent_types, first_prompt, folder_name
 from ..repositories.projects import ProjectsRepo
@@ -25,12 +29,12 @@ from ..repositories.tasks import TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
 from .transcripts import SESSION, agent_type, jsonl, load, store
 
-ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,99}")  # Q7: every id on today's board
 ROUND_DIR = re.compile(r"round-([1-9][0-9]{0,8})")
 FEEDBACK = re.compile(r"feedback-([1-9][0-9]{0,8})\.md")
 PULL = re.compile(r"/pull/([0-9]{1,9})\b")  # Q6
 TIME = "%Y-%m-%dT%H:%M:%SZ"  # db.now()'s format (Q4)
 STATUSES, STAGES = {s.value for s in Status}, {s.value for s in Stage}
+FILES = ("board.json", "backlog.md")  # 058
 
 
 # --- Reading factory/ (Q7) ---------------------------------------------------------------
@@ -75,17 +79,29 @@ def bad_id(value, where: str = "") -> Invalid:
                    " starting with a letter or digit")
 
 
-def board(project_path: str) -> tuple[Path, list]:
-    """(the realpath of factory/, board.json's jobs). 404 when factory/ resolves outside the project or holds no
-    board.json; 422 when that isn't a JSON object with a jobs list."""
-    factory = Path(project_path, "factory")
-    root = Path(os.path.realpath(factory))
-    missing = NotFound(f"no factory/board.json in {project_path}")
-    if not root.is_relative_to(os.path.realpath(project_path)):
-        raise missing
-    text = read(root, factory / "board.json", "board.json")
-    if text is None:
-        raise missing
+def factory_root(project_path: str) -> Path | None:
+    """The realpath of factory/, or None when it resolves outside the project (Q7)."""
+    root = Path(os.path.realpath(Path(project_path, "factory")))
+    return root if root.is_relative_to(os.path.realpath(project_path)) else None
+
+
+def mark(project_path: str) -> str | None:
+    """058 Q10: board.json's and backlog.md's st_mtime_ns and st_size, `-` for a missing one; None with neither.
+    It uses the import's containment, so a file outside factory/ counts as missing."""
+    root, parts = factory_root(project_path), []
+    for name in FILES:
+        path = Path(project_path, "factory", name)
+        try:
+            st = path.stat()
+        except OSError:
+            st = None
+        found = root and st and stat.S_ISREG(st.st_mode) and inside(root, path)
+        parts.append(f"{name}:{st.st_mtime_ns}:{st.st_size}" if found else f"{name}:-")
+    return None if all(p.endswith(":-") for p in parts) else " ".join(parts)
+
+
+def board_jobs(text: str) -> list:
+    """board.json's jobs; 422 when it isn't a JSON object with a jobs list."""
     try:
         data = json.loads(text)
     except (ValueError, RecursionError):
@@ -93,7 +109,7 @@ def board(project_path: str) -> tuple[Path, list]:
     jobs = data.get("jobs") if isinstance(data, dict) else None
     if not isinstance(jobs, list):
         raise Invalid('factory/board.json has no "jobs" list')
-    return root, jobs
+    return jobs
 
 
 def checked(job) -> dict:
@@ -255,14 +271,23 @@ def copy_transcripts(runs: RunsRepo, transcripts: TranscriptsRepo, task_id: int,
 def import_factory(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo,
                    runs: RunsRepo, transcripts: TranscriptsRepo, git: Git, project_id: int,
                    job_id: str | None) -> ImportOut:
-    """Every job on board.json, or only `job_id`, in board order."""
+    """Every job on board.json in board order, then backlog.md's backlog-only lines in file order (058); or only
+    board.json's `job_id`."""
     if job_id is not None and not ID.fullmatch(job_id):
         raise bad_id(job_id)
     project = projects.for_code(project_id)
     if project is None:
         raise NotFound(f"Project #{project_id} not found")
     path = project["path"]
-    root, jobs = board(path)
+    signature = mark(path) if job_id is None else None  # Q10: taken before the files are read
+    root = factory_root(path)
+    board = read(root, Path(path, "factory", "board.json"), "board.json") if root else None
+    backlog = read(root, Path(path, "factory", "backlog.md"), "backlog.md") if root and job_id is None else None  # Q8
+    if job_id is None and board is None and backlog is None:  # Q9
+        raise NotFound(f"no factory/board.json or factory/backlog.md in {path}")
+    if board is None and job_id is not None:
+        raise NotFound(f"no factory/board.json in {path}")
+    jobs = [] if board is None else board_jobs(board)
     picked = [j for j in jobs if job_id is None or (isinstance(j, dict) and j.get("id") == job_id)]
     if job_id is not None and not picked:
         raise NotFound(f"no job {job_id} in factory/board.json")
@@ -270,13 +295,15 @@ def import_factory(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo,
     ids = [j["id"] for j in picked]
     if dup := next((i for n, i in enumerate(ids) if i in ids[:n]), None):
         raise Invalid(f"factory/board.json lists job {dup} twice")
+    lines, skipped = ([], 0) if backlog is None else parse(backlog)
+    lines = [line for line in lines if line["id"] not in ids]  # BE9: board.json's entry wins
     jobs_dir = Path(path, "factory", "jobs")
     files = {j["id"]: job_files(root, jobs_dir / j["id"], j["id"]) | {"base_sha": base_sha(git, path, j.get("pr"))}
              for j in picked}
     found = sessions(path, ids)
     # ponytail: the copies happen inside the write lock, so a first import of every job holds it for seconds
     now = tasks.lock()
-    for jid in ids:
+    for jid in ids + [line["id"] for line in lines]:
         task = tasks.by_import_key(f"factory:{jid}")
         if task and task["project_id"] != project_id:  # Q11
             raise Conflict(f"factory:{jid} is imported in project #{task['project_id']}")
@@ -288,7 +315,58 @@ def import_factory(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo,
         count = copy_transcripts(runs, transcripts, task_id, found.get(jid, {}), now)
         imported.append(ImportedJob(job=jid, task_id=task_id, created=task is None, rounds=len(f["rounds"]),
                                     transcripts=count))
-    return ImportOut(imported=imported)
+    for line in lines:
+        task = tasks.by_import_key(f"factory:{line['id']}")
+        task_id = put_line(tasks, project_id, task, line, now)
+        imported.append(ImportedJob(job=line["id"], task_id=task_id, created=task is None, rounds=0, transcripts=0))
+    if job_id is None:
+        projects.set_factory_sync(project_id, signature, None)  # Q10: a {} that worked clears the error
+    return ImportOut(imported=imported, skipped=skipped)
+
+
+def put_line(tasks: TasksRepo, project_id: int, task, line: dict, now: str) -> int:
+    """058 Q4–Q6: a backlog-only line's task, new at the bottom of its column with one `app` event. A rerun on one
+    the app hasn't started changes only description_md and status, and only when they differ; a new status sends
+    it to the bottom of that column with an event. A started task is left alone. done_at stays NULL (Q4)."""
+    status = Status.DONE if line["done"] else Status.BACKLOG
+    if task is None:
+        task_id = tasks.put_imported(None, {
+            "project_id": project_id, "import_key": f"factory:{line['id']}", "title": line["title"],
+            "description_md": line["description_md"], "spec_md": None, "status": status, "stage": None,
+            "position": tasks.bottom_position(project_id, status), "branch": None, "created_at": now,
+            "updated_at": now, "done_at": None})
+        tasks.add_event(task_id, "app", None, status, None, now)
+        return task_id
+    if task["started"]:
+        return task["id"]
+    if task["description_md"] != line["description_md"]:
+        tasks.edit(task["id"], None, line["description_md"], now)
+    if task["status"] != status:
+        tasks.move(task["id"], status, None, None, now, tasks.bottom_position(project_id, status))
+        tasks.add_event(task["id"], "app", task["status"], status, None, now)
+    return task["id"]
+
+
+def sync(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
+         transcripts: TranscriptsRepo, git: Git, project_id: int) -> str | None:
+    """058 Q10, Q11: the board's `{}`, run only when the files' mark differs from the stored one; the refusal to
+    show, or None. A refusal (DomainError) is stored with the mark, so a 3 s poll doesn't retry it until a file
+    changes; anything else still fails the request. With neither file, nothing is imported or written."""
+    # ponytail (Q15): a changed mark runs 031's whole import (a git log per job with a PR, a transcript scan, and
+    # copies inside the write lock), once per file change; skip the transcripts here if that ever shows
+    found = projects.factory_sync(project_id)
+    signature = mark(found["path"])
+    if signature == found["factory_mark"]:
+        return found["factory_error"]
+    error = None
+    if signature is not None:
+        try:
+            import_factory(projects, tasks, rounds, reviews, runs, transcripts, git, project_id, None)
+            return None
+        except DomainError as e:
+            error = e.detail
+    projects.set_factory_sync(project_id, signature, error)
+    return error
 
 
 def board_task(project_id: int, job: dict, f: dict, now: str) -> tuple[dict, list[dict]]:

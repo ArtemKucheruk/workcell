@@ -371,8 +371,8 @@ Single user and no auth still need these, because the API can start processes th
   (`MAX_CONTEXT_FILES`), and must be UTF-8, or the whole read is refused. It writes nothing to
   disk. Uploads go through the same 16 KB and extension checks, and their name never touches
   the filesystem.
-- `fctl import-factory` reads only inside `<project>/factory/`, which must resolve inside the project
-  root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as
+- `fctl import-factory`, and the board's sync of `board.json` and `backlog.md`, reads only inside
+  `<project>/factory/`, which must resolve inside the project root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as
   missing, and a file over 5 MB is refused with `413`.
 - A task bundle import (`POST /api/projects/{id}/import`) refuses a body over `MAX_BUNDLE` (50 MB)
   with `413`, on its `Content-Length` and again as the stream comes in. Every zip entry must be a

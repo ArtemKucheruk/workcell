@@ -25,10 +25,10 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl serve [--host 127.0.0.1] [--port 4545]` | me | starts the app |
 | `fctl setup` | me, once | writes the 2 global skills |
 | `fctl seed` | me | none: writes demo data straight into an empty `FCTL_HOME` |
-| `fctl connect --workspace W [--test-cmd C]` | `/factory-connect` | `POST /api/projects/connect` |
+| `fctl connect --workspace W [--test-cmd C]` | `/factory-connect` | `POST /api/projects/connect`, then `POST /api/projects/{id}/import-factory` `{}` when `factory/board.json` or `factory/backlog.md` is a file |
 | `fctl context` | me | `GET /api/projects/{id}/context` → prints `context_md` as stored |
 | `fctl context set` (stdin) | me | `PUT /api/projects/{id}/context`; refuses blank stdin (clear it on the project's Context page) |
-| `fctl import-factory [--job ID]` | me, `/factory approve` | `POST /api/projects/{id}/import-factory`: the bootstrap `factory/` jobs become tasks |
+| `fctl import-factory [--job ID]` | me, `/factory approve` | `POST /api/projects/{id}/import-factory`: the bootstrap `factory/board.json` jobs, then the `factory/backlog.md` lines it doesn't list, become tasks |
 | `fctl export <id> [-o FILE] [--transcripts]` | me | `GET /api/tasks/{id}/export` → writes the task bundle, `task-<id>.zip` by default |
 | `fctl import FILE` | me | `POST /api/projects/{id}/import` with the bundle as the body: a new task, or an update of the one it made before |
 | `fctl task add "title" [--run]` | me | `POST /api/projects/{id}/tasks` (+ `/run`) |
