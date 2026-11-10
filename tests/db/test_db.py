@@ -115,6 +115,23 @@ def test_startup_adds_context_column():  # 033 AC2
         assert conn.execute("SELECT id, context_md FROM projects").fetchall() == [(1, "")]
 
 
+def test_startup_adds_factory_sync_columns():  # 058 BE27, Q10
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    start_app()
+    start_app()  # a second startup finds them there
+    with closing(db.connect()) as conn:
+        columns = {name: (kind, notnull, default) for _, name, kind, notnull, default, _ in
+                   conn.execute("PRAGMA table_info(projects)")}
+        assert (columns["factory_mark"], columns["factory_error"]) == (("TEXT", 0, None), ("TEXT", 0, None))
+        assert conn.execute("SELECT id, factory_mark, factory_error FROM projects").fetchall() == [(1, None, None)]
+    schema = (Path(db.__file__).with_name("schema.sql")).read_text()
+    projects = schema[schema.index("CREATE TABLE IF NOT EXISTS projects"):schema.index("CREATE TABLE IF NOT EXISTS tasks")]
+    assert "factory_mark TEXT," in projects and "factory_error TEXT)" in projects
+
+
 TRANSCRIPT_COLUMNS = [  # 030 AC15: (name, type, notnull)
     ("id", "INTEGER", 0), ("run_id", "INTEGER", 1), ("task_id", "INTEGER", 1), ("agent_type", "TEXT", 0),
     ("name", "TEXT", 0), ("round", "INTEGER", 0), ("path", "TEXT", 1), ("model", "TEXT", 0),

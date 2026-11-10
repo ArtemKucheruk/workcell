@@ -260,6 +260,7 @@ class BoardPage(BaseModel):
     can_run: bool
     workspaces: list[WorkspaceOut]
     columns: dict[str, list[Card]]  # backlog, in_progress, review, done
+    factory_error: str | None  # 058 Q10: the last automatic factory/ sync's refusal
 
 
 # --- GET /api/pages/tasks/{id} (§8 item 4) ---------------------------------------------

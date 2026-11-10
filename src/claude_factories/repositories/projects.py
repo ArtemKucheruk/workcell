@@ -100,6 +100,16 @@ class ProjectsRepo:
             (project_id,),
         ).fetchone()
 
+    def factory_sync(self, project_id: int) -> sqlite3.Row | None:
+        """058 Q10: the path, and the last factory/ sync's file mark and refusal."""
+        return self.conn.execute(
+            "SELECT path, factory_mark, factory_error FROM projects WHERE id = ?", (project_id,)
+        ).fetchone()
+
+    def set_factory_sync(self, project_id: int, mark: str | None, error: str | None) -> None:
+        self.conn.execute("UPDATE projects SET factory_mark = ?, factory_error = ? WHERE id = ?",
+                          (mark, error, project_id))
+
     def context(self, project_id: int) -> str | None:
         """None if there is no such project."""
         row = self.conn.execute("SELECT context_md FROM projects WHERE id = ?", (project_id,)).fetchone()

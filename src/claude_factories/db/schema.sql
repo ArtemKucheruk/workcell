@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS projects (
   test_cmd TEXT,                          -- used in templates and the run allowlist
   factory_version INTEGER,                -- NULL = factory never written
   created_at TEXT NOT NULL,
-  context_md TEXT NOT NULL DEFAULT '');   -- stack and conventions, atop fctl show; db.init() adds it to old DBs
+  context_md TEXT NOT NULL DEFAULT '',    -- stack and conventions, atop fctl show; db.init() adds it to old DBs
+  factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync
+  factory_error TEXT);                    -- that sync's refusal, NULL when it worked; db.init() adds both
 
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12

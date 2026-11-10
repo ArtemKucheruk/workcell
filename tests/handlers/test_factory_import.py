@@ -378,8 +378,10 @@ def test_unknown_project(client, two):  # AC26
     assert (r.status_code, r.json()["detail"]) == (404, "Project #99 not found")
 
 
-def test_no_board(client, repo, project):  # AC27
+def test_no_board(client, repo, project):  # AC27, 058 Q9
     r = post(client, project)
+    assert (r.status_code, r.json()["detail"]) == (404, f"no factory/board.json or factory/backlog.md in {repo}")
+    r = post(client, project, {"job": "001-a"})
     assert (r.status_code, r.json()["detail"]) == (404, f"no factory/board.json in {repo}")
 
 
@@ -409,17 +411,17 @@ def test_bad_entry_elsewhere_doesnt_block_one_job(client, repo, project):  # AC2
     assert [j["job"] for j in ok(client, project, {"job": "001-a"})] == ["001-a"]
 
 
-def test_symlinks(client, tmp_path, repo, project):  # AC29
+def test_symlinks(client, tmp_path, repo, project):  # AC29, 058 Q9
     outside = tmp_path / "outside"
     write(outside, {"factory/board.json": json.dumps({"jobs": [entry("001-a")]}), "spec.md": "secret",
                     "diff.patch": PATCH})
     (repo / "factory").symlink_to(outside / "factory")
     r = post(client, project)
-    assert (r.status_code, r.json()["detail"]) == (404, f"no factory/board.json in {repo}")
+    assert (r.status_code, r.json()["detail"]) == (404, f"no factory/board.json or factory/backlog.md in {repo}")
     (repo / "factory").unlink()
     (repo / "factory").mkdir()
     (repo / "factory" / "board.json").symlink_to(outside / "factory" / "board.json")
-    assert post(client, project).json()["detail"] == f"no factory/board.json in {repo}"
+    assert post(client, project).json()["detail"] == f"no factory/board.json or factory/backlog.md in {repo}"
     (repo / "factory" / "board.json").unlink()
     board(repo, entry("001-a"))
     put(repo, {"001-a/round-1/build.md": "x"})
@@ -455,6 +457,218 @@ def test_key_in_other_project(client, tmp_path, repo, project, two):  # AC31
     r = post(client, project)
     assert (r.status_code, r.json()["detail"]) == (409, f"factory:001-a is imported in project #{other_id}")
     assert counts() == before
+
+
+# --- 058: factory/backlog.md -----------------------------------------------------------
+
+LOG = "# Backlog\n\n## Repo backlog\n\n- [ ] 101-alpha: first\n- [x] 102-beta: second\n- [ ] 103-gamma: third\n"
+LOG_IDS = ["101-alpha", "102-beta", "103-gamma"]
+
+
+def backlog(repo, text=LOG):
+    write(repo, {"factory/backlog.md": text})
+
+
+def events(jid) -> list[tuple]:
+    return [(e["actor"], e["from_status"], e["to_status"], e["stage"], e["created_at"]) for e in rows(
+        "SELECT * FROM events WHERE task_id = ? ORDER BY id", (task(jid)["id"],))]
+
+
+def snapshot() -> tuple:
+    return rows("SELECT * FROM tasks ORDER BY id"), rows("SELECT * FROM events ORDER BY id")
+
+
+def aged():
+    """Every task and event dated T[0], so a rewrite at the sync time shows."""
+    sql("UPDATE tasks SET created_at = ?, updated_at = ?", (T[0], T[0]))
+    sql("UPDATE events SET created_at = ?", (T[0],))
+
+
+def test_backlog_only(client, repo, project):  # BE6
+    backlog(repo)
+    r = post(client, project)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"skipped": 0, "imported": [
+        {"job": jid, "task_id": task(jid)["id"], "created": True, "rounds": 0, "transcripts": 0} for jid in LOG_IDS]}
+    a, b = task("101-alpha"), task("102-beta")
+    assert (a["import_key"], a["title"], a["description_md"], a["status"]) == (
+        "factory:101-alpha", "Alpha", "## Repo backlog\n\nfirst", "backlog")
+    assert (b["title"], b["description_md"], b["status"]) == ("Beta", "## Repo backlog\n\nsecond", "done")
+    for t in (a, b, task("103-gamma")):
+        assert (t["project_id"], t["stage"], t["branch"], t["spec_md"], t["worktree_path"], t["done_at"]) == (
+            project, None, None, None, None, None)
+        assert t["created_at"] == t["updated_at"]
+
+
+def test_backlog_positions(client, repo, project):  # BE7
+    sql("INSERT INTO tasks (project_id, title, status, position, created_at, updated_at)"
+        " VALUES (?, 'mine', 'backlog', 5, ?, ?), (?, 'shipped', 'done', 3, ?, ?)",
+        (project, T[0], T[0], project, T[0], T[0]))
+    backlog(repo)
+    ok(client, project)
+    assert [task(j)["position"] for j in LOG_IDS] == [6, 4, 7]
+
+
+def test_backlog_events(client, repo, project):  # BE8
+    backlog(repo)
+    ok(client, project)
+    for jid, status in zip(LOG_IDS, ("backlog", "done", "backlog")):
+        assert events(jid) == [("app", None, status, None, task(jid)["created_at"])]
+
+
+def test_board_and_backlog(client, repo, project):  # BE9
+    board(repo, entry("101-alpha"))
+    backlog(repo, "- [ ] 102-beta: b\n- [x] 101-alpha: a\n")
+    assert [j["job"] for j in ok(client, project)] == ["101-alpha", "102-beta"]
+    a = task("101-alpha")
+    assert (a["title"], a["status"], a["stage"], a["description_md"]) == (
+        "Job 101-alpha", "review", "human_review", "Build 101-alpha")
+    assert [e[0] for e in events("101-alpha")] == ["orchestrator", "orchestrator"]
+    assert counts()["tasks"] == 2
+
+
+def test_backlog_rerun_same(client, repo, project):  # BE10
+    backlog(repo)
+    first = ok(client, project)
+    aged()
+    before = snapshot()
+    assert ok(client, project) == [j | {"created": False} for j in first]
+    assert snapshot() == before
+
+
+def test_backlog_rerun_ticked(client, repo, project):  # BE11, Q5
+    sql("INSERT INTO tasks (project_id, title, status, position, created_at, updated_at)"
+        " VALUES (?, 'shipped', 'done', 9, ?, ?)", (project, T[0], T[0]))
+    backlog(repo)
+    ok(client, project)
+    aged()
+    backlog(repo, LOG.replace("- [ ] 101-alpha: first", "- [x] 101-alpha: first, done"))
+    [a] = [j for j in ok(client, project) if j["job"] == "101-alpha"]
+    assert a["created"] is False
+    t = task("101-alpha")
+    assert (t["title"], t["description_md"], t["status"], t["position"], t["done_at"]) == (
+        "Alpha", "## Repo backlog\n\nfirst, done", "done", 11, None)
+    *_, last = events("101-alpha")
+    assert events("101-alpha") == [("app", None, "backlog", None, T[0]), ("app", "backlog", "done", None, last[4])]
+    assert t["updated_at"] == last[4] != T[0]
+    assert task("103-gamma")["updated_at"] == T[0]  # unchanged lines aren't touched
+
+
+def start_run(client, tid):
+    sql("INSERT INTO runs (task_id, session_id, status, log_path, started_at) VALUES (?, 's', 'failed', 'l', ?)",
+        (tid, T[0]))
+
+
+def start_round(client, tid):
+    sql("INSERT INTO rounds (task_id, n, trigger, base_sha, created_at) VALUES (?, 1, 'initial', 'x', ?)", (tid, T[0]))
+
+
+def start_move(client, tid):
+    r = client.patch(f"/api/tasks/{tid}", json={"status": "in_progress", "position": 1}, headers=H)
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("start", [start_run, start_round, start_move])
+def test_backlog_started_left_alone(client, repo, project, start):  # BE12, Q6
+    backlog(repo)
+    ok(client, project)
+    start(client, task("101-alpha")["id"])
+    before = task("101-alpha")
+    backlog(repo, LOG.replace("- [ ] 101-alpha: first", "- [x] 101-alpha: rewritten"))
+    [a] = [j for j in ok(client, project) if j["job"] == "101-alpha"]
+    assert a["created"] is False
+    assert task("101-alpha") == before
+
+
+def test_backlog_line_removed(client, repo, project):  # BE13
+    backlog(repo)
+    ok(client, project)
+    kept = task("101-alpha")
+    backlog(repo, LOG.replace("- [ ] 101-alpha: first\n", ""))
+    assert [j["job"] for j in ok(client, project)] == ["102-beta", "103-gamma"]
+    assert task("101-alpha") == kept
+
+
+def test_backlog_skipped(client, repo, project):  # BE14, Q8
+    backlog(repo, LOG + "- [ ] ../x: t\n- [ ] just text\n- [~] 104-d: t\n- [ ] 101-alpha: again\n- plain\n")
+    r = post(client, project)
+    assert r.json()["skipped"] == 4
+    board(repo, entry("001-a"))
+    r = post(client, project, {"job": "101-alpha"})
+    assert (r.status_code, r.json()["detail"]) == (404, "no job 101-alpha in factory/board.json")
+    assert post(client, project, {"job": "001-a"}).json()["skipped"] == 0
+
+
+def test_neither_or_board_alone(client, repo, project):  # BE15, Q9
+    r = post(client, project)
+    assert (r.status_code, r.json()["detail"]) == (404, f"no factory/board.json or factory/backlog.md in {repo}")
+    board(repo, entry("001-a"))
+    r = post(client, project)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"skipped": 0, "imported": [
+        {"job": "001-a", "task_id": task("001-a")["id"], "created": True, "rounds": 0, "transcripts": 0}]}
+
+
+def test_backlog_containment(client, tmp_path, repo, project):  # BE16
+    outside = tmp_path / "outside"
+    write(outside, {"factory/backlog.md": LOG})
+    (repo / "factory").mkdir()
+    (repo / "factory" / "backlog.md").symlink_to(outside / "factory" / "backlog.md")
+    missing = (404, f"no factory/board.json or factory/backlog.md in {repo}")
+    r = post(client, project)
+    assert (r.status_code, r.json()["detail"]) == missing
+    (repo / "factory" / "backlog.md").unlink()
+    (repo / "factory").rmdir()
+    (repo / "factory").symlink_to(outside / "factory")
+    r = post(client, project)
+    assert (r.status_code, r.json()["detail"]) == missing
+    (repo / "factory").unlink()
+    backlog(repo, LOG + "x" * config.MAX_PATCH)
+    r = post(client, project)
+    assert (r.status_code, r.json()["detail"]) == (413, "backlog.md over 5 MB")
+    assert counts() == EMPTY
+
+
+def test_backlog_key_in_other_project(client, tmp_path, repo, project):  # BE17, Q12
+    other = tmp_path / "other"
+    write(other, {"factory/backlog.md": "- [ ] 103-gamma: theirs\n"})
+    other_id = connect(client, other)
+    ok(client, other_id)
+    before = snapshot()
+    backlog(repo)
+    r = post(client, project)
+    assert (r.status_code, r.json()["detail"]) == (409, f"factory:103-gamma is imported in project #{other_id}")
+    assert snapshot() == before
+
+
+def test_sync_writes_nothing_to_repo(client, repo, project):  # BE18
+    board(repo, entry("001-a"))
+    backlog(repo)
+    put(repo, {"001-a/round-1/build.md": "x"})
+    commit(repo, {"factory/backlog.md": LOG})
+    factory = repo / "factory"
+
+    def state():
+        return git(repo, "status", "--porcelain", "--ignored"), {
+            p.relative_to(factory).as_posix(): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in sorted(factory.rglob("*")) if p.is_file()}
+
+    before = state()
+    ok(client, project)
+    ok(client, project)
+    assert state() == before
+
+
+def test_sync_stores_mark(client, repo, project):  # BE19, Q10
+    sql("UPDATE projects SET factory_error = 'old refusal' WHERE id = ?", (project,))
+    backlog(repo)
+    ok(client, project)
+    [p] = rows("SELECT factory_mark, factory_error FROM projects WHERE id = ?", (project,))
+    assert p["factory_mark"] and p["factory_error"] is None
+    sql("UPDATE tasks SET description_md = 'edited' WHERE import_key = 'factory:101-alpha'")
+    r = client.get(f"/api/pages/projects/{project}")
+    assert r.status_code == 200 and r.json()["factory_error"] is None
+    assert task("101-alpha")["description_md"] == "edited"
 
 
 # --- Transcripts ---------------------------------------------------------------------
@@ -592,3 +806,28 @@ def test_docs():  # AC44
     assert "| `fctl import-factory [--job ID]` |" in cc_doc[cc_doc.index("### 7.2"):cc_doc.index("### 7.3")]
     mvp = (ROOT / "docs" / "MVP.md").read_text()
     assert "`<project>/factory/`" in mvp[mvp.index("### 4.5"):mvp.index("### 4.6")]
+
+
+def test_backlog_docs():  # 058 BE32
+    data = (ROOT / "docs" / "data-model-and-api.md").read_text()
+    projects = data[data.index("CREATE TABLE projects ("):data.index("CREATE TABLE tasks (")]
+    assert "factory_mark" in projects and "factory_error" in projects
+    api = data[data.index("### 6.1"):data.index("### 6.2")]
+    block = api[api.index("POST /api/projects/3/import-factory"):api.index("POST /api/projects/3/import ")]
+    assert '"skipped"' in block and "backlog.md" in block
+    pages = data[data.index("### 6.4"):]
+    assert "factory_error" in pages[pages.index("GET  /api/pages/projects/{id} "):pages.index("GET  /api/pages/tasks/{id}")]
+    cc_doc = (ROOT / "docs" / "claude-code.md").read_text()
+    section = cc_doc[cc_doc.index("### 7.2"):cc_doc.index("### 7.3")]
+    [row] = [line for line in section.splitlines() if line.startswith("| `fctl import-factory")]
+    assert "backlog.md" in row
+    ui = (ROOT / "docs" / "ui.md").read_text()
+    assert "factory/: " in ui[ui.index("3. **Project board**"):ui.index("4. **")]
+    assert "Sync factory/" in ui[ui.index("12. **Project settings**"):ui.index("13. **")]
+    fctl = (ROOT / "src" / "claude_factories" / "fctl.md").read_text()
+    connect = fctl[fctl.index("## fctl connect\n"):fctl.index("## fctl context\n")]
+    assert "Synced factory/: 2 new, 1 updated, 3 skipped" in connect
+    imports = fctl[fctl.index("## fctl import-factory\n"):fctl.index("## fctl export\n")]
+    for text in ("Skipped 2 lines in factory/backlog.md", "`No jobs in factory/`",
+                 "404 no factory/board.json or factory/backlog.md in <path>"):
+        assert text in imports, text

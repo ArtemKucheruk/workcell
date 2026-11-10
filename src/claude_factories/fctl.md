@@ -288,7 +288,9 @@ docker compose -p claude-factories-demo down -v   # later: deletes the demo
 ## fctl connect
 
 Registers the current repo as a project in a workspace, or updates it if it's connected already.
-Calls `POST /api/projects/connect`.
+Calls `POST /api/projects/connect`. When the main checkout has a `factory/board.json` or
+`factory/backlog.md` file, it then syncs them onto the board with
+`POST /api/projects/{id}/import-factory` `{}`, as [fctl import-factory](#fctl-import-factory) does.
 
 **Synopsis**
 
@@ -319,11 +321,23 @@ none
 Connected api-server (personal) → http://127.0.0.1:4545/projects/3
 ```
 
+With a `factory/board.json` or `factory/backlog.md`, a second line counts the sync's tasks: new
+ones, ones that were there already, and `backlog.md` lines it skipped:
+
+```
+Connected api-server (personal) → http://127.0.0.1:4545/projects/3
+Synced factory/: 2 new, 1 updated, 3 skipped
+```
+
 **Exit codes and errors**
 
 - `fctl: not inside a git repository: <cwd>` and
   `fctl: can't tell the default branch: no origin/HEAD and HEAD is detached`, exit `1`.
 - `fctl: 422 workspace must not be blank`, exit `1`.
+- A refused sync prints the `Connected` line, then
+  [fctl import-factory](#fctl-import-factory)'s error, for example
+  `fctl: 422 factory/board.json isn't valid JSON`, exit `1`. The project stays connected, and its
+  board shows the same error.
 - `--workspace` missing: exit `2`.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
@@ -431,8 +445,11 @@ EOF
 
 Imports the repo's bootstrap factory, `factory/board.json` and `factory/jobs/<id>/`, as tasks in its
 project: each job's board entry, history, spec, rounds with their diffs and reviews, decisions, and
-feedback, plus copies of the Claude Code transcripts of the sessions that ran it. Calls
-`GET /api/projects?path=…`, then `POST /api/projects/{id}/import-factory`.
+feedback, plus copies of the Claude Code transcripts of the sessions that ran it. Then each
+`factory/backlog.md` line that `board.json` doesn't list, `- [ ] <id>: <text>` (`- [x]` when done),
+becomes a backlog-only task: titled from the id, described by its `## ` section and text, in Backlog
+or Done. Calls `GET /api/projects?path=…`, then `POST /api/projects/{id}/import-factory`. The board
+runs the same sync on its own when either file changes, and nothing is written to the repo.
 
 **Synopsis**
 
@@ -443,11 +460,14 @@ fctl import-factory [--job ID]
 Run it in the connected repo. A job becomes the task whose import key is `factory:<job id>`, so a
 rerun updates that task in place: the files win over moves and decisions made in the app, and
 comments are kept. A new task, or one whose status changed, goes to the bottom of its column.
+A backlog-only task is different: a rerun changes only its description and status, and leaves it
+alone once the app has started it (a run, a round, or a move out of Backlog). A removed line never
+deletes its task.
 
 **Arguments and flags**
 
-- `--job ID`: only this job, for example `014-run-ui`. Without it, every job in `board.json`, in
-  its order.
+- `--job ID`: only this `board.json` job, for example `014-run-ui`; `backlog.md` isn't read.
+  Without it, every job in `board.json`, in its order, then `backlog.md`'s lines in file order.
 
 **Stdin**
 
@@ -455,23 +475,27 @@ none
 
 **Output**
 
-One line per job:
+One line per job, then the `backlog.md` lines it skipped (a checkbox line with no `<id>:`, another
+mark, a bad id, or a repeated id), if any:
 
 ```
 Imported 001-a → #12 (new, 2 rounds, 3 transcripts)
 Imported 002-b → #13 (updated, 1 round, 0 transcripts)
+Imported 059-legacy-factory → #14 (new, 0 rounds, 0 transcripts)
+Skipped 2 lines in factory/backlog.md
 ```
 
-`No jobs in factory/board.json` when the board is empty.
+`No jobs in factory/` when nothing was imported or skipped.
 
 **Exit codes and errors**
 
-- `fctl: 404 no factory/board.json in <path>`, also when `factory/` or `board.json` is a symlink
-  that leads outside the repo, exit `1`.
-- `fctl: 404 no job <id> in factory/board.json`, exit `1`.
+- `fctl: 404 no factory/board.json or factory/backlog.md in <path>`, also when `factory/` or a file
+  is a symlink that leads outside the repo, exit `1`.
+- `fctl: 404 no factory/board.json in <path>` and `fctl: 404 no job <id> in factory/board.json`,
+  with `--job`, exit `1`.
 - `fctl: 422 <job or problem>`: `board.json` isn't JSON or has no `jobs` list, a job's id, title,
   status, or stage is bad, or a `diff.patch` isn't a git diff. Nothing is imported, exit `1`.
-- `fctl: 413 <job>/round-<n>/diff.patch over 5 MB`, exit `1`.
+- `fctl: 413 <job>/round-<n>/diff.patch over 5 MB` or `fctl: 413 backlog.md over 5 MB`, exit `1`.
 - `fctl: 409 factory:<id> is imported in project #<n>`: another repo already imported that job id,
   exit `1`.
 - `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.

@@ -18,7 +18,10 @@ CREATE TABLE projects (
   test_cmd TEXT,                          -- used in templates and the run allowlist
   factory_version INTEGER,                -- NULL = factory never written
   created_at TEXT NOT NULL,
-  context_md TEXT NOT NULL DEFAULT '');   -- project context: stack and conventions, atop fctl show
+  context_md TEXT NOT NULL DEFAULT '',    -- project context: stack and conventions, atop fctl show
+  factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync,
+                                          --   NULL when neither file is there
+  factory_error TEXT);                    -- that sync's refusal detail, shown on the board; NULL when it worked
 
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12
@@ -318,11 +321,24 @@ POST /api/context/items/5/reload                                  (Reload from p
   # 404 {"detail":"Context item #99 not found"}
   # every 4xx writes nothing
 
-POST /api/projects/3/import-factory                               (fctl import-factory, /factory approve)
-→ {"job":"014-run-ui"}                                            # {} imports every job in factory/board.json
-← 200 {"imported":[{"job":"014-run-ui","task_id":12,"created":true,"rounds":1,"transcripts":9}]}
-  # 404 unknown project, no factory/board.json, or no such job · 422 bad board.json, job id, or patch
-  # 413 a file over 5 MB · 409 the import_key belongs to another project's task
+POST /api/projects/3/import-factory      (Settings: Sync factory/, fctl import-factory, fctl connect, /factory approve)
+→ {"job":"014-run-ui"}                   # that board.json job only; factory/backlog.md isn't read, and skipped is 0
+→ {}                                     # sync: every board.json job, then each factory/backlog.md line it doesn't list
+← 200 {"imported":[{"job":"014-run-ui","task_id":12,"created":true,"rounds":1,"transcripts":9},
+                   {"job":"059-legacy-factory","task_id":70,"created":true,"rounds":0,"transcripts":0}],
+       "skipped":2}
+  # imported: board.json jobs in board order, then backlog-only lines in file order; each job once
+  # a backlog.md line `- [ ] <id>: <text>` (`[x]` done) under `## <heading>` becomes, keyed factory:<id>, a task
+  #   titled from the id (`058-backlog-sync` → `Backlog sync`), described `## <heading>\n\n<text>`, in backlog or
+  #   done (done_at NULL) at the bottom of its column, with one `app` event. A rerun changes only description_md
+  #   and status, and only on a task the app hasn't started (no run, no round, still backlog). Nothing is deleted.
+  # skipped: backlog.md checkbox lines (`- [`) with no `<id>:`, another mark, a bad id, or a repeated id
+  # a {} that works stores the files' mark and clears projects.factory_error; the board's view-model runs {}
+  #   itself when the mark changes (§6.4). It never writes to the repo
+  # 404 {"detail":"Project #99 not found"} · {"detail":"no factory/board.json or factory/backlog.md in <path>"} ({})
+  #   · {"detail":"no factory/board.json in <path>"} or {"detail":"no job <id> in factory/board.json"} ({"job"})
+  # 422 bad board.json, job id, or patch · 413 {"detail":"backlog.md over 5 MB"}, board.json, or a job's file
+  # 409 {"detail":"factory:<id> is imported in project #<n>"} · every refusal writes no rows
 
 POST /api/projects/3/import                                       (Import, fctl import) → the zip as the raw body
 ← 200 {"task_id":12,"title":"Rate-limit login endpoint","import_key":"task:12@2026-10-17T10:03:00Z",
@@ -655,7 +671,11 @@ GET  /api/pages/dashboard                       tiles, the waiting and escalated
 GET  /api/pages/workspaces/{id}                 projects with path, counts per status, factory state, last activity
 GET  /api/pages/projects/{id}                   the project (path, remote_url, default branch, test_cmd, workspace),
                                                 factory state and hint, board cards with stage, branch,
-                                                description_md, chips per round, +/−, waiting, escalated, stalled
+                                                description_md, chips per round, +/−, waiting, escalated, stalled,
+                                                and factory_error (058): first syncs factory/ (§6.1's {}) when
+                                                board.json's or backlog.md's mtime or size changed; a refusal is
+                                                stored as factory_error, not a failed page, until a file changes.
+                                                With Sec-Fetch-Site: cross-site it skips the sync (MVP §4.5)
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts)

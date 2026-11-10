@@ -25,3 +25,4 @@ class ImportedJob(BaseModel):
 
 class ImportOut(BaseModel):
     imported: list[ImportedJob]
+    skipped: int  # 058 Q1: backlog.md lines skipped; 0 for {"job": …}

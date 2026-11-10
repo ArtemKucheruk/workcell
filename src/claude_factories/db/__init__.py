@@ -38,8 +38,12 @@ def init() -> None:
                 conn.execute("INSERT INTO claude_accounts (config_dir, active, created_at) VALUES (?, 1, ?)",
                              (str(config.claude_config_dir()), now()))
         # 033 Q1: CREATE TABLE IF NOT EXISTS skips a factory.db made before projects.context_md
-        if "context_md" not in {row[1] for row in conn.execute("PRAGMA table_info(projects)")}:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
+        if "context_md" not in columns:
             conn.execute("ALTER TABLE projects ADD COLUMN context_md TEXT NOT NULL DEFAULT ''")
+        for column in ("factory_mark", "factory_error"):  # 058 Q10: the same for the last factory/ sync
+            if column not in columns:
+                conn.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
         # 031: the same for tasks.import_key; ALTER can't add UNIQUE, so an index enforces it
         if "import_key" not in {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}:
             conn.execute("ALTER TABLE tasks ADD COLUMN import_key TEXT")

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
-import { createFactory, deleteProject, importBundle, patchProject } from '../../api/projects.js'
+import { createFactory, deleteProject, importBundle, patchProject, syncFactory } from '../../api/projects.js'
 import { DangerZone, PROJECT_TEXT } from '../../components/DeleteDialog.jsx'
 import { FactoryForm, FactoryResult } from '../../components/FactoryResult.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
@@ -130,6 +130,44 @@ function ImportResult({ out }) {
   )
 }
 
+/**
+ * 058 FE1–FE4, Q14: one `POST …/import-factory {}`, disabled while it's pending (no spinner). A 200 says the counts
+ * beside the button and `onSynced` reloads; a refusal shows its detail there and doesn't. Cleared as it starts, so a
+ * second identical result is announced again.
+ */
+function SyncFactory({ projectId, onSynced }) {
+  const [out, setOut] = useState(null)
+  const [busy, setBusy] = useState(false)
+  async function sync() {
+    setBusy(true)
+    setOut(null)
+    try {
+      const { imported, skipped } = await syncFactory(projectId)
+      const created = imported.filter((job) => job.created).length
+      setOut(`Synced factory/: ${created} new, ${imported.length - created} updated, ${skipped} skipped`)
+      onSynced()
+    } catch (err) {
+      setOut(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="grid gap-2">
+      <p className={muted}>
+        The repo&apos;s <code>factory/board.json</code> and <code>factory/backlog.md</code> as tasks. The board also syncs
+        them when either file changes.
+      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={sync} disabled={busy} className={button}>
+          Sync factory/
+        </button>
+        <div aria-live="polite">{out instanceof Error ? <ErrorMessage error={out} /> : out && <p className={muted}>{out}</p>}</div>
+      </div>
+    </div>
+  )
+}
+
 /** §8 item 2, moved: this project to another workspace; a refusal shows in the form. */
 function MoveProject({ project, workspaces, onDone }) {
   const [error, setError] = useState(null)
@@ -198,7 +236,7 @@ function SettingsSkeleton() {
   )
 }
 
-/** docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Save, Create factory, Import, and Move. */
+/** docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Save, Create factory, Import, Sync factory/, and Move. */
 function ProjectSettings({ id }) {
   const { reloadSidebar } = useOutletContext()
   const navigate = useNavigate()
@@ -275,6 +313,7 @@ function ProjectSettings({ id }) {
           <p className={muted}>A task bundle (.zip) from a task&apos;s Export, added to this project.</p>
           <ImportBundle onImport={importFile} />
           <div aria-live="polite">{importOut && <ImportResult out={importOut} />}</div>
+          <SyncFactory projectId={project.id} onSynced={refresh} />
         </Section>
         <Section id="settings-move" title="Move to another workspace">
           <MoveProject

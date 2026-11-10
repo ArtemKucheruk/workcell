@@ -345,7 +345,9 @@ Single user and no auth still need these, because the API can start processes th
   and `compose.override.yaml` publishes them only on `127.0.0.1` (§4.6).
 - Every mutating request must carry `X-Requested-By: fctl`, and the `Host` must be
   `127.0.0.1` or `localhost`. That blocks CSRF from web pages and DNS rebinding. `fctl` and
-  the SPA's fetch wrapper both send the header.
+  the SPA's fetch wrapper both send the header. One GET writes: the board's view-model
+  (`GET /api/pages/projects/{id}`) syncs `factory/` when its files change (058), so it skips
+  that sync, not the page, when the browser sends `Sec-Fetch-Site: cross-site`.
 - The frontend server (`frontend/server.js`) applies its own Host check: `127.0.0.1` or
   `localhost`, else `403`. It proxies `/api/*` to `FCTL_API_URL` with `Host: 127.0.0.1`, and
   passes the browser's `X-Requested-By` through without adding it. This follows the CSRF
@@ -371,9 +373,10 @@ Single user and no auth still need these, because the API can start processes th
   (`MAX_CONTEXT_FILES`), and must be UTF-8, or the whole read is refused. It writes nothing to
   disk. Uploads go through the same 16 KB and extension checks, and their name never touches
   the filesystem.
-- `fctl import-factory` reads only inside `<project>/factory/`, which must resolve inside the project
-  root. Every file it reads must resolve inside `factory/` and be a regular file, or it counts as
-  missing, and a file over 5 MB is refused with `413`.
+- `fctl import-factory`, and the board's sync of `board.json` and `backlog.md`, reads only
+  inside `<project>/factory/`, which must resolve inside the project root. Every file it reads
+  must resolve inside `factory/` and be a regular file, or it counts as missing, and a file
+  over 5 MB is refused with `413`.
 - A task bundle import (`POST /api/projects/{id}/import`) refuses a body over `MAX_BUNDLE` (50 MB)
   with `413`, on its `Content-Length` and again as the stream comes in. Every zip entry must be a
   name the layout has (`task.json`, 031's job files, and `transcripts/…` files `task.json` lists),

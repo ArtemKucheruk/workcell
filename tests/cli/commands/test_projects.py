@@ -4,7 +4,7 @@ import socket
 import urllib.parse
 
 import pytest
-from conftest import git
+from conftest import git, write
 
 from claude_factories.cli.main import main
 
@@ -109,6 +109,39 @@ def test_connect_requires_workspace(connect_server, repo, monkeypatch, capsys): 
     assert connect_server.requests == []
 
 
+@pytest.mark.parametrize("name", ["factory/backlog.md", "factory/board.json"])
+def test_connect_syncs_factory(server, repo, monkeypatch, capsys, name):  # 058 BE28, Q13, Q14
+    write(repo, {name: "x"})
+    server.replies = [reply(CONNECTED), imported(("001-a", 12, True, 0, 0), ("002-b", 13, True, 0, 0),
+                                                 ("003-c", 14, False, 1, 0), skipped=3)]
+    monkeypatch.chdir(repo)
+    main(["connect", "--workspace", "personal"])
+    assert [r[:2] for r in requests(server)] == [("POST", "/api/projects/connect"),
+                                                 ("POST", "/api/projects/3/import-factory")]
+    assert requests(server)[1][2] == {}
+    assert capsys.readouterr().out == (f"Connected repo (personal) → {CONNECTED['url']}\n"
+                                       "Synced factory/: 2 new, 1 updated, 3 skipped\n")
+
+
+def test_connect_without_factory_files(connect_server, repo, monkeypatch, capsys):  # 058 BE29
+    write(repo, {"factory/notes.md": "unrelated", "factory/backlog.md/x": "a folder, not the file"})
+    monkeypatch.chdir(repo)
+    main(["connect", "--workspace", "personal"])
+    sent_body(connect_server)  # exactly one request
+    assert capsys.readouterr().out == f"Connected repo (personal) → {CONNECTED['url']}\n"
+
+
+def test_connect_sync_refused(server, repo, monkeypatch, capsys):  # 058 BE30, Q13
+    write(repo, {"factory/board.json": "{not json"})
+    server.replies = [reply(CONNECTED), reply({"detail": "factory/board.json isn't valid JSON"}, 422)]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        main(["connect", "--workspace", "personal"])
+    assert e.value.code == 1
+    assert capsys.readouterr() == (f"Connected repo (personal) → {CONNECTED['url']}\n",
+                                   "fctl: 422 factory/board.json isn't valid JSON\n")
+
+
 # --- fctl context, fctl context set (033) --------------------------------------------
 
 
@@ -167,8 +200,9 @@ def test_context_set_too_large(server, repo, monkeypatch, capsys):  # 033 AC22
 # --- fctl import-factory (031) ---------------------------------------------------------
 
 
-def imported(*jobs):
-    return reply({"imported": [dict(zip(("job", "task_id", "created", "rounds", "transcripts"), j)) for j in jobs]})
+def imported(*jobs, skipped=0):
+    return reply({"imported": [dict(zip(("job", "task_id", "created", "rounds", "transcripts"), j)) for j in jobs],
+                  "skipped": skipped})
 
 
 def test_import_factory(server, repo, monkeypatch, capsys):  # 031 AC38
@@ -182,6 +216,19 @@ def test_import_factory(server, repo, monkeypatch, capsys):  # 031 AC38
         "Imported 001-a → #12 (new, 2 rounds, 3 transcripts)\n"
         "Imported 002-b → #13 (updated, 1 round, 1 transcript)\n"
         "Imported 003-c → #14 (new, 0 rounds, 0 transcripts)\n")
+
+
+@pytest.mark.parametrize("jobs, skipped, out", [
+    ([("001-a", 12, True, 0, 0)], 2, "Imported 001-a → #12 (new, 0 rounds, 0 transcripts)\n"
+                                     "Skipped 2 lines in factory/backlog.md\n"),
+    ([], 1, "Skipped 1 line in factory/backlog.md\n"),
+    ([], 0, "No jobs in factory/\n"),
+])
+def test_import_factory_skipped(server, repo, monkeypatch, capsys, jobs, skipped, out):  # 058 BE31, Q14
+    server.replies = [reply(PROJECT), imported(*jobs, skipped=skipped)]
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "import-factory")
+    assert capsys.readouterr().out == out
 
 
 def test_import_factory_one_job(server, repo, monkeypatch, capsys):  # 031 AC39

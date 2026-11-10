@@ -19,6 +19,11 @@ def connect(args):
     }
     project = api("POST", "/api/projects/connect", body)
     print(f"Connected {body['name']} ({args.workspace.strip()}) → {project['url']}")
+    # 058 Q13: only for the files a sync reads, so an unrelated factory/ folder doesn't fail connect
+    if any(os.path.isfile(os.path.join(main, "factory", name)) for name in ("board.json", "backlog.md")):
+        out = api("POST", f"/api/projects/{project['id']}/import-factory", {})
+        new = sum(j["created"] for j in out["imported"])
+        print(f"Synced factory/: {new} new, {len(out['imported']) - new} updated, {out['skipped']} skipped")
 
 
 def project_at(main: str) -> dict:
@@ -46,12 +51,14 @@ def plural(n: int, word: str) -> str:
 
 
 def import_factory(args):
-    """031 Q1: one line per imported job."""
+    """031 Q1: one line per imported job. 058 Q14: then backlog.md's skipped lines."""
     project = project_at(main_checkout())
     body = {} if args.job is None else {"job": args.job}
-    imported = api("POST", f"/api/projects/{project['id']}/import-factory", body)["imported"]
-    for j in imported:
+    out = api("POST", f"/api/projects/{project['id']}/import-factory", body)
+    for j in out["imported"]:
         print(f"Imported {j['job']} → #{j['task_id']} ({'new' if j['created'] else 'updated'},"
               f" {plural(j['rounds'], 'round')}, {plural(j['transcripts'], 'transcript')})")
-    if not imported:
-        print("No jobs in factory/board.json")
+    if out["skipped"]:
+        print(f"Skipped {plural(out['skipped'], 'line')} in factory/backlog.md")
+    elif not out["imported"]:
+        print("No jobs in factory/")
