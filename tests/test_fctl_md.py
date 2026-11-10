@@ -14,7 +14,7 @@ REPO = Path(__file__).resolve().parents[1]
 FCTL_MD = REPO / "src" / "claude_factories" / "fctl.md"
 LABELS = ("**Synopsis**", "**Arguments and flags**", "**Stdin**", "**Output**", "**Exit codes and errors**",
           "**Called by**", "**Example**")
-STDIN = ("context set", "submit", "spec", "verdict", "comment", "decide")
+STDIN = ("context set", "submit", "spec", "verdict", "comment", "decide", "task add")  # 060 BE7: task add
 
 
 def walk(parser: argparse.ArgumentParser, words: tuple = ()) -> dict[str, argparse.ArgumentParser]:
@@ -124,6 +124,15 @@ def test_claude_code_links_the_page():  # AC15
     commands = doc[start:doc.index("### 7.3", start)]
     assert "/docs/fctl" in commands
     assert "](../src/claude_factories/fctl.md)" in commands
+
+
+def test_claude_code_task_add_row():  # 060 BE8
+    doc = (REPO / "docs" / "claude-code.md").read_text()
+    start = doc.index("### 7.2 Commands")
+    commands = doc[start:doc.index("### 7.3", start)]
+    [row] = [line for line in commands.splitlines() if line.startswith("| `fctl task add")]
+    assert row.startswith('| `fctl task add "title" [--description TEXT] [--run]`')
+    assert "`--description -`" in row and "`description_md`" in row.split("|")[3]
 
 
 def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example

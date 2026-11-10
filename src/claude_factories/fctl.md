@@ -595,23 +595,30 @@ fctl import task-12.zip
 
 ## fctl task add
 
-Adds a task to the bottom of the current repo's Backlog, and with `--run` starts a factory run on
-it. Calls `POST /api/projects/{id}/tasks`, then with `--run` `POST /api/tasks/{id}/run`.
+Adds a task to the bottom of the current repo's Backlog, with an optional markdown description, and
+with `--run` starts a factory run on it. Calls `POST /api/projects/{id}/tasks` with `title` and,
+when given, `description_md`, then with `--run` `POST /api/tasks/{id}/run`.
 
 **Synopsis**
 
 ```
-fctl task add "title" [--run]
+fctl task add "title" [--description TEXT] [--run]
 ```
 
 **Arguments and flags**
 
 - `title`: the task's title, quoted for the shell, for example `"Rate-limit login endpoint"`.
+- `--description TEXT`: the task's description, as markdown, sent unchanged. `--description -`
+  reads it from stdin instead, so a literal `-` is sent by piping it:
+  `printf '%s\n' - | fctl task add "T" --description -`. Without the flag the task has only a title.
 - `--run`: then start a factory run on it, as `fctl run <id>` does.
 
 **Stdin**
 
-none
+Read only with `--description -`: the description, as markdown, sent unchanged. From a terminal
+`fctl` reads nothing. A blank description, as text or on stdin, is refused before any request, so
+a hand-typed `--description -` never makes a title-only task. Without `--description -` stdin is
+ignored.
 
 **Output**
 
@@ -627,6 +634,7 @@ Run #41 on #12 → http://127.0.0.1:4545/tasks/12
 
 **Exit codes and errors**
 
+- `fctl: description is empty; pass it as text, or on stdin with --description -`, exit `1`.
 - `fctl: 422 title must not be blank`, exit `1`.
 - `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
 - With `--run`, any refusal of [fctl run](#fctl-run), exit `1`. The task stays in Backlog and the
@@ -641,7 +649,10 @@ me.
 **Example**
 
 ```sh
-fctl task add "Rate-limit login endpoint" --run
+fctl task add "Rate-limit login endpoint" --run --description - <<'EOF'
+## Why
+Max 5 failed logins per minute per IP.
+EOF
 ```
 
 ## fctl run
