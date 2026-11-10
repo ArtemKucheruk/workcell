@@ -91,6 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     task_commands = p.add_subparsers(dest="task_command", required=True)
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
     p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
+    p.add_argument("--description", metavar="TEXT", help='its markdown description; "-" reads it from stdin')
     p.add_argument("--run", action="store_true", help="then start a factory run on it")
     p.set_defaults(func=task_add)
     p = commands.add_parser("run", help="start a factory run on a task, or on the top of this repo's Backlog")

@@ -2,13 +2,19 @@ from pathlib import Path
 
 from ..client import api, base_url
 from ..git import main_checkout
-from ..output import fail, print_run
+from ..output import fail, print_run, stdin_text
 from .projects import plural, project_at
 
 
 def task_add(args):
+    body = {"title": args.title}
+    if args.description is not None:  # Q2: "-" always means stdin
+        text = stdin_text() if args.description == "-" else args.description
+        if not text.strip():  # Q1: refused before any request, like fctl spec
+            fail("description is empty; pass it as text, or on stdin with --description -")
+        body["description_md"] = text
     project = project_at(main_checkout())
-    task = api("POST", f"/api/projects/{project['id']}/tasks", {"title": args.title})
+    task = api("POST", f"/api/projects/{project['id']}/tasks", body)
     # flush: a refused run's stderr line must come after this one, also when stdout is a pipe
     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}", flush=True)
     if args.run:  # Q11: a refused run leaves the task in Backlog, its Added line already printed

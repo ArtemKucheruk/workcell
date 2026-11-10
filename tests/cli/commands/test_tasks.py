@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import urllib.parse
 
 import pytest
@@ -7,7 +8,7 @@ from conftest import git
 
 from claude_factories.cli.main import main
 
-from ..conftest import PROJECT, RUN, reply, requests
+from ..conftest import PROJECT, RUN, Terminal, fctl, reply, requests
 
 ADDED = {"id": 12, "status": "backlog"}
 
@@ -122,6 +123,63 @@ def test_task_add_without_run(server, repo, monkeypatch, capsys):  # 015 AC17
     main(["task", "add", "T"])
     assert [(m, p) for m, p, _ in requests(server)][1:] == [("POST", "/api/projects/3/tasks")]
     assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+
+
+# --- 060: fctl task add --description ----------------------------------------------------------
+
+def test_task_add_description(task_server, repo, monkeypatch, capsys):  # 060 BE1
+    monkeypatch.chdir(repo)
+    main(["task", "add", "T", "--description", "Max 5 failed logins/min per IP."])
+    assert requests(task_server) == [
+        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None),
+        ("POST", "/api/projects/3/tasks", {"title": "T", "description_md": "Max 5 failed logins/min per IP."}),
+    ]
+    assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+
+
+def test_task_add_description_stdin(task_server, repo, monkeypatch):  # 060 BE2
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "task", "add", "T", "--description", "-", stdin="## Why\nMax 5 failed logins.\n")
+    assert requests(task_server)[1][2] == {"title": "T", "description_md": "## Why\nMax 5 failed logins.\n"}
+
+
+@pytest.mark.parametrize("value, stdin", [("", ""), ("  ", ""), ("-", "  \n"), ("-", Terminal())])
+def test_task_add_blank_description(server, repo, monkeypatch, capsys, value, stdin):  # 060 BE3, Q1
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        fctl(monkeypatch, "task", "add", "T", "--description", value, stdin=stdin)
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: description is empty; pass it as text, or on stdin with --description -\n"
+    assert server.requests == []
+
+
+def test_task_add_ignores_stdin(task_server, repo, monkeypatch):  # 060 BE4
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "task", "add", "T", stdin="ignored\n")
+    assert requests(task_server)[1][2] == {"title": "T"}
+    assert sys.stdin.read() == "ignored\n"  # never read
+
+
+def test_task_add_description_run(server, repo, monkeypatch, capsys):  # 060 BE5
+    server.replies = [reply(PROJECT), reply(ADDED, 201), reply(RUN, 202)]
+    monkeypatch.chdir(repo)
+    main(["task", "add", "T", "--description", "D", "--run"])
+    assert requests(server) == [
+        ("GET", "/api/projects?" + urllib.parse.urlencode({"path": os.path.realpath(repo)}), None),
+        ("POST", "/api/projects/3/tasks", {"title": "T", "description_md": "D"}),
+        ("POST", "/api/tasks/12/run", None),
+    ]
+    url = os.environ["FCTL_URL"]
+    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 → {url}/tasks/12\n"
+
+
+def test_task_add_help(capsys):  # 060 BE6
+    with pytest.raises(SystemExit) as e:
+        main(["task", "add", "--help"])
+    assert e.value.code == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "--description TEXT" in out
+    assert '"-" reads it from stdin' in out
 
 
 # --- 032: fctl export, fctl import -------------------------------------------------------------
