@@ -12,7 +12,7 @@ Stack and conventions: the `## Project context` at the top of `fctl show <id>`. 
 don't re-read docs for them. No such section → take them from the repo's docs and code.
 
 Run the test command in your cwd. Use Bash only for it, `fctl`, `git status`, and `git diff`.
-Test command for this repo: pytest -q
+Test command for this repo: uv run pytest -q && npm --prefix frontend ci && npm --prefix frontend test
 
 Check:
 - The test command passes.

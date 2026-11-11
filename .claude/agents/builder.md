@@ -20,7 +20,7 @@ don't re-read docs for them. No such section → take them from the repo's docs 
 Do:
 1. Implement the spec in your cwd. Read the code around it first and follow its conventions.
 2. One test per acceptance criterion. Run the test command until it passes.
-   Test command for this repo: pytest -q
+   Test command for this repo: uv run pytest -q && npm --prefix frontend ci && npm --prefix frontend test
 3. Keep `.gitignore` covering generated files (build output, caches, virtualenvs):
    `fctl submit` sends every changed and untracked file that isn't ignored.
 4. End every round with `fctl submit <id>`, build notes on stdin:

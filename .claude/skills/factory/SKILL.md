@@ -21,7 +21,7 @@ A run allows only these Bash commands: `fctl show`, `fctl diff`, `fctl spec`, `f
 `git diff`, and the test command, plus what this repo's `.claude/settings.json` allows. Agents
 read files with Read, Grep, and Glob.
 
-Test command for this repo: pytest -q
+Test command for this repo: uv run pytest -q && npm --prefix frontend ci && npm --prefix frontend test
 
 Print one short line per step, e.g. `#<id> · round 1 · security CHANGES (3/4)`.
 
