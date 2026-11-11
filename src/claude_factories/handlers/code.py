@@ -9,6 +9,7 @@ from ..adapters.git import Git
 from ..config import MAX_VIEW
 from ..domain.errors import NotFound
 from ..lib.diff import file_tree
+from ..lib.remote import blob_url, web_url
 from ..repositories.projects import ProjectsRepo
 
 
@@ -77,9 +78,13 @@ def branch_names(refs: bytes) -> dict[str, str]:
 def code(projects: ProjectsRepo, git: Git, project_id: int, path: str, branch: str = "") -> dict:
     """§8 item 6: the main checkout's `git ls-files` tree, or a listed branch's `git ls-tree` (054), beside
     README.md (no `path`) or one file."""
-    project = projects.for_code(project_id)
-    if project is None:
+    row = projects.for_code(project_id)
+    if row is None:
         raise NotFound(f"Project #{project_id} not found")
+    project = dict(row)
+    # 090 AC8, AC11: the remote's browser URL, also on a git failure; the raw remote and branch aren't sent
+    web, default = web_url(project.pop("remote_url")), project.pop("default_branch")
+    project["web_url"] = web
     root, context = project["path"], {"project": project, "path": path}
     refs, error = git.branch_refs(root)
     if error:  # Q10
@@ -109,4 +114,5 @@ def code(projects: ProjectsRepo, git: Git, project_id: int, path: str, branch: s
         "tree": file_tree([{"path": n} for n in names]), "shown": shown, "view": view,
         "branch": None if checked_out is None else checked_out or "detached HEAD", "branches": list(branches),  # Q7
         "lang": name.rpartition(".")[2].lower() if "." in name else None,  # Q9, same rule as review_files
+        "file_url": blob_url(web, default, path) if path else None,  # 090 Q5: the default branch, not the browsed one
     }

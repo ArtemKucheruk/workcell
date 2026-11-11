@@ -686,9 +686,13 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
 GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; timeline; files with diff rows carrying
                                                 side, old/new line, kind, text, and the path:side:line anchor; inline
                                                 comments
-GET  /api/pages/projects/{id}/code?path=&branch=  the project {id, name, path, workspace_id, workspace}, also on a
+GET  /api/pages/projects/{id}/code?path=&branch=  the project {id, name, path, workspace_id, workspace, web_url}, also on a
                                                 git failure; tree, README or file, branch (the checked-out one),
                                                 branches (local names, then origin/<name> with no local twin)
+  # 090: project.web_url is remote_url as an http(s) browser URL (lib/remote.py: scp-like, ssh://, http(s)://;
+  #   credentials, the ssh port, and .git dropped), null for no remote or any other form, also on a git failure;
+  #   remote_url itself isn't sent. file_url is ?path= on default_branch (<web_url>/blob/<branch>/<path>, each
+  #   segment percent-encoded) for a github.com web_url only; null on the landing, for other hosts, and with error
   # ?branch= must be one of branches; the checked-out one (or none) is the working tree, any other is
   #   read from git by its full refname: ls-tree for the tree, cat-file blob for the file
   # 404 {"detail":"nope is not a branch in api-server"} for a branch that isn't listed

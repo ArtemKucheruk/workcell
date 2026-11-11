@@ -241,6 +241,11 @@ Loading, failures, times, and motion are the same on every page:
      `?branch=` and opens that branch's README landing, and file links and `?path=` deep links
      keep `?branch=`. Its files come from `git cat-file blob <ref>:<path>`, with the same landing and
      not-shown rules, and a symlink shows its target path. An unknown `?branch=` is not found.
+   - With a remote the backend can turn into an http(s) URL (`project.web_url`), the Branch line
+     ends with a link to the repo on its git host (e.g. `github.com/owner/repo`), on a line of its
+     own when there is no Branch line. With a file open on a github.com repo, a "View on
+     github.com" link to that file on the default branch sits beside its path. Both open in a new
+     tab and say so to screen readers. No remote, or one that isn't a URL, shows no link.
 7. **fctl reference** (`/docs/fctl`)
    - Linked from the sidebar. A table of contents is built from its headings.
    - One anchored section per §7.2 command: synopsis, arguments and flags, stdin, output,

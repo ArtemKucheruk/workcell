@@ -3,8 +3,8 @@ import { expect, test } from 'vitest'
 import { cls, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const API = '/api/pages/projects/3/code'
-/** 020's CodeProject, with 047's workspace. */
-const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', workspace_id: 2, workspace: 'personal' }
+/** 020's CodeProject, with 047's workspace and 090's web_url. */
+const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', workspace_id: 2, workspace: 'personal', web_url: null }
 const TREE = {
   'README.md': { path: 'README.md' },
   'src/': { 'a.py': { path: 'src/a.py' }, 'lib/': { 'b.py': { path: 'src/lib/b.py' } } },
@@ -472,4 +472,66 @@ test('AC20: a failed first load is an alert alone; a failed click keeps the page
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
   expect(h1().textContent).toBe('api · personal') // FE4: no board view-model mocked; 047 Q1: the code one names it
   expect(files()).not.toBeNull()
+})
+
+// --- 090: links to the git host -----------------------------------------------------------
+
+const WEB = 'https://github.com/owner/repo'
+const withWeb = { ...PROJECT, web_url: WEB }
+const header = () => document.querySelector('main header')
+const outLinks = () => [...document.querySelectorAll('main a[target]')]
+const newTab = (a) => [a.getAttribute('target'), a.getAttribute('rel')]
+
+test('090 AC12: with web_url the header links to it in a new tab, on the Branch line after the select', async () => {
+  await open({ [`GET ${API}`]: [200, landing({ project: withWeb })] })
+  const a = within(header()).getByRole('link', { name: 'github.com/owner/repo (opens in a new tab)' })
+  expect(a.getAttribute('href')).toBe(WEB)
+  expect(newTab(a)).toEqual(['_blank', 'noopener noreferrer'])
+  expect(picker().compareDocumentPosition(a) & FOLLOWING).toBeTruthy()
+  expect(a.closest('p')).toBe(picker().closest('p'))
+})
+
+test('090 AC12, Q4: with no Branch line (a git failure) the repo link has its own line', async () => {
+  const page = landing({
+    project: withWeb, error: 'fatal: not a git repository', branch: null, branches: [], tree: {},
+    shown: '', view: null, lang: null, readme_html: null,
+  })
+  await open({ [`GET ${API}`]: [200, page] })
+  expect(picker()).toBeNull()
+  const a = within(header()).getByRole('link', { name: /^github\.com\/owner\/repo/ })
+  expect(a.getAttribute('href')).toBe(WEB)
+  expect(a.closest('p').className).toMatch(cls('basis-full'))
+})
+
+test('090 AC13: with web_url null or absent there is no repo link and the page renders as today', async () => {
+  const { unmount } = await open({ [`GET ${API}`]: [200, landing()] })
+  expect(outLinks()).toEqual([])
+  expect(picker()).not.toBeNull()
+  unmount()
+  const { web_url: _, ...older } = PROJECT
+  await open({ [`GET ${API}`]: [200, landing({ project: older })] })
+  expect(outLinks()).toEqual([])
+  expect(fileHeader().textContent).toBe('README.md')
+})
+
+test('090 AC14: file_url adds a second link beside the file h2; null adds none', async () => {
+  const url = `${WEB}/blob/main/src/a.py`
+  const { unmount } = await openFile('src/a.py', file('src/a.py', text('a = 1\n'), 'py', { project: withWeb, file_url: url }))
+  const a = screen.getByRole('link', { name: 'View on github.com (opens in a new tab)' })
+  expect(a.getAttribute('href')).toBe(url)
+  expect(newTab(a)).toEqual(['_blank', 'noopener noreferrer'])
+  expect(a.parentElement).toBe(fileHeader().parentElement)
+  expect(fileHeader().compareDocumentPosition(a) & FOLLOWING).toBeTruthy()
+  expect(fileHeader().textContent).toBe('src/a.py')
+  unmount()
+  await openFile('src/a.py', file('src/a.py', text('a = 1\n'), 'py', { project: withWeb, file_url: null }))
+  expect(outLinks().map((l) => l.getAttribute('href'))).toEqual([WEB])
+})
+
+test('090 AC15: each link names where it goes and that it opens in a new tab', async () => {
+  const url = `${WEB}/blob/main/src/a.py`
+  await openFile('src/a.py', file('src/a.py', text('a = 1\n'), 'py', { project: withWeb, file_url: url }))
+  const names = outLinks().map((a) => a.textContent)
+  expect(names).toEqual(['github.com/owner/repo (opens in a new tab)', 'View on github.com (opens in a new tab)'])
+  for (const a of outLinks()) expect(a.querySelector('span').className).toMatch(cls('sr-only'))
 })

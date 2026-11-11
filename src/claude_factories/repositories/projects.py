@@ -93,9 +93,10 @@ class ProjectsRepo:
         ).fetchone()
 
     def for_code(self, project_id: int) -> sqlite3.Row | None:
-        """047: with the workspace for the code page's breadcrumb."""
+        """047: with the workspace for the code page's breadcrumb; 090: the remote and default branch for its links."""
         return self.conn.execute(
-            "SELECT p.id, p.name, p.path, p.workspace_id, w.name AS workspace FROM projects p"
+            "SELECT p.id, p.name, p.path, p.workspace_id, w.name AS workspace, p.remote_url, p.default_branch"
+            " FROM projects p"
             " JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
             (project_id,),
         ).fetchone()
