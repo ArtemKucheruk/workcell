@@ -45,6 +45,21 @@ function Code({ view, lang }) {
   )
 }
 
+/**
+ * 090 Q4: a link to the git host, in a new tab. `href` is the backend's lib.remote result, always http(s), never a
+ * raw remote. The hidden suffix tells a screen reader it opens a new tab.
+ */
+function HostLink({ href, children }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer" className="text-sm wrap-anywhere">
+      {children}
+      {/* the space outside the span: accessible-name computation trims a hidden child's own spaces */}
+      {' '}
+      <span className="sr-only">(opens in a new tab)</span>
+    </a>
+  )
+}
+
 /** Q3: decided from the view-model alone, so a stale one never renders as the wrong kind. */
 function Viewer({ page }) {
   const { view, lang, readme_html } = page
@@ -96,7 +111,11 @@ export function CodePage() {
   if (error?.status === 404) return <NotFound detail={error.message} />
   if (!page) return error ? <ErrorMessage error={error} /> : <CodeSkeleton />
   // 054: a backend from before `branches` gives a picker with the checked-out branch alone, not a crash
-  const { project, branch, branches = [], tree, shown } = page
+  const { project, branch, branches = [], tree, shown, file_url } = page
+  // 090 Q4: the repo link's text is web_url without its scheme; absent from an older backend, so no link
+  const repo = project.web_url && (
+    <HostLink href={project.web_url}>{project.web_url.replace(/^https?:\/\//, '')}</HostLink>
+  )
   // 054 Q2: the browsed branch; none (the "" option, the working tree) for no ?branch= or the checked-out one
   const browsed = wanted && wanted !== branch ? wanted : ''
   // usePoll keeps the last data across a project change: only this project's board view-model counts
@@ -130,8 +149,11 @@ export function CodePage() {
                   </option>
                 ))}
             </select>
+            {repo && <> {repo}</>}
           </p>
         )}
+        {/* 090 Q4: with no Branch line (a git failure), the repo link gets a line of its own */}
+        {!branch && repo && <p className="min-w-0 basis-full">{repo}</p>}
       </ProjectHeader>
       {error && <ErrorMessage error={error} />}
       {page.error ? (
@@ -159,10 +181,15 @@ export function CodePage() {
             />
           </nav>
           <div className="min-w-0">
+            {/* 090 Q4, Q5: file_url only with ?path= on github.com (lib.remote.blob_url), so the README landing has no
+                second link and the label can name the host */}
             {shown && (
-              <h2 className="mt-0 mb-1 text-base">
-                <code className="wrap-anywhere">{shown}</code>
-              </h2>
+              <div className="mb-1 flex flex-wrap items-baseline gap-x-3">
+                <h2 className="m-0 text-base">
+                  <code className="wrap-anywhere">{shown}</code>
+                </h2>
+                {file_url && <HostLink href={file_url}>View on github.com</HostLink>}
+              </div>
             )}
             <Viewer page={page} />
           </div>

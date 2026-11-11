@@ -397,6 +397,7 @@ class CodeProject(BaseModel):
     path: str
     workspace_id: int  # 047: for the breadcrumb
     workspace: str
+    web_url: str | None = None  # 090: lib.remote.web_url of remote_url, always http(s); remote_url itself isn't sent
 
 
 class TextView(BaseModel):
@@ -419,3 +420,4 @@ class CodePage(BaseModel):
     view: TextView | NoteView | None = None
     lang: str | None = None
     readme_html: str | None = None
+    file_url: str | None = None  # 090 Q5: ?path= on the default branch, github.com only; null with `error`

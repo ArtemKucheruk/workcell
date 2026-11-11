@@ -1602,7 +1602,7 @@ def code_project(client, repo):
 def test_code_landing(client, code_project, repo):  # AC23, 047 BE3: exactly these project keys
     page = api(client, f"/api/pages/projects/{code_project}/code")
     assert page["project"] == {"id": code_project, "name": "repo", "path": str(repo),
-                               "workspace_id": ws_id("personal"), "workspace": "personal"}
+                               "workspace_id": ws_id("personal"), "workspace": "personal", "web_url": None}
     assert page["branch"] == "main"
     assert page["tree"] == {"README.md": {"path": "README.md"}, "src/": {"a.py": {"path": "src/a.py"}}}
     assert page["shown"] == "README.md"
@@ -1698,7 +1698,49 @@ def test_code_git_failure(client, tmp_path, kind):  # 026 AC30, 047 BE4
     assert page["error"].startswith("fatal: ")
     assert page["tree"] == {}
     assert page["project"] == {"id": pid, "name": "repo", "path": str(path),
-                               "workspace_id": ws_id("personal"), "workspace": "personal"}
+                               "workspace_id": ws_id("personal"), "workspace": "personal", "web_url": None}
+
+
+def set_remote(project_id, remote):
+    sql("UPDATE projects SET remote_url = ? WHERE id = ?", (remote, project_id))
+
+
+def test_code_web_url(client, code_project):  # 090 AC8
+    page = code(client, code_project).json()
+    assert page["project"]["web_url"] is None
+    set_remote(code_project, "git@github.com:owner/repo.git")
+    page = code(client, code_project).json()
+    assert page["project"]["web_url"] == "https://github.com/owner/repo"
+    assert "remote_url" not in page["project"] and "default_branch" not in page["project"]
+
+
+def test_code_file_url(client, repo):  # 090 AC9
+    commit(repo, {"src/a.py": "a\n", "a b#c.txt": "x\n"})
+    pid = connect(client, repo)
+    set_remote(pid, "git@github.com:owner/repo.git")
+    assert code(client, pid, "src/a.py").json()["file_url"] == "https://github.com/owner/repo/blob/main/src/a.py"
+    assert code(client, pid, "a b#c.txt").json()["file_url"] == "https://github.com/owner/repo/blob/main/a%20b%23c.txt"
+
+
+def test_code_file_url_null(client, code_project, tmp_path):  # 090 AC10
+    assert code(client, code_project, "src/a.py").json()["file_url"] is None  # no web_url
+    set_remote(code_project, "git@github.com:owner/repo.git")
+    assert code(client, code_project).json()["file_url"] is None  # the landing
+    set_remote(code_project, "git@gitlab.com:owner/repo.git")
+    page = code(client, code_project, "src/a.py").json()
+    assert (page["project"]["web_url"], page["file_url"]) == ("https://gitlab.com/owner/repo", None)
+    gone = connect(client, tmp_path / "gone")
+    set_remote(gone, "git@github.com:owner/repo.git")
+    page = code(client, gone, "src/a.py").json()
+    assert page["error"] and page["file_url"] is None
+
+
+def test_code_web_url_on_git_failure(client, tmp_path):  # 090 AC11
+    pid = connect(client, tmp_path / "gone")
+    set_remote(pid, "https://token@github.com/owner/repo.git")
+    page = code(client, pid).json()
+    assert page["error"].startswith("fatal: ")
+    assert page["project"]["web_url"] == "https://github.com/owner/repo"
 
 
 def test_code_branch(client, fixture_repo):  # 026 AC31
