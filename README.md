@@ -67,14 +67,13 @@ not one to use on the host. The app rejects requests whose `Host` isn't `127.0.0
 `localhost`, and it refuses any write that lacks the `X-Requested-By: fctl` header
 (docs/MVP.md §4.5).
 
-**What works today:** `fctl serve` with a placeholder home page. The rest of the setup
-below is designed but not built yet. Each step lists the backlog job that adds it:
+To use the app on a repo:
 
-```sh
-fctl setup                  # 015: installs the /factory-connect and /factory-submit skills
-/factory-connect personal   # 002: run in a repo's Claude Code session to register the repo
-                            # 011: Settings → Create factory writes .claude/ into the repo
-```
+1. `fctl setup` installs the `/factory-connect` and `/factory-submit` skills.
+2. In the repo, run `/factory-connect <workspace>` in Claude Code, or
+   `fctl connect --workspace W --test-cmd "<cmd>"`.
+3. Project Settings → **Create factory**, then commit `.claude/` on the default branch.
+4. `fctl task add "<title>" [--description TEXT] [--run]`, or **+ New task** on the board.
 
 The full walkthrough, from connecting a repo to approving a task, is in
 [docs/MVP.md §3](docs/MVP.md#3-user-flows).
