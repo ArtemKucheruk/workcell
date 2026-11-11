@@ -1967,6 +1967,1165 @@
           "stage": null
         }
       ]
+    },
+    {
+      "id": "040-design-tokens",
+      "title": "Design tokens, shared styles, and self-hosted fonts",
+      "description": "Tailwind v4 `@theme` tokens in `frontend/src/index.css` for surface, raised surface, border, text, muted, accent, success, warning, and danger, each with its dark value set once under `prefers-color-scheme: dark`, so pages write `bg-surface text-muted border-line` instead of `gray-*`/`dark:` pairs; shared class constants in `components/styles.js` (`muted`, `field`, `button`, `smallButton`) replacing the per-page copies in all 8 pages and WorkspacePage's inline button; one typeface pair self-hosted from npm (`@fontsource-variable/*`, no CDN, since the app runs on 127.0.0.1 and may be offline): a sans for UI and a mono for code, diffs, paths, and the run log; heading scale and spacing set once in `@layer base`; an SVG favicon in `frontend/public/`. No layout or behavior change; tests change only where they assert class names.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/040-design-tokens",
+      "worktree": ".claude/worktrees/040-design-tokens",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/42",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T07:46:25Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T07:54:24Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T08:04:54Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T08:08:22Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T08:09:56Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T08:19:28Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "041-sidebar",
+      "title": "Persistent left sidebar with workspace switcher",
+      "description": "a persistent left sidebar in `app/Layout.jsx` replacing the top header. Top: app name, then a workspace switcher (native `<select>`, plus `+ New workspace` through the existing `POST /api/workspaces`); the selected workspace comes from the current page's project, else the last choice in `localStorage` (try/catch, falling back to the first workspace). Below it, that workspace's projects, each a disclosure button (`aria-expanded`) that opens its pages: Board (`/projects/:id`, the kanban with its Backlog column), Code, Reviews with a count of tasks waiting on me or escalated, Context, and Settings (the last three from 042; until then they are left out). The project holding the current page opens by itself, its current link gets `aria-current=\"page\"` and the accent, and other projects' open state survives navigation. Bottom: Dashboard, fctl reference, and the auth badge moved from the header. Data from a new `GET /api/pages/sidebar` \u2192 `{workspaces: [{id, name, projects: [{id, name, review, running, escalated}]}], current: {workspace_id, project_id} | null}`, built from repositories with no git calls; `/tasks/:id/*` and `/transcripts/:id` carry no project id, so the request passes the route's `?task=` or `?transcript=` and the backend fills `current`. Fetched on mount and after each navigation, not polled. Below `md` the sidebar is a drawer behind a menu button (native `<dialog>`: Esc and the backdrop close it, focus returns to the button). The board, review, and code pages drop `max-w-6xl` and use the full width beside the sidebar; text pages keep a readable width; the board's and workspace page's \"Claude Factories\" breadcrumb goes. pytest for the endpoint and `current`; vitest for workspace choice from route vs storage, the current project opening, and the drawer.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/041-sidebar",
+      "worktree": ".claude/worktrees/041-sidebar",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/43",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T08:20:30Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T08:30:41Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T08:42:53Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T08:47:38Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T08:57:00Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-20T09:07:25Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "042-project-pages",
+      "title": "Project pages: reviews, context, settings",
+      "description": "the board's extras move to the sidebar's project pages, so the board header keeps the title, `+ New task`, Run next, and the hint. `/projects/:id/reviews`: a GitHub-PR-style list from the existing `/api/pages/projects/{id}` view-model, no new endpoint: Open = the review column, escalated first, then waiting on you; Closed = done; each row `#id title`, branch, round, verdict chips, and +/\u2212, linking to `/tasks/:id/review`; the tab kept in `?tab=`. `/projects/:id/context`: the ProjectContext editor off the board, open on load, plus the rendered preview of `context_html` that \u00a78 item 3 lists as a follow-up (the GET already returns it). `/projects/:id/settings`: path, remote, default branch, and test command read-only (`remote_url` and `test_cmd` added to the board's `BoardProject` view-model, pytest); factory state with Create factory and its result; Import bundle and its result; Move to another workspace. Board, Code, Reviews, Context, and Settings share one project header component (name, workspace, factory state). Routes in `app/routes.jsx`; tests move with the components they cover.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/042-project-pages",
+      "worktree": ".claude/worktrees/042-project-pages",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/44",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T10:32:24Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T10:43:49Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T10:55:36Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T11:00:03Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T11:02:40Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T11:13:26Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "043-status-badges",
+      "title": "Shared status badges and verdict chips",
+      "description": "one `components/Badge.jsx` for task state and one verdict `Chip`, used by the board, task, review, reviews list, dashboard, and sidebar. Status pills colored by token: backlog neutral, in progress accent, review warning, done success; `\u25cf running` with a pulsing dot that holds still under `prefers-reduced-motion`; `waiting on you` and `escalated` as filled warning and danger pills, escalated keeping the card's red left bar. Verdict chips green \u2713, red \u2717, muted \u00b7, keeping the symbol and the `title` so color is never the only signal. One label set replaces BoardPage's own SHORT/SYMBOL and StatusLine copies (the board's `co` becomes `code`; `sec\u2713` and `sec \u2713` become one format). Text and pill contrast at least 4.5:1 in light and dark.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/043-status-badges",
+      "worktree": ".claude/worktrees/043-status-badges",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/45",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T12:06:20Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T12:14:29Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T12:25:24Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T12:29:21Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T12:30:24Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T12:31:37Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "044-board-interaction",
+      "title": "Board card interaction states and Move menu",
+      "description": "cards get hover, focus-visible, and dragging styles; while dragging, a line shows where the card will land (the Q1 midpoint rule already finds the gap) and the target column highlights. Drag and drop has no keyboard or screen-reader path today, so each card gets a `Move` menu (native popover) listing the other columns, plus Up and Down within Backlog, sending the same PATCH and announcing the result in an `aria-live` region. `+ New task` becomes a native popover, so Esc and an outside click close it. A success clears the board's alert by itself; a refusal stays until the next action. Each column scrolls on its own past the viewport height, so a long Backlog doesn't push the others' cards off screen.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/044-board-interaction",
+      "worktree": ".claude/worktrees/044-board-interaction",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/46",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T12:32:13Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T12:39:25Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T12:59:06Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T13:04:02Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T13:05:38Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T13:32:38Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "045-dashboard",
+      "title": "Dashboard needs-you list, split tiles, rounds bars",
+      "description": "a \"Needs you\" list first: tasks waiting on me and escalated, inline with title, project, round, and age, instead of behind a tile click, and an empty state that says nothing needs you (the dashboard view-model gains both lists, pytest). Tiles split into attention (waiting, escalated, running now; accent or danger when above 0) and throughput (done this week, runs this week, tasks per status), counts large and labels muted. Rounds per task as one small bar per task (inline SVG, no chart library) beside the average and max. The Workspaces list goes, since the sidebar lists them. The open-tasks table scrolls sideways in its own box on small screens.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/045-dashboard",
+      "worktree": ".claude/worktrees/045-dashboard",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/47",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T13:33:27Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T13:38:04Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T13:44:16Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T13:47:16Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T13:48:21Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T13:49:58Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "047-task-review-headers",
+      "title": "Shared breadcrumbs and task/review page headers",
+      "description": "one `Breadcrumbs` component, workspace \u203a project \u203a `#id` \u203a page, on the task, review, code, and transcript pages, which today each build their own and skip the workspace (view-models gain `workspace_id` and `workspace` where missing, pytest). Task page: Run / Stop / Retry and the run status on the title row; Export moves into a small popover with the Include transcripts checkbox and its warning, out of the status line. Review page: Request changes and Approve move into a GitHub-style `Review changes` popover holding the summary and an Approve / Request changes radio, so Approve is never a lone click beside the title and the disabled summary box stops filling the header outside review; the commit commands shown after Approve get a Copy button (`navigator.clipboard`, else the text is selected).",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/047-task-review-headers",
+      "worktree": ".claude/worktrees/047-task-review-headers",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/48",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T13:35:09Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T13:41:55Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T13:51:04Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T13:55:05Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T13:56:41Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T14:21:05Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "046-feedback-states",
+      "title": "Loading skeletons, offline banner, relative times",
+      "description": "skeletons in place of `Loading\u2026` on every page, sized like what replaces them so nothing jumps; when a poll fails after a good load, a muted `Offline \u2014 retrying` banner over the stale page instead of a bare red line, cleared by the next success; relative times (`5m ago`, `yesterday`) for last activity, started, history, and the timeline, with the absolute time in `title` and `<time dateTime>`, refreshed by the existing polls; `ActionButton` shows a spinner while busy; transitions limited to opacity and transform, 150 ms at most, and off under `prefers-reduced-motion`.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/046-feedback-states",
+      "worktree": ".claude/worktrees/046-feedback-states",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/49",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-20T14:27:53Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-20T14:37:18Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-20T14:55:35Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-20T15:01:33Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-20T15:03:11Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-20T15:36:29Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "048-task-manage",
+      "title": "Edit and delete tasks on the board",
+      "description": "edit and delete tasks on the board `/projects/:id` (docs/ui.md \u00a78 item 3, \u00a78.1). `PATCH /api/tasks/{id}` also takes `title` (non-empty, trimmed) and `description_md`, in any status; new `DELETE /api/tasks/{id}` \u2192 204, removing the task with its runs, rounds, round_files, verdicts, comments, decisions, events, and transcripts rows in one transaction (the \u00a75.1 schema has no `ON DELETE CASCADE`), 409 while the task has a running run, 404 unknown; the worktree, branch, run logs, and copied transcript files on disk are left alone. Each card's `Move` menu (044) gains Edit and Delete under a divider: Edit opens the `+ New task` popover form prefilled with title and description, saving through the PATCH; Delete opens a native `<dialog>` naming `#id title` and what goes with it, a danger-token confirm button, and is disabled on a running card. \u00a76.2 and \u00a78.1's wireframe updated; pytest for PATCH and DELETE (cascade, 409, 404), frontend tests for both menu items.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/048-task-manage",
+      "worktree": ".claude/worktrees/048-task-manage",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/50",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T06:40:35Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T06:45:29Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T06:55:26Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T07:01:12Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T07:03:18Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T07:08:53Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T07:10:12Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-21T07:11:53Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "050-preline",
+      "title": "Preline UI kit and shared FileTree",
+      "description": "adopt Preline UI (free MIT components, npm `preline`, no CDN since the app runs offline on 127.0.0.1) as the frontend's component kit, starting with the file tree. Wire it once: Tailwind v4 `@import \"preline/variants.css\"` and an `@source` for its JS in `frontend/src/index.css`, its plugins loaded in `main.jsx` and re-initialised after each route change and data load (`window.HSStaticMethods.autoInit()`), and its colors mapped onto 040's tokens so light and dark stay ours. One `components/FileTree.jsx` on Preline's Tree View (folder and file icons, +/\u2212 toggles, guide lines) replaces CodePage's and ReviewPage's own `Tree`s, keeping today's behavior: directories open along the current path, the same links, keyboard use and `aria-expanded` working. No Preline Pro. docs/ui.md \u00a78 names Preline as the component source, and the Code page and \u00a78.3 wireframes show the tree. vitest for FileTree (open path, toggle, links); the CodePage and ReviewPage tree tests move to it.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/050-preline",
+      "worktree": ".claude/worktrees/050-preline",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/51",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T06:56:22Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T07:07:50Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T07:23:51Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T07:28:25Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T07:29:44Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-21T07:31:05Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "049-project-manage",
+      "title": "Rename, edit, and delete projects and workspaces",
+      "description": "rename, edit, and delete projects and workspaces (docs/ui.md \u00a78 item 2, \u00a78.4). Sidebar: a `\u22ef` button at the right of each project row and beside the workspace switcher, shown on row hover and focus and always below `md`, opening a native popover menu like 044's `Move`: project \u2192 Rename, Settings, Move to workspace, Delete; workspace \u2192 Rename, Settings, Delete. Rename edits the name in place (Enter saves, Esc cancels). Settings pages: `/projects/:id/settings` (042) gains an editable name and test command and a Danger zone with Delete; new `/workspaces/:id/settings` with its name, its projects, and Delete. API: `PATCH /api/projects/{id}` also takes `name` (non-empty, trimmed) and `test_cmd`; new `PATCH /api/workspaces/{id}` takes `name`, unique, 409 on a clash; new `DELETE /api/projects/{id}` \u2192 204, removing the project with its tasks and everything 048 removes with a task in one transaction, 409 while a run is active; new `DELETE /api/workspaces/{id}` \u2192 204, 409 while it still holds projects (move or delete them first); 404 unknown. The repo, worktrees, branches, and files on disk are left alone. Delete confirms in a native `<dialog>` naming the item and what goes with it, with a danger-token button. \u00a76.1 and \u00a78.4's wireframe updated; pytest for each endpoint (cascade, 409, 404), vitest for the menus, rename, and the delete dialogs.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/049-project-manage",
+      "worktree": ".claude/worktrees/049-project-manage",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/52",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T07:32:18Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T07:38:25Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T07:54:13Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T08:03:40Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T08:05:42Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-21T08:07:33Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "051-factory-designer",
+      "title": "Factory designer: factories table, API, and canvas",
+      "description": "a project has many factories, each designed as an interactive flow on a canvas (React Flow, npm `@xyflow/react`, MIT, its stock zoom +/\u2212, fit, and lock controls and dotted background), and saving one to the db is what connects it to the project (\u00a79 Later \"configurable reviewer set, editing the loop in the UI\" moves to MVP). Table `factories` (id, project_id \u2192 projects ON DELETE CASCADE, name unique per project, `graph` JSON, created_at, updated_at). The graph is React Flow's shape, `{nodes: [{id, type, position, data}], edges: [{id, source, sourceHandle, target}]}`, with node types: one `start`; agents (spec writer, builder with side backend / frontend / both, reviewer with focus security / ux / ui / code / custom, approver, custom agent), each with `data` name (a slug, unique in the factory), description, model (inherit / opus / sonnet / haiku), tools, and prompt markdown; conditions (all reviews PASS, any review CHANGES, rounds used < N, decision APPROVE), each with a yes and a no handle. API: `GET`/`POST /api/projects/{id}/factories`, `GET`/`PUT`/`DELETE /api/factories/{id}`; `PUT` validates the graph (exactly one start, edges join existing nodes and handles, unique agent names, conditions' handles only yes/no, body \u2264 256 KB) \u2192 422 naming the problem, 404 unknown, 409 on a name clash. A new factory starts from a default graph that mirrors today's loop: start \u2192 spec writer \u2192 builder \u2192 the four reviewers \u2192 all PASS? yes \u2192 approver; no \u2192 rounds used < 2? yes \u2192 builder, no \u2192 approver. Pages: `/projects/:id/factories` lists them (name, nodes, updated, relative time) with `+ New factory`, rename, and delete in a native `<dialog>`; `/projects/:id/factories/:fid` (wide) is the canvas as in the attached example: a collapsible left palette with Agents and Conditions groups whose items drag onto the canvas (or, for keyboard use, click to add at the center), nodes as cards with an icon, title, and a one-line summary, edges with a \u00d7 at their midpoint to delete, yes handles green and no handles red, a side panel editing the selected node's `data`, and Save top-right (also Cmd/Ctrl+S) with a `beforeunload` warning while unsaved. The sidebar's project pages (042) gain Factories. Colors on 040's tokens, light and dark. docs: \u00a72 Factory, \u00a73.2 gains the designer flow, data-model \u00a75.1 and \u00a76.1, \u00a76.4 routes, ui.md \u00a78 a new item with a wireframe. pytest for the endpoints and every validation rule (422, 404, 409, cascade); vitest for the list page, palette add, edge delete, the side panel, and save.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/051-factory-designer",
+      "worktree": ".claude/worktrees/051-factory-designer",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/53",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T08:09:26Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T08:22:25Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T08:43:54Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T08:51:12Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T08:55:05Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T08:59:57Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T09:02:25Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-21T09:07:31Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "052-factory-export",
+      "title": "Factory export: compile, download, write to repo",
+      "description": "compile a factory (051) into markdown files, then download them or copy them into the project's repo. `GET /api/factories/{id}/files` \u2192 `[{path, content}]`: one `.claude/agents/<name>.md` per agent node (frontmatter name, description, tools, model; body the node's prompt) and `.claude/skills/<factory-slug>/SKILL.md`, the 011 orchestrator template whose loop section is generated from the graph (steps numbered in walk order from start, agents that share a parent spawned in ONE message and waited for together, each condition a \"yes \u2192 step k, no \u2192 step m\" line), all rendered with the project's name, test command, and default branch as 011 does. The default graph compiled gives 011's 8 files, so `/factory` runs keep working. `GET /api/factories/{id}/download` \u2192 `<project>-<factory>.zip` (stdlib zipfile) of those files. `POST /api/factories/{id}/write {overwrite}` copies them into the project's repo through 011's writer (existing files skipped and listed unless overwrite, paths kept under `<repo>/.claude/`, symlinks refused), returning written and skipped plus the commit hint; the factory state check (\u00a73.2 step 4) is unchanged. Canvas page (051): a Files button opens a panel listing the compiled files with a highlighted preview of the selected one, Download .zip, and Write to repo with an Overwrite tick and the same result view as Settings' Create factory. docs: \u00a73.2, \u00a76.1, claude-code.md \u00a77.3 the compile rules. pytest: default graph compiles to the 011 templates byte for byte, a branching graph's generated loop, the zip's entries, and write's skip / overwrite / path checks; vitest for the panel, download link, and write result.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/052-factory-export",
+      "worktree": ".claude/worktrees/052-factory-export",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/56",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T12:13:39Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T12:29:47Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T12:43:21Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T13:10:20Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T13:18:25Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-21T13:26:15Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "053-agents-page",
+      "title": "Agents page: running and recent agents",
+      "description": "an Agents page `/agents` showing which agents are running right now, across every project, so later automations have a home: today every run is a factory run, and scheduled ones (cron checkup agents, other codebase automations) join it later as runs of their own kind (\u00a79 Later gains that line). `GET /api/pages/agents` \u2192 `{running: [...], recent: [...]}`, no schema change. A running row: `kind` (`factory` for every run today), `#id title` linking to the task page, project linking to its board, stage \u00b7 round, started and elapsed, Stop (`POST /api/runs/{id}/stop`), and a link to the task's run log; under it, the run's agents read from its stream-json log the way `lib/run_log.py` already names them (an `Agent` tool_use's `name` / `subagent_type`, `parent_tool_use_id` for what they do): the orchestrator first, then each spawned agent with its type, round (from \"Task <id>, round <n>.\" in its prompt), `\u25cf running` while its `Agent` call has no tool_result yet, else finished with its duration, and its latest tool line as the run log panel shows it. `recent`: the last 20 ended runs, newest first, with how they ended (succeeded / failed / stopped, and `error`), duration, and a link to the task's transcripts. Polled every 3 s like the run log, with 046's skeleton and offline banner; with nothing running it says `Nothing running.` above Recent. The sidebar (\u00a78.4) gains Agents under Dashboard, with an `accent` count pill while a run is going. docs: \u00a76.4 routes and view-model, ui.md \u00a78 a new item with a wireframe, \u00a78.4's wireframe, \u00a79 Later. pytest for the view-model from fixture logs (a live and a finished agent, a subagent's own tool lines, a malformed line skipped, no runs, recent's order and limit, an unknown run log file); vitest for the page (agent states, empty state, Stop) and the sidebar link.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/053-agents-page",
+      "worktree": ".claude/worktrees/053-agents-page",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/54",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T12:14:46Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T12:22:47Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T12:31:14Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T12:36:08Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T12:38:45Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-21T12:47:58Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "055-claude-logout",
+      "title": "Disconnect the Claude account from Settings",
+      "description": "disconnect the Claude account from Settings (docs/ui.md \u00a78 item 9, 039). While signed in, the Claude login section gains **Disconnect**, confirmed in a native `<dialog>` like `DeleteDialog`. `POST /api/auth/logout` stops a pending login first, runs `claude auth logout` with the run's environment (\u00a74.3), and returns `GET /api/auth`'s body checked afresh (auth_method, plan, email null, runs disabled); 409 `a run is active` while one is, so a run never loses its login mid-way; 500 with claude's last line if logout fails. The section then shows **Log in with Claude**, and the sidebar's badge reads not signed in. docs: \u00a76.4 auth block, ui.md \u00a78 item 9, MVP \u00a74.6 Login. pytest with a fake `claude` (logout ok, logout fails, active run 409, pending login stopped); vitest for the button, dialog, and signed-out state.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/055-claude-logout",
+      "worktree": ".claude/worktrees/055-claude-logout",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/55",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T12:17:02Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T12:21:38Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T12:27:28Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T12:35:08Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T12:36:16Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T12:42:00Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T12:44:28Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-21T13:19:27Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "054-code-branches",
+      "title": "Code page branch picker",
+      "description": "the code page `/projects/:id/code` (docs/ui.md \u00a78 item 6) browses every branch, not only the main checkout. A branch picker in the header, in place of the static current-branch label, lists local branches and `origin/*` branches with no local twin (`git for-each-ref`); the current branch is the default and keeps today's working-tree view. Picking another branch sets `?branch=`, kept on file links and `?path=` deep links, and reads that branch's tree with `git ls-tree -r --name-only` and its files with `git show <ref>:<path>`, with the same README landing and binary / over 1 MB \"not shown\" rules. `/api/pages/projects/{id}/code` takes `branch` and returns 404 unless it is one of the listed refs, so no arbitrary revs or `-` options reach git (\u00a74.5). Branch browsing leaves the docs/MVP.md \u00a79 out-of-scope list; worktree browsing stays there.",
+      "status": "done",
+      "stage": null,
+      "round": 3,
+      "branch": "factory/feat/054-code-branches",
+      "worktree": ".claude/worktrees/054-code-branches",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/57",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T16:41:28Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T16:46:54Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T16:53:40Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T17:03:11Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T17:07:45Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T17:10:56Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T17:12:19Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-21T17:15:27Z",
+          "status": "in_progress",
+          "stage": "rework"
+        },
+        {
+          "at": "2026-10-21T17:21:38Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T17:30:45Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T17:32:08Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-21T19:41:51Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "056-claude-accounts",
+      "title": "Multiple Claude accounts, one active for runs",
+      "description": "connect more than one Claude account, one of them active for runs. Each account is its own `CLAUDE_CONFIG_DIR` under `FCTL_HOME` (table `claude_accounts`: id, config_dir, active, created_at; at most one active), so `claude auth login` / `status` / `logout` and every run get the active account's dir in their environment (\u00a74.3, \u00a74.4); the existing `~/.claude` login becomes the first account on upgrade, and takeover (\u00a74.6) gains `CLAUDE_CONFIG_DIR`. Settings' Claude login section becomes a list: each account's email, plan, auth method, an `active` pill, **Make active**, and 055's **Disconnect** (which also deletes the account's dir; disconnecting the active one leaves runs disabled until another is made active); **+ Add account** runs 039's login flow into a fresh dir. `GET /api/auth` keeps describing the active account, so the sidebar badge is unchanged; new `GET /api/auth/accounts`, `POST /api/auth/accounts/{id}/activate`, `DELETE /api/auth/accounts/{id}`, and the login endpoints take an optional `account_id`. 409 on activate or delete while a run is active. docs: \u00a74.3, \u00a74.6, data-model \u00a75.1 and \u00a76.4, ui.md \u00a78 item 9. pytest with a fake `claude` per config dir (add, activate, delete, upgrade migration, run env carries the active dir, 409s); vitest for the list, add, activate, and disconnect.",
+      "status": "done",
+      "stage": null,
+      "round": 4,
+      "branch": "factory/feat/056-claude-accounts",
+      "worktree": ".claude/worktrees/056-claude-accounts",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/58",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-21T16:42:56Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-21T16:55:10Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T17:16:40Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T17:25:15Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-21T17:26:23Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-21T17:32:16Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-21T17:34:33Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-22T08:58:02Z",
+          "status": "in_progress",
+          "stage": "rework"
+        },
+        {
+          "at": "2026-10-22T09:02:26Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-22T09:10:10Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-22T09:16:16Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-22T09:23:22Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-22T09:26:21Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-10-22T10:25:53Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "057-context-library",
+      "title": "Context page card library",
+      "description": "the Context page `/projects/:id/context` (docs/ui.md \u00a78 item 11) becomes a library of context cards instead of one textarea: a grid of cards, each with a title, a short description, and its markdown content, which I can add, open, edit, rename, and delete (confirmed in `DeleteDialog`). Today's `projects.context_md` stays as the first, pinned card \"Stack and conventions\" (no delete; `fctl context` and `fctl context set` unchanged). A card can also be a group: opening it shows a modal (native `<dialog>`) with the cards inside, where I add, edit, and delete them as on the page, and a card's `\u22ef` menu moves it into a group or back out; groups are one level deep. Table `context_items` (id, project_id \u2192 projects ON DELETE CASCADE, parent_id \u2192 context_items ON DELETE CASCADE, null at the top; kind `item`/`group`; title; description; content_md; source_path, null unless read from a path; position; created_at; updated_at); `GET` and `POST /api/projects/{id}/context/items`, `PATCH` (title, description, content_md, parent_id, position) and `DELETE /api/context/items/{id}` \u2192 204, deleting a group deletes its cards. Two ways to add from files: (1) upload: `<input type=\"file\" multiple accept=\".md,.markdown,.txt\">`, each file posted as the raw body like 032's bundle import (no python-multipart), one card per file; (2) path: I type an absolute path to a `.md` file or a folder on the backend's machine (in Docker, only mounted roots exist), `POST \u2026/context/items/from-path {path}`: a file becomes one card, a folder becomes a group with one card per `*.md` / `*.markdown` / `*.txt` directly in it, sorted by name; path cards keep `source_path` and get **Reload from path**. Either way the title is the first `# heading` else the file name, the description the first paragraph cut to 160 chars, both editable. Refusals: other extensions, non-UTF-8, a card over 16 KB (`MAX_CONTEXT`), a folder over 50 files, a missing path (404), and a project total over 64 KB (413). `fctl show <id>`'s `## Project context` gains every card after \"Stack and conventions\", in position order, as `### <title>` plus content, with each group's cards under `### <group>` as `#### <title>`. docs/ui.md \u00a78 item 11 and its wireframe, docs/data-model-and-api.md (table and endpoints), docs/claude-code.md (`fctl show`), and `fctl seed` (038: a few cards and one group) are updated; pytest for the endpoints, path import, caps, and the `fctl show` order; vitest for the card grid, group modal, and both add flows.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/057-context-library",
+      "worktree": ".claude/worktrees/057-context-library",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/59",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-10-22T22:03:49Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-10-22T22:13:07Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-10-22T22:32:10Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-10-22T22:42:33Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-10-22T22:44:38Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-10-23T08:10:01Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "058-backlog-sync",
+      "title": "Sync factory/backlog.md onto the board",
+      "description": "a connected repo's file-based factory shows on its board without a manual command (docs/ui.md \u00a78 item 3; 031). Today `POST /api/projects/{id}/import-factory` reads only `factory/board.json`, so a backlog line nobody started never appears, and nothing is imported unless `fctl import-factory` runs while the app is up: report-system's 23 jobs and this repo's 57 are missing from their boards. The import also parses `factory/backlog.md`: each line `- [ ] <id>: <text>` or `- [x] <id>: <text>`, with the id passing 031's job-id check, becomes the task keyed `factory:<id>`, the same `import_key` as 031, so a job is one row whichever file names it. A job on board.json keeps 031's mapping (board.json wins); a line without one gets its title from the id's slug (`058-backlog-sync` \u2192 `Backlog sync`), the line's text under its `## ` section heading as `description_md`, status backlog for `[ ]` and done for `[x]`, and its Backlog position in file order. Other lines are skipped and counted. A sync never deletes a task whose line is gone, never moves back a task the app has started (any run or round, or a status past backlog), and never writes to the repo. Automatic: `fctl connect` imports when `factory/` exists, and the board's view-model (`GET /api/pages/projects/{id}`) re-imports when backlog.md's or board.json's mtime or size changed since the project's last import (stored on `projects`); an import error never fails the page, the board shows one muted line `factory/: <message>` instead. Project Settings \u2192 Import gains **Sync factory/** with the imported / updated / skipped counts. docs/claude-code.md (`fctl import-factory`), docs/data-model-and-api.md (\u00a75.1 column, \u00a76.1 response), and docs/ui.md (board, settings) are updated; pytest for the parser (checked, unchecked, sections, bad ids, skipped lines), rerun idempotency, board.json winning, started tasks left alone, the mtime trigger, and path containment; vitest for the Sync button and the error line.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/058-backlog-sync",
+      "worktree": ".claude/worktrees/058-backlog-sync",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/61",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-11-10T14:30:29Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-11-10T14:38:46Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-11-10T14:55:06Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-11-10T14:58:24Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-11-10T15:01:52Z",
+          "status": "review",
+          "stage": "escalated"
+        },
+        {
+          "at": "2026-11-10T15:02:59Z",
+          "status": "in_progress",
+          "stage": "rework"
+        },
+        {
+          "at": "2026-11-10T15:06:54Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-11-10T15:10:13Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-11-10T15:11:34Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-11-10T15:12:28Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "060-task-description",
+      "title": "fctl task add takes a description",
+      "description": "`fctl task add` takes a description, so a task made in the terminal isn't title-only (docs/claude-code.md, the `fctl` table; 003, 048). `fctl task add \"<title>\" [--description TEXT]`, where `--description -` reads stdin like `fctl spec`, sends it as `description_md` in `POST /api/projects/{id}/tasks`, which already accepts it; no flag sends nothing, as today, and `--run` still works with it. Today the only way to set one from the terminal is a raw `PATCH /api/tasks/{id}` with the `X-Requested-By` header. docs/claude-code.md and the fctl reference page (029's markdown) are updated; pytest for the flag, stdin, an empty description, and the create without it.",
+      "status": "done",
+      "stage": null,
+      "round": 2,
+      "branch": "factory/feat/060-task-description",
+      "worktree": ".claude/worktrees/060-task-description",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/60",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-11-10T14:36:08Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-11-10T14:38:28Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-11-10T14:42:52Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-11-10T14:49:03Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-11-10T14:52:08Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-11-10T14:57:20Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-11-10T14:58:18Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-11-10T15:02:32Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
+    },
+    {
+      "id": "059-legacy-factory",
+      "title": "Legacy factory state for file-based /factory repos",
+      "description": "the factory state tells the file-based bootstrap `/factory` from the app's template (docs/MVP.md \u00a73.2 step 4; 002, 011). Today `ready` only means `.claude/skills/factory/SKILL.md` is committed on the default branch, so this repo and report-system, whose SKILL.md is the file-based loop (state in `factory/`, arguments `<feature> | next | resume | approve | rework`), show `Factory: ready`, and Run would start `claude -p \"/factory <task id>\"` on a skill that reads the id as a new feature and starts a job in `factory/`. A new state `legacy`: the committed SKILL.md lacks `fctl stage`, which the app's template (`factory_templates/skills/factory/SKILL.md`) always calls. Run, Run next, and `fctl run` answer 409 with the hint \"this repo runs the file-based /factory loop: Create factory with Overwrite, then commit it on <branch>\"; the badge reads `Factory: legacy` in the warning token on the workspace page, the board, and Settings; Settings' Factory section says Overwrite replaces SKILL.md and the 7 agents and lists which of those files exist now. 058's sync still runs on a legacy repo, so its jobs show while the old loop keeps building them. docs/MVP.md \u00a73.2, docs/ui.md \u00a78 (workspace rows, board, settings), and docs/data-model-and-api.md (\u00a76.1 factory values, the run 409s) are updated; pytest for detection (template, legacy, uncommitted, none) and every run gate; vitest for the badge and the hint.",
+      "status": "done",
+      "stage": null,
+      "round": 1,
+      "branch": "factory/feat/059-legacy-factory",
+      "worktree": ".claude/worktrees/059-legacy-factory",
+      "pr": "https://github.com/ArtemKucheruk/claude-factories/pull/62",
+      "reviews": {
+        "security": "PASS",
+        "ux": "PASS",
+        "ui": "PASS",
+        "code": "PASS"
+      },
+      "history": [
+        {
+          "at": "2026-11-10T15:14:49Z",
+          "status": "in_progress",
+          "stage": "spec"
+        },
+        {
+          "at": "2026-11-10T15:20:50Z",
+          "status": "in_progress",
+          "stage": "build"
+        },
+        {
+          "at": "2026-11-10T15:28:53Z",
+          "status": "in_progress",
+          "stage": "agent_review"
+        },
+        {
+          "at": "2026-11-10T15:34:37Z",
+          "status": "in_progress",
+          "stage": "approval"
+        },
+        {
+          "at": "2026-11-10T15:36:32Z",
+          "status": "review",
+          "stage": "human_review"
+        },
+        {
+          "at": "2026-11-10T15:37:14Z",
+          "status": "done",
+          "stage": null
+        }
+      ]
     }
   ]
 }
