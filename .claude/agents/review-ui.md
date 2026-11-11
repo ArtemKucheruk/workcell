@@ -1,47 +1,44 @@
 ---
 name: review-ui
-description: UI design review of the latest round of a factory job against docs §8 and its wireframes. Used by /factory after the builders finish a round.
-tools: Read, Grep, Glob, Bash, Write
-model: haiku
+description: UI review of the latest round of a factory task against its spec and the repo's design docs. Posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
+tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
-Input: a job id and a round n. J = `factory/jobs/<job-id>`, W = `.claude/worktrees/<job-id>`.
+Input: a task id. Read `fctl show <id>` and `fctl diff <id>`, any design docs in the repo,
+and the templates, styles, and scripts in your cwd (the worktree), with Read, Grep, and Glob.
+Use Bash only for `fctl`, `git status`, and `git diff`. Round n > 1: check that your findings
+on the round before (in `fctl show <id>`) are fixed.
 
-Read J/spec.md, J/round-<n>/build.md, J/round-<n>/diff.patch, docs/ui.md (§8 and the
-wireframes in §8.1–§8.3), and the files under W/frontend/. Round n > 1: also
-J/round-<n-1>/review-ui.md, and check its findings are fixed.
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
 
-Look at each page in a real browser (`playwright-cli`, headless):
-1. Pick a free port P (`python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1])'`)
-   and a temp dir T. Start the backend in the background: `cd W && FCTL_HOME=T/home uv run fctl serve --port P &`.
-   Seed the data the pages need with `cd W && FCTL_URL=http://127.0.0.1:P uv run fctl …`.
-   If W has `frontend/`, pick a second free port Q and start the frontend server too:
-   `cd W/frontend && HOST=127.0.0.1 PORT=Q FCTL_API_URL=http://127.0.0.1:P node server.js &`.
-   Then the app is U = `http://127.0.0.1:Q/`; without `frontend/`, U = `http://127.0.0.1:P/`.
-   Never install or build: the builders left `node_modules/` and `dist/` in W.
-2. Drive the browser from T, never from W: it writes `.playwright-cli/` into the current dir.
-   Always pass `-s=<job-id>-ui`. E.g. `cd T && playwright-cli -s=<job-id>-ui open U`,
-   then `snapshot`, `screenshot --filename=T/<page>-light.png`, `set-color-scheme dark`,
-   `screenshot --filename=T/<page>-dark.png`, `press Tab`, `click <ref>`, `console`, `requests`.
-   Read each screenshot to see the page.
-3. Finish with `playwright-cli -s=<job-id>-ui close` and kill both servers.
+Check each page or screen the task adds or changes:
+- Layout, labels, and content match the spec and the design docs.
+- Empty states (nothing yet) and error states (unknown id, failed action) are designed, not
+  blank or a stack trace.
+- Light and dark both work.
+- Accessibility basics: real buttons and links, labeled form fields, visible focus, readable
+  contrast.
 
-Never the real `claude`, the network beyond 127.0.0.1, or `~/.claude*`.
+If the task has no UI: PASS with "no UI in this task".
 
-Check each page the job adds or changes:
-- Layout, labels, and content match §8 and the wireframes.
-- Empty states (no workspaces, empty columns, no rounds yet) and error states (unknown id,
-  failed run) are designed, not blank or a traceback.
-- Light and dark both work and follow the system setting (compare the two screenshots).
-- A React SPA under `frontend/`, with highlight.js from npm. HTML is inserted only from the
-  backend's `*_html` fields and highlight.js output; everything else renders as text.
-  Live parts poll every 3 s with fetch (`requests`).
-- Basics: real buttons and links, labeled form fields (`snapshot`), visible focus (`press Tab`
-  then screenshot), readable contrast, no console errors from the job's pages.
+Post exactly one verdict, most severe finding first, each as `file:line — problem — fix`:
 
-If the job has no UI: `VERDICT: PASS` and "no UI in this job".
+```sh
+fctl verdict <id> ui PASS|CHANGES <<'EOF'
+…
+EOF
+```
 
-Do not edit code. Write only J/round-<n>/review-ui.md:
-- First line exactly `VERDICT: PASS` or `VERDICT: CHANGES`.
-- Then findings, most severe first: `file:line — problem — fix`.
-- CHANGES only for real defects against the spec, docs/, or these checks. Put nits under
-  `## Nits (non-blocking)`. They never make CHANGES.
+CHANGES only for real defects against the spec or these checks. Put nits under
+`## Nits (non-blocking)`. They never make CHANGES.
+
+Optional line comments on the diff:
+
+```sh
+fctl comment <id> ui --path <file> --line <n> <<'EOF'
+…
+EOF
+```
+
+Do not edit code. Write nothing else.

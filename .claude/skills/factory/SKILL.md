@@ -1,252 +1,86 @@
 ---
 name: factory
-description: Bootstrap software factory orchestrator. Each run drives one job through spec → build → 4 reviews → approval → human review, with all state in factory/. Independent jobs run side by side in separate terminals. Use only when the user types /factory.
-argument-hint: "<feature> | next | resume [job-id] | approve <job-id> | rework <job-id> <note>"
-disable-model-invocation: true
+description: Factory orchestrator. The app runs it headless as "/factory <task-id>" in the task's worktree. It drives one task through spec, build, agent review, and approval, with all state in the app.
 ---
 
 # /factory $ARGUMENTS
 
-You are the orchestrator. FACTORY.md is the design; this file is how you run it. If they
-disagree, stop and tell me.
+You orchestrate task $ARGUMENTS in claude-factories. Below, `<id>` is $ARGUMENTS. All state lives in
+the app; read and write it only with `fctl`.
 
-You spawn every agent, create worktrees, snapshot diffs, and, with the orchestrators in other
-terminals, are the only writers of `factory/board.json`. You write no code, specs, reviews, or
-decisions: each agent writes its own file. The exceptions are the joined build.md (build
-step 5) and a skipped review-ui file (agent_review step 2). Agents never run git writes. Yours are exactly:
-`git fetch`, `git worktree add`, publish (commit, push, PR), and approve (PR merge, worktree
-remove, branch delete). Nobody rebases, stashes, resets, force-pushes, or switches branches.
-Commits and PRs carry no Claude attribution: no `Co-Authored-By` trailer, no "Generated with
-Claude Code" line.
+Your cwd is the task's worktree, on a branch the app created from main. You and
+every agent work only in it. You are the only one who runs `fctl stage`. Every other agent
+posts only its own record: the spec, a round, a verdict, or a decision. You write no code,
+spec, verdicts, or decisions, and you edit no files.
 
-Work from the repo root (where FACTORY.md is). For job `<id>`:
-J = `factory/jobs/<id>`, W = `.claude/worktrees/<id>`, B = `factory/<type>/<id>`, the board's
-`branch`.
-Print one short line per step, e.g. `001-setup · round 1 · security CHANGES (3/4)`.
+Never commit, push, merge, or switch branches, and no agent runs a git command that writes.
+The builder submits the worktree as it is.
 
-This terminal drives one job. Other terminals may run their own `/factory` jobs at the same
-time: touch only your job's W, J, and board entry. Run `approve` and `rework` in the terminal
-that ran the job; its builders live there.
+A run allows only these Bash commands: `fctl show`, `fctl diff`, `fctl spec`, `fctl submit`,
+`fctl verdict`, `fctl comment`, `fctl decide`, `fctl stage`, `fctl round`, `git status`,
+`git diff`, and the test command, plus what this repo's `.claude/settings.json` allows. Agents
+read files with Read, Grep, and Glob.
 
-## Commands
+Test command for this repo: pytest -q
 
-| command | does |
+Print one short line per step, e.g. `#<id> · round 1 · security CHANGES (3/4)`.
+
+## Where to start
+
+`fctl show <id>` prints the task: its status and stage, the spec, and every round with its
+build notes, verdicts, comments, and decisions. Continue from the current stage:
+
+| stage | go to |
 |---|---|
-| `/factory <feature>` | start gate → new job with the next free id → loop from spec |
-| `/factory next` | start gate → first `- [ ] <id>: <text>` line in factory/backlog.md that no active job blocks → loop from spec |
-| `/factory resume [<id>]` | continue an in_progress job whose session ended (default: the only in_progress job) |
-| `/factory approve <id>` | review job → merge its PR, done, tick its backlog line, stop its builders, remove worktree and branch, import it into the app |
-| `/factory rework <id> <note>` | review job → feedback-<n>.md, stage rework, loop from build round n, push to the same PR |
+| none, spec, or build | No spec yet (`_No spec yet._`) → the spec step. No rounds, or the latest round has verdicts → the build step with the next round. The latest round has none yet (`fctl round <id>` shows 0/4) → the agent_review step. |
+| rework | `fctl show <id> --feedback` names the round my feedback is on. The latest round is that one → Rework below. The latest round is newer → the agent_review step. |
+| agent_review | the agent_review step, spawning only the reviewers `fctl round <id>` shows as pending (none → the step after it) |
+| approval | the approval step |
+| human_review or escalated | nothing to do: print the stage and stop |
 
-No arguments or anything unclear: print this table and stop.
-
-## Board
-
-`factory/board.json` is `{"jobs": [...]}`, one entry per job:
-
-```json
-{ "id": "004-submit", "title": "fctl submit and review rounds",
-  "description": "<the feature text or the backlog line, verbatim>",
-  "status": "in_progress", "stage": "agent_review", "round": 2,
-  "branch": "factory/feat/004-submit", "worktree": ".claude/worktrees/004-submit", "pr": null,
-  "reviews": { "security": "CHANGES", "ux": "PASS", "ui": "pending", "code": "PASS" },
-  "history": [ { "at": "2026-10-17T10:03:00Z", "status": "in_progress", "stage": "spec" } ] }
-```
-
-- `title`: you write it, under 60 chars. It becomes the commit message and the PR title.
-- `pr`: null until publish opens the PR, then its URL.
-- `round`: the current round, 0 before the first build. `reviews`: that round's verdicts.
-- Every status or stage change appends `{"at": <date -u +%FT%TZ>, "status", "stage"}` to `history`.
-- Setting a stage sets the status:
-
-  | stage | status |
-  |---|---|
-  | spec, build, agent_review, approval, rework | in_progress |
-  | human_review, escalated | review |
-  | null (only via approve) | done |
-
-- Other terminals write board.json too. Change it only with this command, which holds a lock
-  while it reads and writes, and touch only your job's entry (on start, append it). The
-  dashboard polls this file.
-  ```sh
-  python3 - <<'EOF'
-  import fcntl, json
-  with open("factory/board.json", "r+") as f:
-      fcntl.flock(f, fcntl.LOCK_EX)
-      board = json.load(f)
-      job = next(j for j in board["jobs"] if j["id"] == "<id>")
-      # your change here, plus its history entry
-      f.seek(0); json.dump(board, f, indent=2); f.write("\n"); f.truncate()
-  EOF
-  ```
-
-## Start gate (`<feature>` and `next`)
-
-Stop and tell me what to do if any check fails:
-1. `git fetch origin`, then `git rev-parse --verify -q origin/main^{commit}` fails, or
-   `gh auth status` fails → I must push main to GitHub or run `gh auth login`.
-2. A done job still has its worktree or its local branch → I must finish its cleanup
-   (approve step 5).
-3. Blocked (below). `next`: walk the unchecked backlog lines in order, skipping ids already on
-   the board, and take the first that isn't blocked. `<feature>`: check the feature alone.
-   Print one line per blocked candidate, e.g.
-   `007-review-conversation · blocked by 006-agent-api: shows the verdicts 006 stores`.
-   Nothing left → tell me which job each candidate waits on, and that `/factory next` after
-   an approve tries again.
-
-**Blocked.** Active jobs are the board's in_progress and review jobs. Read the candidate's
-text and the doc sections it cites; for each active job, its description, J/spec.md `## Files`,
-and the file list of its latest diff.patch. The candidate is blocked when it:
-- needs something an active job or an earlier unchecked backlog line adds (a table, endpoint,
-  page, or CLI command it calls or extends), or
-- would edit the same part of a file as an active job: the same function, template block,
-  route or import list, or test. New files and far-apart edits in one file merge cleanly.
-
-When unsure, it's blocked.
-
-## Start a job
-
-1. Id. `next`: the id on the line, description = the line's text. `<feature>`: the next number
-   after the highest in backlog.md and board.json, zero-padded to 3, plus a 1–3 word slug
-   (`013-rate-limit`), description = the feature text. backlog.md is not changed.
-   Type, from the description: feat (new behavior), fix, ci, docs, refactor, test, or chore.
-2. `grep -qxF .claude/worktrees/ .git/info/exclude || echo .claude/worktrees/ >> .git/info/exclude`
-3. `git worktree add --no-track -b B .claude/worktrees/<id> origin/main`. It fails
-   because the branch exists → another terminal just took this id: back to start gate check 3,
-   skipping it.
-4. `mkdir -p factory/jobs/<id>`. Add the board entry: branch B, stage spec, round 0, reviews
-   pending, pr null.
+A stage's step is the first step in the loop below that runs its `fctl stage`. A stage the
+loop never sets → step 2.
 
 ## The loop
 
-### spec
-Spawn `spec-writer`: "Job <id>." Wait for it. No J/spec.md → stop and report.
+1. `fctl show <id>`: read the task, then continue from its current stage (table above).
+2. spec → `fctl stage <id> spec`. Spawn `spec-writer`: "Task <id>." Wait for it.
+   `fctl show <id>` still says `_No spec yet._` → stop and report.
+3. build, the next round n → `fctl stage <id> build`.
+   - Round 1, or no `builder-<id>` in this session: spawn `builder` named `builder-<id>`:
+     "Task <id>, round <n>."
+   - Otherwise SendMessage `builder-<id>`: "Round <n>. Round <n-1> verdicts: `fctl show <id> --round <n-1>`."
+     SendMessage may be a deferred tool: load it with ToolSearch `select:SendMessage`.
 
-### build, round n
-n is 1 for a new job, round + 1 after a CHANGES round, set by `rework`, or the current round on `resume`.
-There are two builders; `<side>` is backend (everything outside `frontend/`) or frontend
-(`frontend/`).
-1. Set `round` = n, all reviews pending, stage build (keep rework if `rework` just set it).
-   `mkdir -p J/round-<n>`.
-2. Pick the sides:
-   - n = 1: one per `## Backend build` / `## Frontend build` heading in J/spec.md. Neither →
-     stop and report.
-   - n > 1: from the findings in J/round-<n-1>/review-*.md that aren't PASS, and
-     J/feedback-<n>.md. A finding on a file under `frontend/`, or on how a page looks or
-     behaves in the browser → frontend; any other finding → backend; unsure → both.
-   Print one line, e.g. `013-run-ui · round 2 · builders: frontend`.
-3. Start every picked side in ONE message, so they work in W side by side:
-   - `builder-<side>-<id>` spawned earlier in this session → SendMessage it: "Round <n>.
-     Read J/round-<n-1>/review-*.md and J/feedback-<n>.md if it exists, and fix the
-     findings on your files. Write J/round-<n>/build-<side>.md."
-   - otherwise (round 1, a side this job hasn't used yet, or a new session) spawn
-     `builder-<side>` with name `builder-<side>-<id>`: "Job <id>, round <n>."
-   SendMessage may be a deferred tool: load it with ToolSearch `select:SendMessage`.
-4. WAIT FOR ALL picked sides. A missing J/round-<n>/build-<side>.md → ask that builder once
-   to write it, then stop and report if it's still missing (`/factory resume` picks up from
-   here).
-5. Join them into the one file the reviewers, the approver, and `fctl import-factory` read:
-   `cat J/round-<n>/build-*.md > J/round-<n>/build.md`
-6. Snapshot the worktree, untracked files included, without touching its index, against the
-   job's base on main (after a rework, HEAD is the job's earlier commit). Vendored `*.min.*`
-   files, `uv.lock`, and `package-lock.json` stay out of the patch: every reviewer and the
-   approver read it.
-   ```sh
-   t=$(mktemp -d); wt=.claude/worktrees/<id>
-   base=$(git -C $wt merge-base HEAD origin/main)
-   GIT_INDEX_FILE=$t/index git -C $wt read-tree HEAD
-   GIT_INDEX_FILE=$t/index git -C $wt add -A
-   GIT_INDEX_FILE=$t/index git -C $wt diff --cached -M $base -- . ':!*.min.*' ':!uv.lock' ':!*package-lock.json' > factory/jobs/<id>/round-<n>/diff.patch
-   rm -rf $t
-   ```
-   Over 5 MB means generated files got in (.venv/, caches): have builder-backend-<id> fix
-   .gitignore (it owns it), then snapshot again.
+   Wait for it. Done when the builder has run `fctl submit <id>` and `fctl round <id>` shows
+   round n. Not there → ask the builder once to submit, then stop and report.
+4. agent_review → `fctl stage <id> agent_review`. Spawn these in ONE message, each with "Task <id>.":
+   `review-security`, `review-ux`, `review-ui`, `review-code`.
+   WAIT FOR ALL: go on only when `fctl round <id>` shows a verdict from each. Spawn a reviewer
+   that ended without posting its verdict once more. Never message the builder mid-round.
+5. All reviews PASS? yes → step 6, no → step 7.
+6. approval → `fctl stage <id> approval`. Spawn `approver`: "Task <id>, rounds used <x> of 2."
+   Rounds exhausted with CHANGES → it must ESCALATE. Wait for it.
+   Then step 8.
+7. Rounds used < 2? yes → step 3, no → step 6.
+8. Read the approver's latest decision in `fctl show <id> --round <n>`. APPROVE →
+   `fctl stage <id> human_review`. ESCALATE, no decision, or anything else →
+   `fctl stage <id> escalated`. Stop and report the decision's summary: the task now waits
+   on me in Review.
 
-### agent_review, round n
-1. Stage agent_review.
-2. Spawn `review-security`, `review-ux`, `review-ui`, `review-code` in ONE message, each with
-   "Job <id>, round <n>." Skip `review-ui` when the diff touches nothing under `frontend/`,
-   i.e. `grep -qE '^diff --git (a|.* b)/frontend/' J/round-<n>/diff.patch` fails: write
-   J/round-<n>/review-ui.md yourself, `VERDICT: PASS` then
-   `no UI in this job (diff touches no frontend/; review-ui skipped)`. review-ux always runs.
-3. As each finishes, read the first line of J/round-<n>/review-<r>.md and set `reviews.<r>`.
-   Anything but `VERDICT: PASS` counts as CHANGES.
-4. WAIT FOR ALL: the round is done only when all 4 review files exist. Spawn a reviewer
-   that ended without its file once more. Never message a builder mid-round.
+## Conditions
 
-### next round or approval
-- This run started at round s = the highest k with J/feedback-k.md, else 1.
-  Rounds used = n − s + 1 (max 2).
-- Any CHANGES and rounds used < 2 → build, round n + 1.
-- Otherwise → approval.
+Answer the loop's questions this way:
+- All reviews PASS?: every verdict on the latest round in `fctl round <id>` is PASS.
+- Any review CHANGES?: any of those verdicts is CHANGES.
+- Rounds used < N?: this run has used fewer than N rounds. Rounds in this run are the rounds
+  after the one my latest feedback is on (`fctl show <id> --feedback`), or all rounds when I
+  left none.
+- Decision APPROVE?: the approver's latest decision in `fctl show <id> --round <n>` is APPROVE.
 
-### approval
-Stage approval. Spawn `approver`: "Job <id>, round <n>, rounds used <x> of 2." Wait for it.
-Read the first line of J/decision.md:
-- `APPROVE` → stage human_review.
-- `ESCALATE`, a missing file, or anything else → stage escalated.
+## Rework
 
-Then publish.
-
-### publish
-Commit message: `<title>` for the first commit, `<title> (round <n>)` after a rework.
-```sh
-git -C W add -A
-git -C W diff --cached --quiet || git -C W commit -m "<message>"
-git -C W push -u origin B
-```
-- `pr` null → `gh pr create --base main --head B --title "<title>" --body-file J/decision.md`
-  (no decision.md: `--body "<description>"`). Set `pr` to the URL it prints.
-- `pr` set → `gh pr edit B --body-file J/decision.md`. The push already updated it.
-- Any command fails → stop and report it. The job stays in review; approve publishes again
-  before merging.
-
-Stop. Report the decision's summary, J, the PR URL, and my next step: read the PR (or the
-job on the dashboard), then `/factory approve <id>` or `/factory rework <id> <note>`.
-
-## approve <id>
-
-The job must be in review (human_review or escalated).
-1. `git -C W status --porcelain` not empty → stop, list the files, and ask whether to
-   publish them into the PR first. `pr` null (publish failed earlier) → publish first.
-2. `gh pr merge B --merge`. Fails (conflict, required checks, already closed) →
-   stop and report it; the job stays in review.
-3. Set status done, stage null, append history. In backlog.md change `- [ ] <id>:` to
-   `- [x] <id>:` if that line exists.
-4. Stop the builders: TaskStop `builder-backend-<id>` and `builder-frontend-<id>` (deferred:
-   ToolSearch `select:TaskStop`). Not found (a side the job didn't use, a new session, or
-   another terminal ran the job) is fine.
-5. Clean up. A branch that's already gone (GitHub auto-delete) is fine:
-   ```sh
-   git worktree remove .claude/worktrees/<id>
-   git branch -D B        # -D: the merge commit is on origin/main, not local
-   git push origin --delete B
-   git fetch origin --prune
-   ```
-   `worktree remove` refuses (dirty files) → stop and tell me; never `--force`.
-6. Import the job into the app: `fctl import-factory --job <id>`. Any non-zero exit (the app is
-   down, a 4xx, no `fctl` on PATH) only warns: print one `warning:` line with fctl's message and
-   finish approve normally. Nothing is undone.
-
-Report the merged PR URL, and that my main checkout isn't updated: `git pull` when I want it.
-
-## rework <id> <note>
-
-The job must be in review. n = round + 1. Write the note verbatim to J/feedback-<n>.md. Set
-stage rework, then run the loop from build, round n. Publish adds the new commit to the open PR.
-
-## resume [<id>]
-
-The job must be in_progress. No id and more than one in_progress job → list them and stop; I
-name one. Continue from its stage:
-- spec: J/spec.md exists → build round 1; else spec.
-- build or rework: J/round-<round>/build.md exists → snapshot (build step 6), then
-  agent_review; else build with n = round, starting only the picked sides (build step 2)
-  whose J/round-<n>/build-<side>.md is missing. All present → join (step 5).
-- agent_review: fill `reviews` from the files that exist; spawn only the missing reviewers
-  (review-ui follows the skip rule in agent_review step 2).
-- approval: run approval again.
-
-## Dashboard
-
-`python3 -m http.server -b 127.0.0.1 -d factory` → http://127.0.0.1:8000/dashboard.html
+Stage rework means I requested changes on the latest round. Spawn the build step's agent fresh,
+with the name that step gives it: "Task <id>, round <n>. Address `fctl show <id> --feedback`."
+Keep the rework stage while it builds (skip the build step's `fctl stage`), then go on from the
+build step's wait. My feedback wins over the reviewers.

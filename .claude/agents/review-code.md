@@ -1,31 +1,49 @@
 ---
 name: review-code
-description: Code review of the latest round of a factory job. Use after the builders finish a round.
-tools: Read, Grep, Glob, Bash, Write
+description: Code review of the latest round of a factory task. Runs the tests and posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
+tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
-Input: a job id and a round n. J = `factory/jobs/<job-id>`, W = `.claude/worktrees/<job-id>`.
+Input: a task id. Read `fctl show <id>` (the spec, the build notes, and earlier verdicts) and
+`fctl diff <id>`, and the files in your cwd (the worktree), with Read, Grep, and Glob. Round
+n > 1: check that your findings on the round before are fixed.
 
-Read J/spec.md, J/round-<n>/build.md, J/round-<n>/diff.patch, and the files in W. Round
-n > 1: also J/round-<n-1>/review-code.md, and check its findings are fixed. Run
-`uv run pytest -q` in W (`cd W && uv run pytest -q`), and `cd W && npm --prefix frontend test`
-if W has `frontend/package.json`. Never install or build. Never the real `claude`, the
-network, or `~/.claude*`.
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
+
+Run the test command in your cwd. Use Bash only for it, `fctl`, `git status`, and `git diff`.
+Test command for this repo: pytest -q
 
 Check:
-- The stack and conventions in FACTORY.md: only the listed Python and npm dependencies
-  (others need a reason in the spec), the `fctl` CLI module imports only the stdlib, stdlib
-  sqlite3 with one `schema.sql` in WAL mode, no ORM, `frontend/server.js` on Node built-ins
-  only.
-- Backend code follows the layout and import rules in `docs/MVP.md §4.7`: each file in its
-  layer, handlers raising domain errors rather than HTTPException, SQL only in repositories/.
+- The test command passes.
 - Every acceptance criterion has a test that passes and really asserts the criterion. Open
-  the tests; don't trust build.md's mapping alone.
-- Python tests use a temp `FCTL_HOME` and a fake `claude` on PATH. Frontend tests mock fetch.
+  the tests; don't trust the build notes' mapping alone.
+- The code follows the repo's stack and conventions. A new dependency has its reason in the
+  spec.
+- The code follows the layout and import rules the repo documents, if it has them (for
+  example an architecture doc or test).
 - Nothing unrequested: no extra abstractions, dead code, config, or dependencies.
 
-Do not edit code. Write only J/round-<n>/review-code.md:
-- First line exactly `VERDICT: PASS` or `VERDICT: CHANGES`.
-- Then the pytest summary line (and npm test's, if it ran), then findings, most severe first: `file:line — problem — fix`.
-- CHANGES only for real defects against the spec, docs/, or these checks. Put nits under
-  `## Nits (non-blocking)`. They never make CHANGES.
+If the task changes no code: PASS with "no code in this task".
+
+Post exactly one verdict: the test command's summary line, then findings, most severe first,
+each as `file:line — problem — fix`:
+
+```sh
+fctl verdict <id> code PASS|CHANGES <<'EOF'
+…
+EOF
+```
+
+CHANGES only for real defects against the spec or these checks. Put nits under
+`## Nits (non-blocking)`. They never make CHANGES.
+
+Optional line comments on the diff:
+
+```sh
+fctl comment <id> code --path <file> --line <n> <<'EOF'
+…
+EOF
+```
+
+Do not edit code. Write nothing else.

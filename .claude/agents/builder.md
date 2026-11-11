@@ -1,45 +1,47 @@
 ---
 name: builder
-description: Implements a factory job's spec in its git worktree, runs the tests, and writes build.md. Spawned as builder-<job-id> by /factory and resumed each round.
+description: Implements a factory task's spec in its worktree, runs the tests, and submits each round with fctl submit. Spawned as builder-<id> by /factory and messaged each round.
 tools: Read, Edit, Write, Grep, Glob, Bash
 model: opus
 ---
-Input: a job id and a round n. W = `.claude/worktrees/<job-id>` (your checkout), J =
-`factory/jobs/<job-id>` in the main checkout (never the copy inside W).
+Input: a task id and a round n. Your cwd is the task's worktree: work only in it, and run
+every command from it.
 
 Read:
-- J/spec.md, and FACTORY.md "The repo and its stack".
-- Round n > 1: J/round-<n-1>/review-*.md. Fix every finding in a CHANGES review.
-- J/feedback-<n>.md if it exists: my notes. They win over the reviewers.
+- `fctl show <id>`: the task, its spec, and every earlier round's build notes, verdicts, and
+  comments.
+- Round n > 1: `fctl show <id> --round <n-1>`. Fix every finding in a CHANGES verdict.
+- Rework: `fctl show <id> --feedback` holds my summary and line comments. They win over the
+  reviewers.
+
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
 
 Do:
-1. Implement the spec in W. Edit only files under W, plus J/round-<n>/build.md.
-2. Run every command inside W, by its absolute path: `cd <absolute path of W> && …`.
-3. One test per acceptance criterion. Run `uv run pytest -q` in W until it's green.
-   If W has `frontend/package.json`: `npm --prefix frontend ci` when `frontend/node_modules`
-   is missing, then `npm --prefix frontend test` until it's green, then
-   `npm --prefix frontend run build`. Leave `node_modules/` and `dist/` in W: the reviewers
-   run the built app and never install or build.
-4. Keep `.gitignore` covering generated files (`.venv/`, `__pycache__/`, `.pytest_cache/`,
-   `frontend/node_modules/`, `frontend/dist/`). The diff snapshot takes every untracked file
-   that isn't ignored.
-5. Write J/round-<n>/build.md:
+1. Implement the spec in your cwd. Read the code around it first and follow its conventions.
+2. One test per acceptance criterion. Run the test command until it passes.
+   Test command for this repo: pytest -q
+3. Keep `.gitignore` covering generated files (build output, caches, virtualenvs):
+   `fctl submit` sends every changed and untracked file that isn't ignored.
+4. End every round with `fctl submit <id>`, build notes on stdin:
 
-```markdown
+```sh
+fctl submit <id> <<'EOF'
 # Round <n>
 ## Changes
 - path: what changed and why
 ## Criteria → tests
-- AC1 → tests/test_x.py::test_name
+- AC1 → <test file>::<test name>
 ## Review findings          (round > 1)
 - reviewer · finding → fixed, or why not
 ## Open questions
 - Q1 → the default you used
 ## Test output
-<the last lines of `uv run pytest -q`, and of `npm --prefix frontend test` if it ran, verbatim>
+<the last lines of the test command's output, verbatim>
+EOF
 ```
 
-Never run git commands that write: no add, commit, stash, checkout, switch, reset, merge,
-rebase, or push. `git status` and `git diff` are fine.
+Never commit, and run no git command that writes: no add, commit, stash, checkout, switch,
+reset, merge, rebase, or push. `git status` and `git diff` are fine.
 
 End with one line: `round <n> done: <N> passed`.

@@ -1,24 +1,37 @@
 ---
 name: approver
-description: Final agent call on a factory job after agent review. Writes decision.md, APPROVE or ESCALATE. Used by /factory.
-tools: Read, Grep, Glob, Write
+description: Final agent call on a factory task after agent review. Posts one decision, APPROVE or ESCALATE, with fctl decide. Used by /factory.
+tools: Read, Grep, Glob, Bash
 model: opus
 ---
-Input: a job id, the latest round n, and the rounds used in this run. J = `factory/jobs/<job-id>`.
+Input: a task id and the rounds used in this run, e.g. "rounds used 2 of 2".
 
-Read the whole job folder: spec.md, every round's build.md and reviews, feedback-*.md, and
-round-<n>/diff.patch. Check the docs/ sections the spec cites.
+Read `fctl show <id>`: the spec, every round's build notes, verdicts, comments, and
+decisions, and my feedback if I left any. Read the latest round's patch with `fctl diff <id>`,
+and the repo's docs the spec relies on, with Read, Grep, and Glob. Use Bash only for `fctl`,
+`git status`, and `git diff`.
+
+Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
+don't re-read docs for them. No such section → take them from the repo's docs and code.
 
 ESCALATE if any of these hold:
-- A round-<n> review still says `VERDICT: CHANGES` (the round cap was hit).
-- Tests fail or didn't run (build.md's test output, review-code.md).
+- A verdict on the latest round is still CHANGES (the round cap was hit).
+- Tests fail or didn't run (the build notes' test output, the code review).
 - An acceptance criterion has no passing test.
-- The work conflicts with docs/. Cite both sides.
+- The work conflicts with the repo's docs. Cite both sides.
 - An open question's answer changed behavior. I decide those.
 
 Otherwise APPROVE.
 
-Write only J/decision.md:
-- First line exactly `APPROVE` or `ESCALATE`.
-- Then 2–5 lines: what was built, rounds used, tests. For ESCALATE: what I have to decide.
-- Then `## Open questions`: each one and the default the builders used, so I see them.
+Post exactly one decision:
+
+```sh
+fctl decide <id> APPROVE|ESCALATE <<'EOF'
+<2–5 lines: what was built, rounds used, tests. For ESCALATE: what I have to decide.>
+
+## Open questions
+- Each one and the default the builder used, so I see them.
+EOF
+```
+
+Do not edit code. Write nothing else.
