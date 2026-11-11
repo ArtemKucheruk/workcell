@@ -336,7 +336,12 @@ claude -p "/factory 12" \
 - The working directory is the worktree, so `acceptEdits` covers only that tree.
   `--permission-prompts none` denies anything not on the allowlist instead of hanging on a
   prompt.
-- The test command comes from `projects.test_cmd`. Extra commands a project needs go in its
+- The test command comes from `projects.test_cmd`. Each `&&`/`||`/`;`/`|` part (split outside
+  quotes) gets its own `Bash(<words> *)` rule, deduplicated in order: the part's words before the
+  first flag. When that is only the program and the flag is followed by a value and a subcommand
+  (`npm --prefix frontend ci`, or `npm --prefix=frontend ci`), the rule runs through them
+  (`Bash(npm --prefix frontend ci *)`) instead of `Bash(npm *)`. Flag arity isn't known, so a flag
+  followed by one word only (`npm -s test`) still gets `Bash(npm *)`. Extra commands a project needs go in its
   own `.claude/settings.json` `permissions.allow`. Denials show up in the run log.
 - Agents can't call `fctl approve`, `run`, or `rework`, so a run can't approve its own work
   or start other runs.

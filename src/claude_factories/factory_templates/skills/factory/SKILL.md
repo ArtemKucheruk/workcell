@@ -18,8 +18,8 @@ The builder submits the worktree as it is.
 
 A run allows only these Bash commands: `fctl show`, `fctl diff`, `fctl spec`, `fctl submit`,
 `fctl verdict`, `fctl comment`, `fctl decide`, `fctl stage`, `fctl round`, `git status`,
-`git diff`, and the test command, plus what this repo's `.claude/settings.json` allows. Agents
-read files with Read, Grep, and Glob.
+`git diff`, and each part of the test command, plus what this repo's `.claude/settings.json`
+allows. Agents read files with Read, Grep, and Glob.
 
 Test command for this repo: {{ test_cmd }}
 
