@@ -38,6 +38,58 @@ DISALLOWED_TOOLS = (
 EXCLUDE_LINE = b".claude/worktrees/"
 
 
+def command_parts(cmd: str) -> list[list[str]]:
+    """092: `cmd` split on `&&`, `||`, `;`, `|` outside quotes, each part as its words as written (quotes
+    kept, Q4). Empty parts are dropped (AC9). ponytail: `&`, redirections, subshells, and `$( )` aren't
+    parsed (spec: out of scope)."""
+    parts, words, word, quote, i = [], [], "", None, 0
+    while i < len(cmd):
+        c = cmd[i]
+        if quote:
+            word += c
+            if c == "\\" and quote == '"' and i + 1 < len(cmd):
+                word, i = word + cmd[i + 1], i + 1
+            elif c == quote:
+                quote = None
+        elif c in "'\"":
+            word, quote = word + c, c
+        elif c == "\\" and i + 1 < len(cmd):
+            word, i = word + c + cmd[i + 1], i + 1
+        elif c.isspace() or c in ";|" or cmd.startswith("&&", i):
+            words += [word] if word else []
+            word = ""
+            if not c.isspace():
+                parts += [words] if words else []
+                words = []
+                i += cmd.startswith(("&&", "||"), i)
+        else:
+            word += c
+        i += 1
+    words += [word] if word else []
+    return parts + ([words] if words else [])
+
+
+def test_rules(cmd: str) -> tuple[str, ...]:
+    """012 Q7, 092: one `Bash(<words> *)` rule per part of the test command, deduplicated in order
+    (Claude Code checks each part of a chain on its own). The words are those before the first flag, but
+    when that leaves only the program and the flag is followed by 2+ non-flag words (a value, then a
+    subcommand: `npm --prefix frontend ci`), they run through those words, so a rule is never `Bash(npm *)`
+    for a subcommand. A `--flag=value` first flag holds its own value, so 1+ word is enough there
+    (`npm --prefix=frontend ci` → `Bash(npm --prefix=frontend ci *)`, round 1 security). 092 Q2 ponytail:
+    flag arity is unknown, so one word after the flag is taken as its value (`pytest -k "a && b"` stays
+    `Bash(pytest *)`, AC6) and `npm -s test` still gets `Bash(npm *)`."""
+    rules = {}
+    for words in command_parts(cmd):
+        prefix = list(takewhile(lambda w: not w.startswith("-"), words))
+        if len(prefix) == 1 and len(words) > 1:
+            rest = list(takewhile(lambda w: not w.startswith("-"), words[2:]))
+            if len(rest) >= (1 if "=" in words[1] else 2):  # `--prefix=frontend` holds its own value
+                prefix = words[:2 + len(rest)]
+        if prefix:
+            rules.setdefault(f"Bash({' '.join(prefix)} *)", None)
+    return tuple(rules)
+
+
 def refuse_if_running(runs: RunsRepo):
     """§4.4: one run at a time, across all projects."""
     if run := runs.any_running():
@@ -100,8 +152,7 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
     if claude.auth_status(wt, env) is None:  # each run's own check, never cached (§4.3: before every run)
         raise Conflict("not on subscription auth")
     session_id = str(uuid.uuid4())
-    test_words = list(takewhile(lambda w: not w.startswith("-"), (task["test_cmd"] or "").split()))  # Q7
-    allowed = ALLOWED_TOOLS + ((f"Bash({' '.join(test_words)} *)",) if test_words else ())
+    allowed = ALLOWED_TOOLS + test_rules(task["test_cmd"] or "")
     args = ["-p", PROMPT.format(task_id=task_id), "--session-id", session_id,
             "--output-format", "stream-json", "--verbose", "--forward-subagent-text",
             "--permission-mode", "acceptEdits", "--permission-prompts", "none",

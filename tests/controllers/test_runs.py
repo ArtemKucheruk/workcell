@@ -234,11 +234,36 @@ def test_argv(client, project, fake):  # AC5
     ]
 
 
-@pytest.mark.parametrize("test_cmd, extra", [("uv run pytest -q", ["Bash(uv run pytest *)"]), (None, [])])
-def test_test_cmd_entry(client, project, fake, test_cmd, extra):  # AC6
+@pytest.mark.parametrize("test_cmd, extra", [
+    ("uv run pytest -q", ["Bash(uv run pytest *)"]),  # 092 AC1
+    (None, []),  # 092 AC2
+    ("pytest -q", ["Bash(pytest *)"]),  # 092 AC2: the connect default
+    ("pytest -q tests/", ["Bash(pytest *)"]),  # one word after the flag is its value (092 Q2)
+    ("uv run pytest -q && npm --prefix frontend ci && npm --prefix frontend test",  # 092 AC3
+     ["Bash(uv run pytest *)", "Bash(npm --prefix frontend ci *)", "Bash(npm --prefix frontend test *)"]),
+    ("pytest -q; ruff check .", ["Bash(pytest *)", "Bash(ruff check . *)"]),  # 092 AC4: no flag, all words
+    ("pytest -q;ruff check --fix .", ["Bash(pytest *)", "Bash(ruff check *)"]),  # 092 AC4
+    ("pytest -q | tee out.txt", ["Bash(pytest *)", "Bash(tee out.txt *)"]),  # 092 AC5
+    ("make test || make retry", ["Bash(make test *)", "Bash(make retry *)"]),  # 092 AC5
+    ('pytest -k "a && b"', ["Bash(pytest *)"]),  # 092 AC6
+    ("pytest -k 'x; y'", ["Bash(pytest *)"]),  # 092 AC6
+    ("npm --prefix frontend ci", ["Bash(npm --prefix frontend ci *)"]),  # 092 AC7
+    ("npm --prefix frontend ci --silent|pytest",  # 092 AC7, no spaces around the operator
+     ["Bash(npm --prefix frontend ci *)", "Bash(pytest *)"]),
+    ("npm --prefix=frontend ci --silent && pnpm --dir=frontend test",  # 092 AC7, inline flag value
+     ["Bash(npm --prefix=frontend ci *)", "Bash(pnpm --dir=frontend test *)"]),
+    ("pytest -q && npm test && pytest -x", ["Bash(pytest *)", "Bash(npm test *)"]),  # 092 AC8
+    ("pytest -q; && && ruff check .;", ["Bash(pytest *)", "Bash(ruff check . *)"]),  # 092 AC9
+    (" && ; | ", []),  # 092 AC9
+])
+def test_test_cmd_entry(client, project, fake, test_cmd, extra):  # AC6; 092 AC11
     sql("UPDATE projects SET test_cmd = ?", (test_cmd,))
     started(client, add_task(project))
-    assert allowed(fake.recorded("run")["argv"]) == FCTL_ALLOWED + extra
+    argv = fake.recorded("run")["argv"]
+    assert allowed(argv) == FCTL_ALLOWED + extra
+    assert argv[argv.index("--disallowedTools") + 1:] == [  # 092 AC10
+        "Bash(git commit *)", "Bash(git push *)", "Bash(git merge *)", "Bash(git rebase *)",
+        "Bash(git reset *)", "Bash(git checkout *)"]
 
 
 def test_cwd_is_worktree(client, project, repo, fake):  # AC7
