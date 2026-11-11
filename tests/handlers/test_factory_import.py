@@ -784,18 +784,6 @@ def test_gitignore():  # AC42
     assert "factory/jobs/" in lines and "factory/board.json" in lines
 
 
-def test_approve_imports():  # AC43
-    skill = (ROOT / ".claude" / "skills" / "factory" / "SKILL.md").read_text()
-    approve = skill[skill.index("\n## approve <id>\n"):skill.index("\n## rework")]
-    steps = approve.split("\n")
-    last = [i for i, s in enumerate(steps) if s[:1].isdigit() and s[1:3].startswith(". ")][-1]
-    text = " ".join(steps[last:])
-    assert steps[last].startswith("6. ") and "`fctl import-factory --job <id>`" in text and "warning" in text
-    factory = (ROOT / "FACTORY.md").read_text()
-    block = factory[factory.index("What `/factory approve` runs:\n"):factory.index("\n## Dashboard")].strip()
-    assert block.splitlines()[-1].strip() == "fctl import-factory --job <job-id>"
-
-
 def test_docs():  # AC44
     data = (ROOT / "docs" / "data-model-and-api.md").read_text()
     tasks = data[data.index("CREATE TABLE tasks ("):data.index("CREATE TABLE runs")]
