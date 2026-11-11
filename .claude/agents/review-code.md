@@ -22,6 +22,8 @@ Check:
   spec.
 - The code follows the layout and import rules the repo documents, if it has them (for
   example an architecture doc or test).
+- In this repo: the code follows the layout in `docs/MVP.md §4.7`, enforced by
+  `tests/test_architecture.py`.
 - Nothing unrequested: no extra abstractions, dead code, config, or dependencies.
 
 If the task changes no code: PASS with "no code in this task".
