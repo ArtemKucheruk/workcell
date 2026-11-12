@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, computed_field
 
 from .rounds import RoundSummary
-from .tasks import TaskItem
+from .tasks import Dep, TaskItem
 from .transcripts import TranscriptOut
 from .workspaces import WorkspaceOut
 
@@ -329,6 +329,9 @@ class TaskPage(BaseModel):
     approver: Approver | None
     history: list[HistoryEntry]
     transcripts: list[TranscriptOut]  # 030: the Agents per round, and Other agents for round null
+    blocked_by: list[Dep]  # 094: every link, done blockers too, by id
+    blocks: list[Dep]  # 094: the tasks waiting on this one, by id
+    project_tasks: list[Dep]  # 094 Q8: the project's other tasks by id, Add's candidates
 
 
 # --- GET /api/pages/tasks/{id}/review (§8 item 5, §8.2, §8.3) --------------------------

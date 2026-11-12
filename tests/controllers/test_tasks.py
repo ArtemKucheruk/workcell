@@ -168,6 +168,7 @@ def test_list_fresh_task(client, project):  # AC11
     assert listed(client, project) == [{
         "id": task_id, "title": "Export CSV", "status": "backlog", "stage": None, "round": None,
         "verdicts": None, "additions": None, "deletions": None, "run": None,
+        "blocked": False, "blocked_by": [], "blocks": [],  # 094 AC8
     }]
 
 
@@ -219,7 +220,8 @@ def test_get_fresh_task(client, project):  # AC16
     r = client.get(f"/api/tasks/{task_id}")
     assert r.status_code == 200
     assert r.json() == {"id": task_id, "title": "Export CSV", "status": "backlog", "stage": None,
-                        "branch": None, "rounds": [], "decisions": [], "run": None}
+                        "branch": None, "rounds": [], "decisions": [], "run": None,
+                        "blocked": False, "blocked_by": [], "blocks": []}  # 094 AC8
 
 
 def test_get_rounds(client, project):  # AC17
@@ -570,3 +572,144 @@ def test_delete_leaves_disk(client, project):  # 048 BE11
     assert delete(client, task_id).status_code == 204
     assert Path(log).is_file()
     assert (home / "transcripts" / copy).is_file()
+
+
+# --- 094: links between tasks (PUT/DELETE /api/tasks/{id}/blocked-by/{blocker}) ----------------------------
+
+
+def block(client, task_id, blocker_id):
+    return client.put(f"/api/tasks/{task_id}/blocked-by/{blocker_id}", headers=H)
+
+
+def unblock(client, task_id, blocker_id):
+    return client.delete(f"/api/tasks/{task_id}/blocked-by/{blocker_id}", headers=H)
+
+
+def links():
+    return sql("SELECT task_id, blocked_by_id FROM task_deps ORDER BY task_id, blocked_by_id")
+
+
+def dep(task_id, status="backlog"):
+    return {"id": task_id, "title": "t", "status": status}
+
+
+def test_block(client, project):  # 094 AC2
+    blocker, task = add_task(project), add_task(project)
+    r = block(client, task, blocker)
+    assert (r.status_code, r.json()) == (200, {"id": task, "blocked": True, "blocked_by": [dep(blocker)], "blocks": []})
+    assert links() == [(task, blocker)]
+
+
+def test_block_again(client, project):  # 094 AC3, Q2
+    blocker, task = add_task(project), add_task(project)
+    first = block(client, task, blocker).json()
+    r = block(client, task, blocker)
+    assert (r.status_code, r.json()) == (200, first)
+    assert links() == [(task, blocker)]
+
+
+def test_block_self(client, project):  # 094 AC4
+    task = add_task(project)
+    r = block(client, task, task)
+    assert (r.status_code, r.json()) == (422, {"detail": f"#{task} can't wait on itself"})
+    assert links() == []
+
+
+def test_block_refused(client, project):  # 094 AC5
+    other = add_task(connect(client, "/code/other"))
+    task = add_task(project)
+    r = block(client, task, other)
+    assert (r.status_code, r.json()) == (422, {
+        "detail": f"#{other} is in another project; a task waits only on tasks of its own project"})
+    r = block(client, task, 999)
+    assert (r.status_code, r.json()) == (422, {"detail": "no task #999"})
+    r = block(client, 998, task)
+    assert (r.status_code, r.json()) == (404, {"detail": "Task #998 not found"})
+    assert links() == []
+
+
+def test_block_cycle(client, project):  # 094 AC6
+    a, b, c = add_task(project), add_task(project), add_task(project)
+    assert block(client, a, b).status_code == block(client, b, c).status_code == 200  # a waits on b, b on c
+    r = block(client, c, a)
+    assert (r.status_code, r.json()) == (
+        422, {"detail": f"cycle: #{c} waits on #{a}, which waits on #{b}, which waits on #{c}"})
+    r = block(client, b, a)
+    assert (r.status_code, r.json()) == (422, {"detail": f"cycle: #{b} waits on #{a}, which waits on #{b}"})
+    assert links() == [(a, b), (b, c)]
+
+
+def test_unblock(client, project):  # 094 AC7, Q3
+    a, b, task = add_task(project), add_task(project, "done"), add_task(project)
+    block(client, task, a)
+    block(client, task, b)
+    r = unblock(client, task, a)
+    assert (r.status_code, r.json()) == (200, {"id": task, "blocked": False, "blocked_by": [dep(b, "done")],
+                                               "blocks": []})
+    assert links() == [(task, b)]
+    r = unblock(client, task, a)
+    assert (r.status_code, r.json()) == (404, {"detail": f"#{task} is not blocked by #{a}"})
+    assert unblock(client, 999, a).json() == {"detail": "Task #999 not found"}
+    assert links() == [(task, b)]
+
+
+def test_link_fields(client, project):  # 094 AC8
+    done, review, task = add_task(project, "done"), add_task(project, "review", stage="human_review"), add_task(project)
+    later = add_task(project, position=2.0)
+    for blocker in (review, done):
+        block(client, task, blocker)
+    block(client, later, task)
+    block(client, later, done)
+    got = client.get(f"/api/tasks/{task}").json()
+    assert (got["blocked"], got["blocked_by"], got["blocks"]) == (
+        True, [dep(done, "done"), dep(review, "review")], [later])
+    assert client.get(f"/api/tasks/{done}").json()["blocks"] == [task, later]
+    items = {i["id"]: i for i in listed(client, project)}
+    assert {k: items[task][k] for k in ("blocked", "blocked_by", "blocks")} == {
+        "blocked": True, "blocked_by": [dep(done, "done"), dep(review, "review")], "blocks": [later]}
+    assert (items[done]["blocked"], items[done]["blocked_by"], items[done]["blocks"]) == (False, [], [task, later])
+    assert items[later]["blocked"] is True  # #task isn't done
+    unblock(client, task, review)
+    assert client.get(f"/api/tasks/{task}").json()["blocked"] is False  # only a done blocker left
+
+
+def test_blocker_done_readies_dependent(client, project):  # 094 AC9
+    by_patch, task = add_task(project), add_task(project, position=2.0)
+    by_approve = add_task(project, "review", stage="human_review")
+    add_round(by_approve, 1)
+    block(client, task, by_patch)
+    block(client, task, by_approve)
+    before = row(task)
+    assert patch(client, by_patch, {"status": "done", "position": 1.0}).status_code == 200
+    assert client.get(f"/api/tasks/{task}").json()["blocked"] is True
+    assert client.post(f"/api/tasks/{by_approve}/approve", json={"body_md": ""}, headers=H).status_code == 200
+    assert client.get(f"/api/tasks/{task}").json()["blocked"] is False
+    assert [i["blocked"] for i in listed(client, project) if i["id"] == task] == [False]
+    assert row(task) == before  # derived on read: the dependent's row isn't written
+
+
+def test_create_blocked_by(client, project):  # 094 AC10
+    a, b = add_task(project), add_task(project)
+    r = create(client, project, blocked_by=[b, a, b])
+    assert r.status_code == 201
+    task = r.json()["id"]
+    assert links() == [(task, a), (task, b)]
+    other = add_task(connect(client, "/code/other"))
+    count = sql("SELECT COUNT(*) FROM tasks")
+    for blocker, detail in ((other, f"#{other} is in another project; a task waits only on tasks of its own project"),
+                            (999, "no task #999")):
+        r = create(client, project, blocked_by=[a, blocker])
+        assert (r.status_code, r.json()) == (422, {"detail": detail})
+    assert sql("SELECT COUNT(*) FROM tasks") == count
+    assert links() == [(task, a), (task, b)]
+
+
+def test_delete_drops_links(client, project):  # 094 AC11
+    a, b, c = add_task(project), add_task(project), add_task(project)
+    block(client, b, a)
+    block(client, c, b)
+    block(client, c, a)
+    assert delete(client, b).status_code == 204
+    assert links() == [(c, a)]
+    assert client.delete(f"/api/projects/{project}", headers=H).status_code == 204
+    assert links() == [] and sql("SELECT COUNT(*) FROM tasks") == [(0,)]

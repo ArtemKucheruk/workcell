@@ -15,10 +15,10 @@ const TASK = {
   branch: 'factory/12-rate-limit-login', worktree_path: WORKTREE,
   description_md: '', description_html: '', spec_md: null, spec_html: '',
 }
-/** 020's TaskPage view-model; `task` overrides fields of the fixture task. */
+/** 020's TaskPage view-model, with 094's links; `task` overrides fields of the fixture task. */
 const taskPage = (task = {}, extra = {}) => ({
   task: { ...TASK, ...task }, can_run: true, hint: null, run: null, takeover: null, rounds: [], approver: null,
-  history: [], transcripts: [], ...extra,
+  history: [], transcripts: [], blocked_by: [], blocks: [], project_tasks: [], ...extra,
 })
 /** RunDetail. */
 const run = (id, status, extra = {}) => ({
@@ -725,4 +725,78 @@ test('053 FE11 (Q7): at /tasks/12#run-log the run log <details id="run-log"> ren
   } finally {
     delete Element.prototype.scrollIntoView
   }
+})
+
+// --- 094: Blocked by and Blocks -------------------------------------------------------
+
+const dep = (id, title, status) => ({ id, title, status })
+/** #12 waits on #9 (done) and #10 (backlog), and #15 waits on #12; the project also has #11 and #14. */
+const LINKED = {
+  blocked_by: [dep(9, 'Add Redis', 'done'), dep(10, 'Login form', 'backlog')],
+  blocks: [dep(15, 'Lockout email', 'backlog')],
+  project_tasks: [dep(9, 'Add Redis', 'done'), dep(10, 'Login form', 'backlog'), dep(11, 'Audit log', 'review'),
+    dep(14, 'Captcha', 'in_progress'), dep(15, 'Lockout email', 'backlog')],
+}
+const select = () => within(section('Blocked by')).getByRole('combobox', { name: 'Wait on' })
+
+test('094 AC25: Blocked by follows Description with a row per link (id link, title, status pill, Remove), then Blocks; or their empty texts', async () => {
+  const linked = await open(taskPage({}, LINKED))
+  const regions = screen.getAllByRole('region').map((el) => el.getAttribute('aria-labelledby')).filter((id) => id?.startsWith('task-'))
+  expect(regions.slice(0, 4)).toEqual(['task-description', 'task-blocked-by', 'task-blocks', 'task-spec'])
+  const rowsOf = [...section('Blocked by').querySelectorAll('li')]
+  expect(rowsOf.map((li) => li.textContent)).toEqual(['#9Add RedisDoneRemove', '#10Login formBacklogRemove'])
+  const first = within(rowsOf[0])
+  expect(first.getByRole('link', { name: '#9' }).getAttribute('href')).toBe('/tasks/9')
+  expect(first.getByText('Done').className).toMatch(cls('text-success')) // StatusPill
+  expect(first.getByRole('button', { name: 'Remove #9' }).textContent).toBe('Remove')
+  const blocks = within(section('Blocks'))
+  expect(blocks.getByRole('link', { name: '#15' }).getAttribute('href')).toBe('/tasks/15')
+  expect(blocks.getByRole('listitem').textContent).toBe('#15 Lockout email')
+  expect(blocks.queryByRole('button')).toBeNull() // Q9: read-only
+  linked.unmount()
+  await open(taskPage())
+  expect(within(section('Blocked by')).getByText('No blockers.')).toBeTruthy()
+  expect(within(section('Blocks')).getByText('Blocks nothing.')).toBeTruthy()
+})
+
+test('094 AC26: Add picks from the project\'s other tasks minus the blockers, sends the PUT, and reloads; a refusal shows in the section and keeps the pick', async () => {
+  const cycle = 'cycle: #12 waits on #15, which waits on #12'
+  const { fetch, responses } = await open(taskPage({}, LINKED), {
+    'PUT /api/tasks/12/blocked-by/15': [422, { detail: cycle }],
+    'PUT /api/tasks/12/blocked-by/14': [200, { id: 12, blocked: true, blocked_by: [], blocks: [] }],
+  })
+  expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([
+    ['11', '#11 Audit log'], ['14', '#14 Captcha'], ['15', '#15 Lockout email']])
+  const add = within(section('Blocked by')).getByRole('button', { name: 'Add' })
+  fireEvent.change(select(), { target: { value: '15' } })
+  fireEvent.click(add)
+  expect((await within(section('Blocked by')).findByRole('alert')).textContent).toBe(cycle)
+  expect(within(header()).queryByRole('alert')).toBeNull()
+  expect(select().value).toBe('15')
+  expect(loads(fetch)).toBe(1)
+  sent(fetch, 'PUT', '/api/tasks/12/blocked-by/15')
+  responses[`GET ${PAGE}`] = [200, taskPage({}, LINKED)]
+  fireEvent.change(select(), { target: { value: '14' } })
+  await waitFor(() => expect(add.disabled).toBe(false))
+  fireEvent.click(add)
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  sent(fetch, 'PUT', '/api/tasks/12/blocked-by/14')
+  expect(within(section('Blocked by')).queryByRole('alert')).toBeNull()
+})
+
+test('094 AC27: Remove sends the DELETE and reloads; a refusal shows in the section', async () => {
+  const gone = '#12 is not blocked by #10'
+  const { fetch, responses } = await open(taskPage({}, LINKED), {
+    'DELETE /api/tasks/12/blocked-by/10': [404, { detail: gone }],
+    'DELETE /api/tasks/12/blocked-by/9': [200, { id: 12, blocked: true, blocked_by: [], blocks: [] }],
+  })
+  fireEvent.click(within(section('Blocked by')).getByRole('button', { name: 'Remove #10' }))
+  expect((await within(section('Blocked by')).findByRole('alert')).textContent).toBe(gone)
+  expect(loads(fetch)).toBe(1)
+  sent(fetch, 'DELETE', '/api/tasks/12/blocked-by/10')
+  responses[`GET ${PAGE}`] = [200, taskPage({}, LINKED)]
+  fireEvent.click(within(section('Blocked by')).getByRole('button', { name: 'Remove #9' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  sent(fetch, 'DELETE', '/api/tasks/12/blocked-by/9')
+  expect(within(section('Blocked by')).queryByRole('alert')).toBeNull()
 })

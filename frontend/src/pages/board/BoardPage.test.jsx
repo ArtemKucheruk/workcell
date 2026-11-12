@@ -1133,3 +1133,62 @@ test('048 round-1 review-ui: + New task over an Edit, then Esc, gives focus to +
   closePopover(popover)
   expect(document.activeElement).toBe(plus)
 })
+
+// --- 094: blocked cards ------------------------------------------------------------------
+
+const dep = (id, status) => ({ id, title: `Task ${id}`, status })
+/** A card waiting on #12 (backlog), #13 (done), and #14 (in progress). */
+const blockedCard = (id, status, extra = {}) =>
+  card(id, status, { blocked: true, blocked_by: [dep(12, 'backlog'), dep(13, 'done'), dep(14, 'in_progress')], blocks: [], ...extra })
+/** The card's badge: the line with the lock, or null. */
+const badge = (id) => cardEl(id).querySelector('svg')?.closest('p') ?? null
+/** An element's text without the tooltips in it. */
+function visible(el) {
+  const copy = el.cloneNode(true)
+  for (const tip of copy.querySelectorAll('[role="tooltip"]')) tip.remove()
+  return copy.textContent
+}
+
+test('094 AC22: a blocked card in Backlog, In progress, or Review shows a hidden lock and Blocked by its open blockers, muted without opacity', async () => {
+  await open(board({
+    backlog: [blockedCard(15, 'backlog')],
+    in_progress: [blockedCard(16, 'in_progress', { stage: 'build' })],
+    review: [blockedCard(17, 'review', { stage: 'human_review', waiting: true })],
+  }))
+  for (const id of [15, 16, 17]) {
+    const line = badge(id)
+    expect(line.querySelector('svg').getAttribute('aria-hidden')).toBe('true')
+    expect(visible(line)).toBe('Blocked by #12, #14') // #13 is done
+    expect(cardEl(id).className).toMatch(cls('bg-raised'))
+    expect(cardEl(id).className).not.toMatch(cls('bg-surface'))
+    expect(cardEl(id).className).not.toMatch(/(^|\s)opacity-/)
+    expect(line.className).not.toMatch(/opacity-/)
+  }
+  expect(within(cardEl(15)).getByRole('button', { name: 'Run' }).disabled).toBe(false) // Q10: the server's 409 decides
+})
+
+test('094 AC23: each blocker id links to its task; its title and status are the link\'s description, in the DOM, shown on hover or focus', async () => {
+  await open(board({ backlog: [blockedCard(15, 'backlog')] }))
+  const links = within(badge(15)).getAllByRole('link')
+  expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([['#12', '/tasks/12'], ['#14', '/tasks/14']])
+  const tips = links.map((a) => document.getElementById(a.getAttribute('aria-describedby')))
+  expect(tips.map((tip) => tip.textContent)).toEqual(['Task 12 · Backlog', 'Task 14 · In progress'])
+  for (const [i, tip] of tips.entries()) {
+    expect(tip.getAttribute('role')).toBe('tooltip')
+    expect(links[i].parentElement.contains(tip)).toBe(true) // its group, which hover or focus within reveals
+    for (const name of ['invisible', 'group-hover:visible', 'group-focus-within:visible']) expect(tip.className).toMatch(cls(name))
+  }
+  expect(within(badge(15)).getByRole('link', { name: '#12' })).toBe(links[0]) // the name stays the id
+})
+
+test('094 AC24: a ready card and every Done card show no badge and keep the surface look', async () => {
+  await open(board({
+    backlog: [card(15, 'backlog', { blocked: false, blocked_by: [dep(13, 'done')], blocks: [] })],
+    done: [blockedCard(18, 'done')],
+  }))
+  for (const id of [15, 18]) {
+    expect(badge(id)).toBeNull()
+    expect(cardEl(id).textContent).not.toContain('Blocked by')
+    expect(cardEl(id).className).toMatch(cls('bg-surface'))
+  }
+})

@@ -36,7 +36,7 @@ def test_schema_has_every_table_and_index():  # AC10
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
               "decisions", "events", "transcripts", "factories", "claude_accounts",
-              "context_items"}  # 030 AC15, 051 BE1, 056, 057 BE1
+              "context_items", "task_deps"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094
     assert {("table", t) for t in tables} <= rows
     assert {("index", "one_active_run"), ("index", "one_active_account")} <= rows
 
@@ -130,6 +130,24 @@ def test_startup_adds_factory_sync_columns():  # 058 BE27, Q10
     schema = (Path(db.__file__).with_name("schema.sql")).read_text()
     projects = schema[schema.index("CREATE TABLE IF NOT EXISTS projects"):schema.index("CREATE TABLE IF NOT EXISTS tasks")]
     assert "factory_mark TEXT," in projects and "factory_error TEXT)" in projects
+
+
+def test_startup_adds_task_deps():  # 094 AC1
+    start_app()
+    with closing(db.connect()) as conn, conn:  # a factory.db from before 094: no task_deps, one task
+        conn.execute("DROP TABLE task_deps")
+        conn.execute("INSERT INTO workspaces (id, name, created_at) VALUES (1, 'w', ?)", (NOW,))
+        conn.execute("INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at)"
+                     " VALUES (1, 1, 'p', '/p', 'main', ?)", (NOW,))
+        conn.execute("INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)"
+                     " VALUES (1, 1, 't', 'backlog', 1, ?, ?)", (NOW, NOW))
+        before = conn.execute("SELECT * FROM tasks").fetchall()
+    start_app()
+    with closing(db.connect()) as conn:
+        columns = [(name, notnull, pk) for _, name, _, notnull, _, pk in conn.execute("PRAGMA table_info(task_deps)")]
+        assert columns == [("task_id", 1, 1), ("blocked_by_id", 1, 2)]
+        assert conn.execute("SELECT * FROM tasks").fetchall() == before
+        assert conn.execute("SELECT COUNT(*) FROM task_deps").fetchone() == (0,)
 
 
 TRANSCRIPT_COLUMNS = [  # 030 AC15: (name, type, notnull)

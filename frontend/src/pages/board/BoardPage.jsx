@@ -60,11 +60,55 @@ function Rounds({ card }) {
   )
 }
 
+/** 094: a padlock, drawn in currentColor; the text beside it carries the meaning. */
+function LockIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" fill="currentColor" className="mt-0.5 size-3.5 shrink-0">
+      <path d="M5 7V5a3 3 0 0 1 6 0v2h.5A1.5 1.5 0 0 1 13 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13.5v-5A1.5 1.5 0 0 1 4.5 7H5Zm1.5 0h3V5a1.5 1.5 0 0 0-3 0v2Z" />
+    </svg>
+  )
+}
+
+/**
+ * 094 AC22, AC23, Q7: a lock and `Blocked by #12, #14`, naming the blockers that aren't done. Each id links to its task;
+ * its `<title> · <Status>` is the link's description, always in the DOM, and shown above it on hover or focus. It
+ * appears at once, never animated, so reduced motion needs nothing more.
+ */
+function Blocked({ card }) {
+  const open = card.blocked_by.filter((b) => b.status !== 'done')
+  return (
+    <p className={`flex items-start gap-1.5 text-sm ${muted}`}>
+      <LockIcon />
+      <span>
+        {'Blocked by '}
+        {open.map((b, i) => (
+          <Fragment key={b.id}>
+            {i > 0 && ', '}
+            <span className="group relative">
+              <Link to={`/tasks/${b.id}`} draggable="false" aria-describedby={`blocker-${card.id}-${b.id}`}>
+                {`#${b.id}`}
+              </Link>
+              <span
+                id={`blocker-${card.id}-${b.id}`}
+                role="tooltip"
+                className="pointer-events-none invisible absolute bottom-full left-0 z-10 mb-1 w-max max-w-60 rounded-md border border-line bg-surface px-2 py-1 text-xs text-fg shadow-md group-focus-within:visible group-hover:visible"
+              >
+                {`${b.title} · ${LABELS[b.status] ?? b.status}`}
+              </span>
+            </span>
+          </Fragment>
+        ))}
+      </span>
+    </p>
+  )
+}
+
 // Q9: tokens only, each class in full for Tailwind's scanner. Hover darkens the ring; keyboard focus on the card's link or a
 // button in it (its Move menu too) thickens it in accent; the dragged card dims, fading (046 Q8). The drop line is the marked card's ::before
 // (the gap above it) or ::after (the gap below the last card), absolute in the 8 px gap, so it takes no room (FE6).
+// 094 Q6: the background and shadow are the Card's, so a blocked card can sit flat on the column's raised color instead
 const cardLook = [
-  'relative grid cursor-grab gap-1 rounded-md bg-surface p-3 shadow-sm ring-1 ring-line hover:shadow-md hover:ring-muted',
+  'relative grid cursor-grab gap-1 rounded-md p-3 ring-1 ring-line hover:shadow-md hover:ring-muted',
   'has-focus-visible:ring-2 has-focus-visible:ring-accent data-dragging:opacity-50 motion-safe:transition-opacity',
   'data-[drop=before]:before:absolute data-[drop=before]:before:inset-x-0 data-[drop=before]:before:-top-1.25 data-[drop=before]:before:h-0.5 data-[drop=before]:before:bg-accent',
   'data-[drop=after]:after:absolute data-[drop=after]:after:inset-x-0 data-[drop=after]:after:-bottom-1.25 data-[drop=after]:after:h-0.5 data-[drop=after]:after:bg-accent',
@@ -125,6 +169,8 @@ function MoveMenu({ card, moves, nudges, running, onEdit, onDelete }) {
 
 function Card({ card, canRun, onRun, moves, nudges, onEdit, onDelete, dragging, drop, onDragStart, onDragEnd }) {
   const running = card.status === 'in_progress' && card.run?.status === 'running'
+  // 094 Q6: every column but Done; the text keeps its tokens, which clear 4.5:1 on raised. Q10: Run stays enabled
+  const blocked = card.blocked && card.status !== 'done'
   const runButton = (label) => (
     <ActionButton action={() => onRun(card.id)} disabled={!canRun} className={smallButton} aria-describedby={`task-${card.id}`}>
       {label}
@@ -138,11 +184,12 @@ function Card({ card, canRun, onRun, moves, nudges, onEdit, onDelete, dragging, 
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       // 040: a space before ${, or Tailwind's scanner reads `ring-line$` and generates no ring-line
-      className={`${cardLook} ${card.escalated ? 'border-l-4 border-danger' : ''}`}
+      className={`${cardLook} ${blocked ? 'bg-raised' : 'bg-surface shadow-sm'} ${card.escalated ? 'border-l-4 border-danger' : ''}`}
     >
       <Link id={`task-${card.id}`} to={`/tasks/${card.id}`} draggable="false" className="font-medium">
         {`#${card.id} ${card.title}`}
       </Link>
+      {blocked && <Blocked card={card} />}
       <StatusLine card={card} running={running} retry={runButton('Retry')} />
       <Rounds card={card} />
       {running && card.started_at && (

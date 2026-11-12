@@ -16,3 +16,11 @@ export const editTask = (id, { title, description_md }) =>
 
 /** 048: resolves to null on the 204. */
 export const deleteTask = (id) => api(`/api/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' })
+
+const blockedBy = (id, blocker) => `/api/tasks/${encodeURIComponent(id)}/blocked-by/${encodeURIComponent(blocker)}`
+
+/** 094: task `id` waits on task `blocker` from now on; resolves to <Deps>. */
+export const blockTask = (id, blocker) => api(blockedBy(id, blocker), { method: 'PUT' })
+
+/** 094: task `id` stops waiting on task `blocker`; resolves to <Deps>. */
+export const unblockTask = (id, blocker) => api(blockedBy(id, blocker), { method: 'DELETE' })

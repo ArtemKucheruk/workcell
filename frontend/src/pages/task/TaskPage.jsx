@@ -2,17 +2,17 @@ import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useParams } from 'react-router'
 import { taskPage } from '../../api/pages.js'
 import { runLog, runTask, stopRun } from '../../api/runs.js'
-import { exportUrl } from '../../api/tasks.js'
+import { blockTask, exportUrl, unblockTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
-import { TaskState } from '../../components/Badge.jsx'
+import { StatusPill, TaskState } from '../../components/Badge.jsx'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
-import { button, muted, popover, smallButton } from '../../components/styles.js'
+import { button, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -80,6 +80,85 @@ function ExportPopover({ id }) {
         Download
       </a>
     </div>
+  )
+}
+
+/**
+ * 094 AC25–AC27: Blocked by lists every link, done ones too, each with Remove; Add picks from a native <select> of the
+ * project's other tasks (Q8), minus the current blockers. Both reload the page; a refusal shows inside the section, and
+ * the select, uncontrolled, keeps its pick through it and through polls. Blocks is read-only (Q9).
+ */
+function Dependencies({ page, onChange }) {
+  const { task, blocked_by: blockers, blocks } = page
+  const [error, setError] = useState(null)
+  const picked = useRef(null)
+  const taken = new Set(blockers.map((b) => b.id))
+  const choices = page.project_tasks.filter((t) => !taken.has(t.id))
+  async function change(call) {
+    setError(null)
+    try {
+      await call()
+    } catch (err) {
+      setError(err)
+      return
+    }
+    onChange()
+  }
+  return (
+    <>
+      <section aria-labelledby="task-blocked-by">
+        <h2 id="task-blocked-by">Blocked by</h2>
+        {blockers.length ? (
+          <ul className="grid gap-1">
+            {blockers.map((b) => (
+              <li key={b.id} className="flex flex-wrap items-center gap-2">
+                <Link to={`/tasks/${b.id}`}>{`#${b.id}`}</Link>
+                <span className="wrap-anywhere">{b.title}</span>
+                <StatusPill status={b.status} />
+                <ActionButton
+                  action={() => change(() => unblockTask(task.id, b.id))}
+                  className={smallButton}
+                  aria-label={`Remove #${b.id}`}
+                >
+                  Remove
+                </ActionButton>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={muted}>No blockers.</p>
+        )}
+        {choices.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {/* htmlFor, not a wrapping label, so the picked option isn't part of the select's name */}
+            <label htmlFor="blocker-pick">Wait on</label>
+            <select id="blocker-pick" ref={picked} className={`${field} max-w-full`}>
+              {choices.map((t) => (
+                <option key={t.id} value={t.id}>{`#${t.id} ${t.title}`}</option>
+              ))}
+            </select>
+            <ActionButton action={() => change(() => blockTask(task.id, picked.current.value))} className={smallButton}>
+              Add
+            </ActionButton>
+          </div>
+        )}
+        {error && <ErrorMessage error={error} />}
+      </section>
+      <section aria-labelledby="task-blocks">
+        <h2 id="task-blocks">Blocks</h2>
+        {blocks.length ? (
+          <ul className="grid gap-1">
+            {blocks.map((d) => (
+              <li key={d.id}>
+                <Link to={`/tasks/${d.id}`}>{`#${d.id}`}</Link> <span className="wrap-anywhere">{d.title}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={muted}>Blocks nothing.</p>
+        )}
+      </section>
+    </>
   )
 }
 
@@ -294,6 +373,7 @@ export function TaskPage() {
         <h2 id="task-description">Description</h2>
         {blank(task.description_md) ? <p className={muted}>No description.</p> : <Markdown html={task.description_html} />}
       </section>
+      <Dependencies page={page} onChange={refresh} />
       <section aria-labelledby="task-spec">
         <h2 id="task-spec">Spec</h2>
         {blank(task.spec_md) ? <p className={muted}>No spec yet.</p> : <Markdown html={task.spec_html} />}

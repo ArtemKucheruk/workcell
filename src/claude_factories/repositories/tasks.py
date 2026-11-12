@@ -89,7 +89,8 @@ class TasksRepo:
         )
 
     def delete(self, task_id: int) -> None:
-        """048: §5.1's cascade, which the schema lacks (foreign_keys is on), children before parents."""
+        """048: §5.1's cascade, which the schema lacks (foreign_keys is on), children before parents. 094: task_deps
+        has its own ON DELETE CASCADE, so the task's links go on both sides."""
         rounds = "SELECT id FROM rounds WHERE task_id = :task"
         for statement in (
             "DELETE FROM transcripts WHERE task_id = :task",
@@ -191,13 +192,50 @@ class TasksRepo:
             (now, task_id),
         ).rowcount > 0
 
-    def top_backlog(self, project_id: int) -> int | None:
-        """012 Q13: the top backlog card's id, lowest position then lowest id."""
-        found = self.conn.execute(
-            "SELECT id FROM tasks WHERE project_id = ? AND status = 'backlog' ORDER BY position, id LIMIT 1",
+    def top_backlog(self, project_id: int) -> sqlite3.Row | None:
+        """012 Q13, 094: the top ready backlog card (lowest position, then lowest id) as id and ready 1; with every
+        card blocked, the top card with ready 0 (Q5); None for an empty backlog."""
+        return self.conn.execute(
+            "SELECT id, NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks b ON b.id = d.blocked_by_id"
+            " WHERE d.task_id = t.id AND b.status != 'done') AS ready FROM tasks t"
+            " WHERE project_id = ? AND status = 'backlog' ORDER BY ready DESC, position, id LIMIT 1",
             (project_id,),
         ).fetchone()
-        return found[0] if found else None
+
+    def blockers(self, task_id: int) -> list[sqlite3.Row]:
+        """094: the tasks `task_id` waits on, as id, title, and status, by id."""
+        return self.conn.execute(
+            "SELECT b.id, b.title, b.status FROM task_deps d JOIN tasks b ON b.id = d.blocked_by_id"
+            " WHERE d.task_id = ? ORDER BY b.id",
+            (task_id,),
+        ).fetchall()
+
+    def dependents(self, task_id: int) -> list[sqlite3.Row]:
+        """094: the tasks waiting on `task_id`, as id, title, and status, by id."""
+        return self.conn.execute(
+            "SELECT t.id, t.title, t.status FROM task_deps d JOIN tasks t ON t.id = d.task_id"
+            " WHERE d.blocked_by_id = ? ORDER BY t.id",
+            (task_id,),
+        ).fetchall()
+
+    def project_links(self, project_id: int) -> list[sqlite3.Row]:
+        """094: every link in the project (links never cross projects) as task_id and its blocker's id, title, and
+        status, by task_id then blocker id: the board's fields and the cycle walk's edges in one query."""
+        return self.conn.execute(
+            "SELECT d.task_id, b.id, b.title, b.status FROM task_deps d JOIN tasks b ON b.id = d.blocked_by_id"
+            " WHERE b.project_id = ? ORDER BY d.task_id, b.id",
+            (project_id,),
+        ).fetchall()
+
+    def link(self, task_id: int, blocker_id: int) -> None:
+        """094 Q2: a link that's there already stays the one row."""
+        self.conn.execute("INSERT OR IGNORE INTO task_deps (task_id, blocked_by_id) VALUES (?, ?)",
+                          (task_id, blocker_id))
+
+    def unlink(self, task_id: int, blocker_id: int) -> bool:
+        """094: False when there was no such link."""
+        return self.conn.execute("DELETE FROM task_deps WHERE task_id = ? AND blocked_by_id = ?",
+                                 (task_id, blocker_id)).rowcount > 0
 
     def for_page(self, task_id: int) -> sqlite3.Row | None:
         """The task row both task pages show; `path` is for Review's commit hint. 047: the workspace is the

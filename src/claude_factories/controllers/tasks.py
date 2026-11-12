@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request
 
-from ..dto.tasks import TaskBody, TaskCreated, TaskItem, TaskOut, TaskPatch, TaskPatched, TaskSubmitted
+from ..dto.tasks import TaskBody, TaskCreated, TaskDeps, TaskItem, TaskOut, TaskPatch, TaskPatched, TaskSubmitted
 from ..handlers import tasks as handler
 from ..server.deps import Projects, Reviews, Rounds, Runs, Tasks
 
@@ -34,3 +34,15 @@ def patch_task(task_id: int, body: TaskPatch, tasks: Tasks, runs: Runs) -> TaskP
 @router.delete("/api/tasks/{task_id}", status_code=204)
 def delete_task(task_id: int, tasks: Tasks, runs: Runs) -> None:
     handler.delete_task(tasks, runs, task_id)
+
+
+@router.put("/api/tasks/{task_id}/blocked-by/{blocker_id}")
+def block(task_id: int, blocker_id: int, tasks: Tasks) -> TaskDeps:
+    """094: the task page's Add, fctl task block."""
+    return handler.block(tasks, task_id, blocker_id)
+
+
+@router.delete("/api/tasks/{task_id}/blocked-by/{blocker_id}")
+def unblock(task_id: int, blocker_id: int, tasks: Tasks) -> TaskDeps:
+    """094: the task page's Remove, fctl task unblock."""
+    return handler.unblock(tasks, task_id, blocker_id)

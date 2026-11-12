@@ -30,7 +30,7 @@ def server(monkeypatch):
             self.end_headers()
             self.wfile.write(body)
 
-        do_GET = do_POST = do_PUT = do_PATCH = handle_one
+        do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = handle_one
 
         def log_message(self, *args):
             pass

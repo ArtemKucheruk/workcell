@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, FiniteFloat, field_validator
+from pydantic import BaseModel, FiniteFloat, computed_field, field_validator
 
 from .rounds import RoundBody, RoundSummary
 
@@ -13,6 +13,26 @@ class TaskBody(BaseModel):
     title: str
     description_md: str = ""
     submit: RoundBody | None = None
+    blocked_by: list[int] = []  # 094 AC10: the tasks it waits on, each stored once
+
+
+class Dep(BaseModel):
+    """094: a task on the other side of a link."""
+    id: int
+    title: str
+    status: str
+
+
+class TaskDeps(BaseModel):
+    """094: PUT and DELETE /api/tasks/{id}/blocked-by/{blocker}'s body, and the link fields of every task."""
+    id: int
+    blocked_by: list[Dep]  # every link, done blockers too, by id
+    blocks: list[int]  # the dependents' ids, ascending
+
+    @computed_field
+    def blocked(self) -> bool:
+        """Worked out on read, never stored: while any blocker isn't done."""
+        return any(d.status != "done" for d in self.blocked_by)
 
 
 class TaskPatch(BaseModel):
@@ -37,8 +57,7 @@ class RunOut(BaseModel):
     status: str
 
 
-class TaskItem(BaseModel):
-    id: int
+class TaskItem(TaskDeps):
     title: str
     status: str
     stage: str | None
@@ -58,8 +77,7 @@ class DecisionOut(BaseModel):
     created_at: str
 
 
-class TaskOut(BaseModel):
-    id: int
+class TaskOut(TaskDeps):
     title: str
     status: str
     stage: str | None

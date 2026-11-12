@@ -36,6 +36,11 @@ CREATE TABLE tasks (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
   import_key TEXT UNIQUE);                -- factory:<job id> for a job fctl import-factory brought in, else NULL
 
+CREATE TABLE task_deps (                  -- task_id waits on blocked_by_id, a task of the same project
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  blocked_by_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,  -- deleting either task drops the link
+  PRIMARY KEY (task_id, blocked_by_id));
+
 CREATE TABLE runs (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES tasks(id),
@@ -138,7 +143,10 @@ CREATE TABLE context_items (              -- a project's context cards and group
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 ```
 Relations: workspace 1–n project 1–n task. A project has 0–n factories and 0–n context items, removed with it
-(ON DELETE CASCADE). A context item of kind group holds 0–n items one level deep, removed with it.
+(ON DELETE CASCADE). A task waits on 0–n tasks of its own project (`task_deps`, no self links, no cycles); it is
+**blocked** while any of them isn't `done` and **ready** otherwise. Blocked is worked out on read, never stored, so
+a blocker moving to done readies its dependents without writing them. Deleting a task, or its project, drops its
+links on both sides. A context item of kind group holds 0–n items one level deep, removed with it.
 A task has 1–n runs and 1–n rounds. A run uses the active Claude account's config dir, and no column records
 which. A run has 0–n
 transcripts. A round has
@@ -506,18 +514,37 @@ rounds yes → builder                        rounds no → approver
 GET  /api/projects/3/tasks
 ← 200 [{"id":12,"title":"Rate-limit login endpoint","status":"review","stage":"human_review",
         "round":2,"verdicts":{"security":"PASS","ux":"PASS","ui":"PASS","code":"PASS"},
-        "additions":126,"deletions":9,"run":null}]
+        "additions":126,"deletions":9,"run":null,
+        "blocked":false,"blocked_by":[{"id":9,"title":"Add Redis","status":"done"}],"blocks":[15]}]
+  # every task carries <Deps>' blocked, blocked_by, and blocks (below)
 
 POST /api/projects/3/tasks                                        (+ New task, fctl task add)
-→ {"title":"Rate-limit login endpoint","description_md":"Max 5 failed logins/min per IP."}
+→ {"title":"Rate-limit login endpoint","description_md":"Max 5 failed logins/min per IP.","blocked_by":[9]}
 ← 201 {"id":12,"status":"backlog"}
   # optional "submit": {...} creates round 1 and puts the task straight in review (§7.4)
+  # optional "blocked_by": the tasks it waits on, each stored once; one refused as in PUT blocked-by below
+  #   (422 "no task #99", "#30 is in another project; …") adds no task
 
 GET  /api/tasks/12                                                (fctl round, task page)
 ← 200 {"id":12,"status":"in_progress","stage":"agent_review","branch":"factory/12-rate-limit-login",
        "rounds":[{"n":1,"trigger":"initial","files":4,"additions":118,"deletions":9,
                   "verdicts":{"security":"CHANGES","ux":"PASS","ui":"pending","code":"PASS"}}],
-       "decisions":[],"run":{"id":41,"status":"running"}}
+       "decisions":[],"run":{"id":41,"status":"running"},"blocked":false,"blocked_by":[],"blocks":[]}
+
+PUT  /api/tasks/15/blocked-by/12                                  (task page Add, fctl task block)
+← 200 <Deps> {"id":15,"blocked":true,"blocked_by":[{"id":12,"title":"Rate-limit login endpoint",
+              "status":"backlog"}],"blocks":[]}
+  # #15 waits on #12 from now on; again is a 200 with the same body and still one row
+  # blocked_by: every link as {id, title, status}, done blockers too, by id · blocks: the dependents' ids,
+  #   ascending · blocked: true while any blocker's status isn't done; worked out on read, never stored
+  # 404 {"detail":"Task #15 not found"}
+  # 422 {"detail":"#15 can't wait on itself"} · {"detail":"no task #99"} ·
+  #     {"detail":"#30 is in another project; a task waits only on tasks of its own project"} ·
+  #     {"detail":"cycle: #15 waits on #12, which waits on #14, which waits on #15"}; none adds a row
+
+DELETE /api/tasks/15/blocked-by/12                                (task page Remove, fctl task unblock)
+← 200 <Deps> after the removal
+  # 404 {"detail":"Task #15 not found"} · 404 {"detail":"#15 is not blocked by #12"}
 
 GET  /api/tasks/12/context?round=1 | ?feedback=1                  (fctl show) → text/markdown
 ← 200 "# #12 Rate-limit login endpoint\n## Spec\n…\n## Round 1 — build notes\n…\n## Verdicts\n…"
@@ -550,9 +577,14 @@ POST /api/tasks/12/run                                            (Run, Retry, f
   # 409 if any run is active, auth isn't claude.ai, or the factory isn't committed on default_branch;
   #   a legacy factory (MVP §3.2 step 4): 409 {"detail":"this repo runs the file-based /factory loop:
   #   Create factory with Overwrite, then commit it on main"}
+  # a blocked task, checked after the review/done 409 and before the factory check, for Run, Retry,
+  #   Run next, and rework's run alike: 409 {"detail":"#15 is blocked by #12, #14; finish those first or
+  #   remove the dependency"}, naming only the blockers that aren't done; no run row, no worktree
 
 POST /api/projects/3/run-next                                     (Run next, fctl run next)
 ← 202 {"task_id":14,"run_id":42}                                  # 404 if backlog empty; 409 as run
+  # the top ready backlog card (lowest position, then id), skipping blocked ones; with every card blocked,
+  #   409 {"detail":"all backlog tasks are blocked: #15 waits on #12, #14"}: the top card and its open blockers
 
 POST /api/runs/41/stop
 ← 200 {"id":41,"status":"stopped"}
@@ -702,13 +734,17 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 factory's 8 paths exist on disk now, in its order; [] when none),
                                                 board cards with stage, branch,
                                                 description_md, chips per round, +/−, waiting, escalated, stalled,
+                                                blocked, blocked_by, and blocks (as §6.2's task list, 094),
                                                 and factory_error (058): first syncs factory/ (§6.1's {}) when
                                                 board.json's or backlog.md's mtime or size changed; a refusal is
                                                 stored as factory_error, not a failed page, until a file changes.
                                                 With Sec-Fetch-Site: cross-site it skips the sync (MVP §4.5)
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
-                                                and takeover command, transcripts (as GET /api/tasks/{id}/transcripts)
+                                                and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
+                                                094: blocked_by and blocks, each [{id, title, status}] by id, and
+                                                project_tasks, the project's other tasks as {id, title, status} by
+                                                id (the Blocked by section's Add choices)
 GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; timeline; files with diff rows carrying
                                                 side, old/new line, kind, text, and the path:side:line anchor; inline
                                                 comments

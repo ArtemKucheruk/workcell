@@ -90,6 +90,11 @@ def test_rules(cmd: str) -> tuple[str, ...]:
     return tuple(rules)
 
 
+def open_blockers(tasks: TasksRepo, task_id: int) -> str:
+    """094: the task's blockers that aren't done, as `#12, #14` by id; "" when it's ready."""
+    return ", ".join(f"#{b['id']}" for b in tasks.blockers(task_id) if b["status"] != "done")
+
+
 def refuse_if_running(runs: RunsRepo):
     """§4.4: one run at a time, across all projects."""
     if run := runs.any_running():
@@ -125,10 +130,11 @@ def worktree(tx, git: Git, task) -> str:
 
 
 def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStarted:
-    """Q2's order: 404, run active, status (Q1), factory (Q12), worktree (Q4), auth; then the run row,
-    the move, and the event in one transaction, then the spawn (§4.4). `base_url` becomes FCTL_URL: the
+    """Q2's order: 404, run active, status (Q1), blockers (094), factory (Q12), worktree (Q4), auth; then the run
+    row, the move, and the event in one transaction, then the spawn (§4.4). `base_url` becomes FCTL_URL: the
     controller's loopback URL on the server's own port (028 Q5). 056: the auth check and the spawn run in
-    the active account's CLAUDE_CONFIG_DIR; with none active, the run is refused without calling claude (Q7)."""
+    the active account's CLAUDE_CONFIG_DIR; with none active, the run is refused without calling claude (Q7).
+    094 Q1, Q4: a blocked task is refused outright, for Run, Retry, Run next, and rework's run alike."""
     with tx() as conn:
         task = TasksRepo(conn).for_run(task_id)
     if task is None:
@@ -137,6 +143,10 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
         refuse_if_running(RunsRepo(conn))
     if task["status"] in ("review", "done"):
         raise Conflict(f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
+    with tx() as conn:
+        waits_on = open_blockers(TasksRepo(conn), task_id)
+    if waits_on:
+        raise Conflict(f"#{task_id} is blocked by {waits_on}; finish those first or remove the dependency")
     branch = task["default_branch"]
     if hint := factory_hint(factory_state(git, task["path"], branch), branch):
         raise Conflict(hint)
@@ -206,14 +216,18 @@ def finish(tx, run_id: int, proc, log_path: Path):
 
 
 def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> RunNextOut:
-    """Q13: the top backlog card, lowest position then lowest id, through all of start's checks."""
+    """Q13: the top backlog card, lowest position then lowest id, through all of start's checks. 094: the top
+    ready one; with every card blocked, a 409 naming the top card's open blockers (Q5)."""
     with tx() as conn:
         if not ProjectsRepo(conn).exists(project_id):
             raise NotFound()
-        top = TasksRepo(conn).top_backlog(project_id)
+        tasks = TasksRepo(conn)
+        top = tasks.top_backlog(project_id)
+        if top is not None and not top["ready"]:
+            raise Conflict(f"all backlog tasks are blocked: #{top['id']} waits on {open_blockers(tasks, top['id'])}")
     if top is None:
         raise NotFound("backlog is empty")
-    return RunNextOut(task_id=top, run_id=start(tx, git, claude, top, base_url).run_id)
+    return RunNextOut(task_id=top["id"], run_id=start(tx, git, claude, top["id"], base_url).run_id)
 
 
 def stop(tx, claude: Claude, run_id: int) -> StopOut:

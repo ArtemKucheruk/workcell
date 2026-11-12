@@ -160,6 +160,8 @@ def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Run
         "rounds": [r | obj({"build_md": page["build"].get(r["n"])}, "build") | {"posted": posted(page, r["n"])}
                    for r in page["rounds"]],
         "approver": obj(page["approver"], "body"), "history": objs(page["history"]),
+        "blocked_by": objs(page["blocked_by"]), "blocks": objs(page["blocks"]),
+        "project_tasks": objs(page["project_tasks"]),
     }
 
 

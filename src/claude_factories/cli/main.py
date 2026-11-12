@@ -6,7 +6,7 @@ from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
 from .commands.runs import run
 from .commands.submit import diff, submit
-from .commands.tasks import export, import_bundle, task_add
+from .commands.tasks import export, import_bundle, task_add, task_block, task_ids
 from .output import fail
 
 SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
@@ -92,8 +92,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = task_commands.add_parser("add", help="add a task to the bottom of the current repo's Backlog")
     p.add_argument("title", help='the task\'s title, e.g. "Rate-limit login endpoint"')
     p.add_argument("--description", metavar="TEXT", help='its markdown description; "-" reads it from stdin')
+    p.add_argument("--blocked-by", metavar="IDS", type=task_ids,
+                   help="the tasks it waits on, comma-separated, e.g. 12,14")
     p.add_argument("--run", action="store_true", help="then start a factory run on it")
     p.set_defaults(func=task_add)
+    for name, method, help_text in (("block", "PUT", "make a task wait on another task of its project"),
+                                    ("unblock", "DELETE", "stop a task waiting on another task")):
+        p = task_commands.add_parser(name, help=help_text)
+        p.add_argument("id", type=int, help="the task that waits")
+        p.add_argument("--by", type=int, required=True, help="the task it waits on")
+        p.set_defaults(func=task_block, method=method)
     p = commands.add_parser("run", help="start a factory run on a task, or on the top of this repo's Backlog")
     p.add_argument("target", help='a task id, or "next"')
     p.set_defaults(func=run, usage_error=p.error)
