@@ -319,8 +319,17 @@ class RunDetail(BaseModel):
     started_at: str
 
 
+class PagePr(BaseModel):
+    """093 AC36: from the task row and local git only, never gh."""
+    url: str | None
+    number: int | None  # parsed from url
+    can_create: bool
+    hint: str | None  # why Create PR is off; null when it's on or a PR exists
+
+
 class TaskPage(BaseModel):
     task: PageTask
+    pr: PagePr | None  # 093: null for a standalone task
     can_run: bool
     hint: str | None
     run: RunDetail | None  # Q9: the latest run, whatever its status
@@ -384,6 +393,7 @@ class TimelineEntry(BaseModel):
 
 class ReviewPage(BaseModel):
     task: ReviewTask
+    pr: PagePr | None  # 093
     rounds: list[ReviewRound]
     selected: RoundSummary | None
     approver: Approver | None

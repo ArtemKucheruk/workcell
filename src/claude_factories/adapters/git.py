@@ -1,6 +1,8 @@
 """git, run as a subprocess with an argument list (docs/MVP.md §4.1)."""
 
 import os
+import shlex
+import shutil
 import subprocess
 import tempfile
 from typing import Protocol
@@ -11,6 +13,28 @@ from ..domain.errors import Failed
 DIFF_FLAGS = ("-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
               "--dst-prefix=b/")
 SEED_IDENTITY = ("-c", "user.name=fctl seed", "-c", "user.email=seed@example.com", "-c", "commit.gpgsign=false")
+LOCAL_TIMEOUT = 60  # 093 AC3: local git, as git_ok
+NETWORK_TIMEOUT = 120  # 093 AC3: push, fetch, and every gh call
+MERGE_METHOD = "--merge"  # 093 AC4: a merge commit, as this repo's history has
+Ran = tuple[int, str, str]  # 093: (exit code, stdout, stderr)
+
+
+def ran(argv: list[str], timeout: int, env: dict | None = None) -> Ran:
+    """093 AC3: argv's (exit code, stdout, stderr), as text. A timeout is Failed("<tool> timed out: <command>"), a
+    tool that won't start Failed("can't run <tool>: …"): 500s with a detail, never a stack trace."""
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, errors="replace", env=env, timeout=timeout,
+                           stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise Failed(f"{argv[0]} timed out: {shlex.join(argv)}") from None
+    except (OSError, ValueError) as e:  # not on PATH, a NUL in an argument
+        raise Failed(f"can't run {argv[0]}: {e}") from None
+    return r.returncode, r.stdout, r.stderr
+
+
+def gh(*args: str) -> Ran:
+    """093 AC3: gh with prompts off, so a missing login fails instead of waiting on stdin."""
+    return ran(["gh", *args], NETWORK_TIMEOUT, os.environ | {"GH_PROMPT_DISABLED": "1", "GH_NO_UPDATE_NOTIFIER": "1"})
 
 
 def git_stdout(root: str, *args: str) -> tuple[bytes | None, str | None]:
@@ -53,6 +77,25 @@ class Git(Protocol):
     def commit_all(self, path: str, message: str) -> None: ...
     def capture(self, path: str) -> tuple[str, str]: ...
     def merge_parent(self, root: str, pr: int) -> str | None: ...
+    # 093: Create PR and Merge PR. Each answers (exit code, stdout, stderr); the handler words the refusal
+    def origin_url(self, root: str) -> Ran: ...
+    def porcelain(self, path: str) -> Ran: ...
+    def ahead(self, path: str, base: str) -> Ran: ...
+    def commit(self, path: str, message: str) -> Ran: ...
+    def push(self, path: str, branch: str) -> Ran: ...
+    def fetch(self, root: str) -> Ran: ...
+    def head_branch(self, root: str) -> Ran: ...
+    def is_ancestor(self, root: str, ref: str, of: str) -> Ran: ...
+    def ff_merge(self, root: str, ref: str) -> Ran: ...
+    def remove_worktree(self, root: str, path: str) -> Ran: ...
+    def delete_branch(self, root: str, branch: str) -> Ran: ...
+    def delete_remote_branch(self, root: str, branch: str) -> Ran: ...
+    def gh_installed(self) -> bool: ...
+    def gh_auth(self) -> Ran: ...
+    def pr_list(self, repo: str, branch: str) -> Ran: ...
+    def pr_create(self, repo: str, base: str, branch: str, title: str, body: str) -> Ran: ...
+    def pr_view(self, repo: str, number: int) -> Ran: ...
+    def pr_merge(self, repo: str, number: int) -> Ran: ...
 
 
 class SubprocessGit:
@@ -128,3 +171,72 @@ class SubprocessGit:
                             "--format=%P", "-n", "1")
         parents = out.split() if out else []
         return parents[0].decode() if parents else None
+
+    # --- 093: Create PR and Merge PR, run only when I click one (docs/MVP.md §3.7) ---------------
+
+    def origin_url(self, root: str) -> Ran:
+        """AC11: origin as configured, without insteadOf rewriting (which `git remote get-url` would apply)."""
+        return ran(["git", "-C", root, "config", "--get", "remote.origin.url"], LOCAL_TIMEOUT)
+
+    def porcelain(self, path: str) -> Ran:
+        """Q7: untracked files are listed too, so they count as changes; ignored ones aren't."""
+        return ran(["git", "-C", path, "status", "--porcelain"], LOCAL_TIMEOUT)
+
+    def ahead(self, path: str, base: str) -> Ran:
+        """AC16: how many commits HEAD has that `base` doesn't."""
+        return ran(["git", "-C", path, "rev-list", "--count", f"{base}..HEAD", "--"], LOCAL_TIMEOUT)
+
+    def commit(self, path: str, message: str) -> Ran:
+        """AC15, Q4: everything not ignored, committed as the configured identity with hooks and signing as set:
+        no -c overrides, no --no-verify, and the message exactly `message`. The add's result if it fails."""
+        added = ran(["git", "-C", path, "add", "-A"], LOCAL_TIMEOUT)
+        return added if added[0] else ran(["git", "-C", path, "commit", "-q", "-m", message], LOCAL_TIMEOUT)
+
+    def push(self, path: str, branch: str) -> Ran:
+        """AC18: never forced."""
+        return ran(["git", "-C", path, "push", "-u", "origin", branch], NETWORK_TIMEOUT)
+
+    def fetch(self, root: str) -> Ran:
+        return ran(["git", "-C", root, "fetch", "origin"], NETWORK_TIMEOUT)
+
+    def head_branch(self, root: str) -> Ran:
+        """AC32: the checked-out branch's name; empty on a detached HEAD."""
+        return ran(["git", "-C", root, "branch", "--show-current"], LOCAL_TIMEOUT)
+
+    def is_ancestor(self, root: str, ref: str, of: str) -> Ran:
+        """AC31: exit 0 when `ref` is an ancestor of `of` (or the same commit), 1 when not."""
+        return ran(["git", "-C", root, "merge-base", "--is-ancestor", ref, of], LOCAL_TIMEOUT)
+
+    def ff_merge(self, root: str, ref: str) -> Ran:
+        return ran(["git", "-C", root, "merge", "--ff-only", ref], LOCAL_TIMEOUT)
+
+    def remove_worktree(self, root: str, path: str) -> Ran:
+        """AC34: no --force, so a dirty worktree stays."""
+        return ran(["git", "-C", root, "worktree", "remove", path], LOCAL_TIMEOUT)
+
+    def delete_branch(self, root: str, branch: str) -> Ran:
+        """AC34: -d, so an unmerged branch stays."""
+        return ran(["git", "-C", root, "branch", "-d", branch], LOCAL_TIMEOUT)
+
+    def delete_remote_branch(self, root: str, branch: str) -> Ran:
+        return ran(["git", "-C", root, "push", "origin", "--delete", branch], NETWORK_TIMEOUT)
+
+    def gh_installed(self) -> bool:
+        return shutil.which("gh") is not None
+
+    def gh_auth(self) -> Ran:
+        return gh("auth", "status", "--hostname", "github.com")
+
+    def pr_list(self, repo: str, branch: str) -> Ran:
+        """AC21: the branch's open PRs as JSON [{number, url}]."""
+        return gh("pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number,url")
+
+    def pr_create(self, repo: str, base: str, branch: str, title: str, body: str) -> Ran:
+        """AC19: prints the new PR's URL."""
+        return gh("pr", "create", "--repo", repo, "--base", base, "--head", branch, "--title", title, "--body", body)
+
+    def pr_view(self, repo: str, number: int) -> Ran:
+        return gh("pr", "view", str(number), "--repo", repo, "--json", "number,url,state,statusCheckRollup")
+
+    def pr_merge(self, repo: str, number: int) -> Ran:
+        return gh("pr", "merge", str(number), "--repo", repo, MERGE_METHOD)

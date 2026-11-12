@@ -28,16 +28,17 @@ and what is waiting on me.
   into workspaces.
 - The app runs the factory loop. A **Run** button spawns headless Claude Code, and the
   app's API and database are the only place factory state lives.
-- Every change gets a GitHub-style review in the app. Claude never commits; I commit and
-  push myself.
+- Every change gets a GitHub-style review in the app. Agents never commit. I commit and
+  merge, either by hand or with the **Create PR** and **Merge PR** buttons (§3.7).
 - Installing the factory into a repo takes one click.
 - Runs use my Claude Pro subscription through my claude.ai login. They never bill per token
   through the API.
 
 ### Non-goals (MVP)
 - Multiple users, auth, cloud hosting.
-- Claude committing, pushing, merging, or opening GitHub PRs.
-- Any GitHub API integration.
+- Agents committing, pushing, merging, or opening GitHub PRs. Only my click on Create PR or
+  Merge PR runs git or `gh` writes.
+- Any GitHub API integration beyond those two buttons, which go through my `gh` login.
 - Editing code in the browser.
 
 ---
@@ -183,14 +184,32 @@ reviewer agents' inline comments show up in the same place.
    task returns to Review.
 
 ### 3.7 Approve and commit
-1. **Approve** records my `APPROVE` decision and moves the task to done.
-2. The page then shows the commands. The app never runs them.
+Agents never commit. I commit and merge either by hand (step 2) or with the buttons (steps 3–4).
+1. **Approve** records my `APPROVE` decision and moves the task to done. Approving runs no git.
+2. The review page shows the commands under **Commit it yourself**, for doing it by hand:
    ```
    cd .claude/worktrees/12-rate-limit-login
    git add -A && git commit -m "Rate-limit login endpoint"
    git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
    git worktree remove .claude/worktrees/12-rate-limit-login
    ```
+3. Or **Create PR** (task and review pages, docs/ui.md §8.2), for a done task whose worktree has
+   uncommitted changes or commits beyond the default branch. It runs `git add -A` and
+   `git commit -m <task title>` in the worktree under my git identity (hooks and signing apply; no
+   attribution), `git push -u origin <branch>` (never forced), then `gh pr create` against the
+   default branch, or reuses the branch's open PR. The body holds the description's first
+   paragraph, the round count, the latest verdicts, the approver's decision, and the task's app
+   URL. The PR's URL is saved on the task, with a `PR #N opened` event. The page then shows the
+   PR link, its state, and its checks, polled every 10 s while it is open.
+4. **Merge PR** asks in a dialog, then runs `gh pr merge <n> --merge` (a merge commit). Then
+   `git fetch origin` in the main checkout and `git merge --ff-only origin/<default>`, but only
+   when the checkout is on the default branch, clean (untracked files count), and behind origin;
+   otherwise it skips that and says why. Last, `git worktree remove`, `git branch -d`, and
+   `git push origin --delete <branch>`, none forced; a failed step is a note, and the rest still
+   run.
+
+Both buttons need `origin` on github.com and `gh` installed and logged in (`gh auth status`).
+Every refusal shows git's or gh's own message.
 
 ### 3.8 Submit without the factory
 Any Claude Code session, in any connected repo: `/factory-submit` creates a task straight in
@@ -312,7 +331,9 @@ is never touched. The branch is created but gets no commits.
 **Changes vs FACTORY.md**
 - There is no merge to main. Approver APPROVE moves the task to review · human_review, and
   only my Approve moves it to done.
-- Claude makes no commits. git write commands are denied in runs (§4.4).
+- Agents make no commits. git write commands are denied in runs (§4.4). I commit and merge by
+  hand or with Create PR and Merge PR (§3.7), which the app runs only on my click, through the
+  git adapter with timeouts (60 s local, 120 s for push, fetch, and gh).
 - `board.json`, `dashboard.html`, and `jobs/*` are replaced by the DB and the API. Stages
   are set only by the orchestrator through `fctl stage`, the same way the orchestrator was
   the only writer of `board.json`.
@@ -444,6 +465,8 @@ Single user and no auth still need these, because the API can start processes th
   Disconnect are refused while a run is active. §4.3's env stripping and auth check are unchanged.
 - **Image.** The backend image has git, uv, node, and the `claude` CLI. Anything else a
   project's test command needs goes in a custom image, set in compose.override.yaml.
+- **No gh login.** The image has no `gh` and no GitHub login, so Create PR and Merge PR (§3.7)
+  are refused in Docker with a hint to create the PR from the host.
 - **Takeover.** The session lives in the container, so §4.4's takeover command becomes
   `docker compose exec -w <worktree> -e CLAUDE_CONFIG_DIR=<account dir> backend claude --resume <session-id>`.
 
@@ -512,7 +535,8 @@ Rules:
 - Subscription-only runs with the auth check (§4.3), one run at a time.
 - Headless runs in worktrees, rework on Request changes, and takeover by
   `claude --resume`.
-- Review page: rounds, verdict chips, unified diff, inline comments, Approve, Request changes.
+- Review page: rounds, verdict chips, unified diff, inline comments, Approve, Request changes,
+  and Create PR / Merge PR (§3.7).
 - `/factory-submit` for changes made without the factory.
 - Dashboard, project code page with README landing and a branch picker.
 - The local safety measures in §4.5.
@@ -529,8 +553,7 @@ Rules:
 - Detecting the usage-limit error so the card shows the reset time.
 - Switching agents to sonnet if opus uses up Pro limits too fast.
 - A warning on Approve if the worktree changed since the latest snapshot.
-- A worktree cleanup button that checks the branch is committed first, push / open a GitHub
-  PR from the app, and commit from the app.
+- A worktree cleanup button for tasks that never go through Merge PR.
 - SSE instead of polling, and desktop notifications when a review is waiting.
 - Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
@@ -548,12 +571,13 @@ Rules:
 2. "max 2 rounds" means at most 2 agent review rounds per run. If round 2 still has CHANGES,
    the approver runs and must ESCALATE. A rework run gets its own 2.
 3. The factory files must be committed on `default_branch` before the first Run, because
-   worktrees branch from it. The app shows the command and never commits.
+   worktrees branch from it. The app shows the command; agents never commit, and the app
+   commits only a task's worktree, and only when I click Create PR (§3.7).
 4. Worktrees live in `<repo>/.claude/worktrees/<id>-<slug>` (Claude Code's own convention).
    The app adds `.claude/worktrees/` to `.git/info/exclude`, so the main checkout stays clean
    and no tracked file changes.
-5. Each round's snapshot is the full diff against `HEAD`, which is the base, because Claude
-   never commits.
+5. Each round's snapshot is the full diff against `HEAD`, which is the base, because agents
+   never commit.
 6. Rework starts a fresh session. The builder gets its context from the app, not from
    memory.
 7. Runs use my Claude Pro subscription through my normal Claude Code login, checked as
@@ -563,7 +587,8 @@ Rules:
    all runs.
 9. Task ids are global integers, the runs' reviewer set is fixed (security, ux, ui, code), and
    the port is 4545. A factory design's reviewers are stored in its graph only.
-10. Approve means done, whether or not I have committed yet.
+10. Approve means done, whether or not I have committed yet. I commit and merge by hand or
+    with Create PR and Merge PR.
 11. The app runs on macOS or Linux. `git`, `claude`, and `uv` are on PATH.
 12. Reviewer agents may leave inline comments, and they render like mine.
 13. Polling every 3 s is fast enough. There are no websockets in the MVP.

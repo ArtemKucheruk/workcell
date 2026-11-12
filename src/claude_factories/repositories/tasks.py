@@ -19,10 +19,11 @@ TILE_TASKS = {status: f"t.status = '{status}'" for status in Status} | {
     "running": "t.id IN (SELECT task_id FROM runs WHERE status = 'running')",
     "done_week": f"t.done_at >= {days_ago(7)}",
 }
-# §5.1, Q8: one row per event, round, verdict, decision, and comment, labelled; ties sort by kind, then id.
+# §5.1, Q8: one row per event (093 AC37: with its note), round, verdict, decision, and comment, labelled; ties sort
+# by kind, then id.
 TIMELINE = """
 SELECT created_at, 0 AS kind, id, IIF(from_status IS NULL, 'created · ', '') || COALESCE(to_status, '')
-  || COALESCE(' · ' || stage, '') AS label, NULL AS body_md FROM events WHERE task_id = :task
+  || COALESCE(' · ' || stage, '') || COALESCE(' · ' || note, '') AS label, NULL AS body_md FROM events WHERE task_id = :task
 UNION ALL SELECT created_at, 1, id, 'round ' || n, NULL FROM rounds WHERE task_id = :task
 UNION ALL SELECT v.created_at, 2, v.rowid, v.reviewer || ' ' || v.verdict || ' · round ' || r.n, NULL
   FROM verdicts v JOIN rounds r ON r.id = v.round_id WHERE r.task_id = :task
@@ -115,11 +116,12 @@ class TasksRepo:
         )
 
     def add_event(self, task_id: int, actor: str, from_status: str | None, to_status: str, stage: str | None,
-                  now: str) -> None:
+                  now: str, note: str | None = None) -> None:
+        """093 AC37: `note`, e.g. `PR #71 opened`, ends the timeline label."""
         self.conn.execute(
-            "INSERT INTO events (task_id, actor, from_status, to_status, stage, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, actor, from_status, to_status, stage, now),
+            "INSERT INTO events (task_id, actor, from_status, to_status, stage, note, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, actor, from_status, to_status, stage, note, now),
         )
 
     def by_import_key(self, key: str) -> sqlite3.Row | None:
@@ -134,18 +136,21 @@ class TasksRepo:
     def put_imported(self, task_id: int | None, row: dict) -> int:
         """031 Q3: a new imported task (task_id None), or the fields a rerun rewrites. A None position keeps
         the stored one. `row`: project_id, import_key, title, description_md, spec_md, status, stage, position,
-        branch, created_at, updated_at, done_at."""
+        branch, created_at, updated_at, done_at, and optionally pr_url (093 AC2), which a rerun only ever sets, so a
+        PR opened from the app stays."""
+        row = {"pr_url": None} | row
         if task_id is None:
             return self.conn.execute(
                 "INSERT INTO tasks (project_id, import_key, title, description_md, spec_md, status, stage, position,"
-                " branch, created_at, updated_at, done_at) VALUES (:project_id, :import_key, :title, :description_md,"
-                " :spec_md, :status, :stage, :position, :branch, :created_at, :updated_at, :done_at)",
+                " branch, created_at, updated_at, done_at, pr_url) VALUES (:project_id, :import_key, :title,"
+                " :description_md, :spec_md, :status, :stage, :position, :branch, :created_at, :updated_at, :done_at,"
+                " :pr_url)",
                 row,
             ).lastrowid
         self.conn.execute(
             "UPDATE tasks SET title = :title, description_md = :description_md, spec_md = :spec_md, status = :status,"
             " stage = :stage, position = COALESCE(:position, position), branch = :branch, done_at = :done_at,"
-            " updated_at = :updated_at WHERE id = :id",
+            " updated_at = :updated_at, pr_url = COALESCE(:pr_url, pr_url) WHERE id = :id",
             row | {"id": task_id},
         )
         return task_id
@@ -242,11 +247,23 @@ class TasksRepo:
         project's now, joined at read time, for the breadcrumb."""
         return self.conn.execute(
             "SELECT t.id, t.project_id, p.name AS project, p.workspace_id, w.name AS workspace, t.title,"
-            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, p.path, p.default_branch"
-            " FROM tasks t JOIN projects p ON p.id = t.project_id JOIN workspaces w ON w.id = p.workspace_id"
+            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, t.pr_url, p.path,"
+            " p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id"
+            " JOIN workspaces w ON w.id = p.workspace_id"
             " WHERE t.id = ?",
             (task_id,),
         ).fetchone()
+
+    def for_pr(self, task_id: int) -> sqlite3.Row | None:
+        """093: what Create PR and Merge PR need: the task, its PR, and its project's path and default branch."""
+        return self.conn.execute(
+            "SELECT t.id, t.title, t.description_md, t.status, t.branch, t.worktree_path, t.pr_url, p.path,"
+            " p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
+            (task_id,),
+        ).fetchone()
+
+    def set_pr_url(self, task_id: int, url: str, now: str) -> None:
+        self.conn.execute("UPDATE tasks SET pr_url = ?, updated_at = ? WHERE id = ?", (url, now, task_id))
 
     def timeline(self, task_id: int) -> list[sqlite3.Row]:
         return self.conn.execute(TIMELINE, {"task": task_id}).fetchall()

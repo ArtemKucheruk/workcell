@@ -34,7 +34,9 @@ CREATE TABLE tasks (
   position REAL NOT NULL,                 -- order within column; Run next = lowest backlog
   branch TEXT, worktree_path TEXT,        -- NULL for standalone (/factory-submit) tasks
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
-  import_key TEXT UNIQUE);                -- factory:<job id> for a job fctl import-factory brought in, else NULL
+  import_key TEXT UNIQUE,                 -- factory:<job id> for a job fctl import-factory brought in, else NULL
+  pr_url TEXT);                           -- 093: the task's GitHub PR, set by Create PR (§6.3) or an imported
+                                          --   job's `pr` that names a /pull/N; NULL until then. db.init() adds it
 
 CREATE TABLE task_deps (                  -- task_id waits on blocked_by_id, a task of the same project
   task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -648,6 +650,46 @@ POST /api/tasks/12/request-changes                                (Request chang
 POST /api/tasks/12/approve                                        (Approve, fctl approve)
 → {"body_md":""}
 ← 200 {"status":"done","commit_hint":"cd .claude/worktrees/12-rate-limit-login && git add -A && …"}
+
+POST /api/tasks/12/pr                                             (Create PR, 093; no fctl command)
+← 200 {"number":71,"url":"https://github.com/o/r/pull/71","reused":false}
+  # a done factory task: `git add -A` and `git commit -m <title>` in the worktree when it has changes (my
+  #   identity, no -c overrides, the title is the whole message), `git push -u origin <branch>` (never forced),
+  #   then `gh pr create --repo <owner/repo> --base <default_branch> --head <branch> --title <title> --body …`,
+  #   or the branch's open PR (`gh pr list … --state open`), reused: true. pr_url is saved with an event (me,
+  #   done → done, note `PR #71 opened`) only when it changes. Task read and writes are separate transactions
+  # 404 {"detail":"Task #99 not found"}
+  # 409, before any git or gh call: "#12 is not done; approve it first" · "#12 has no branch; commit it
+  #     yourself" · "the worktree <path> is gone"
+  # 409 "<repo> has no origin remote; add one with git remote add origin …" · "origin isn't on GitHub
+  #     (<host>); push and open the PR yourself" (origin read raw with git config, github.com only)
+  # 409 "gh is not installed: install GitHub CLI, then run gh auth login" · "gh is not logged in: run gh
+  #     auth login. <gh's line>"; under Docker both end " (the backend image has no gh login; create the PR
+  #     from your host)"
+  # 409 "nothing to commit: #12's branch has no changes beyond main" · "git push was rejected: ! [rejected] …"
+  #     · gh pr create's first stderr line (the commit and push stay; pr_url stays NULL)
+  # 500 "<git|gh> timed out: <command>": 60 s for local git, 120 s for push, fetch, and gh
+
+GET  /api/tasks/12/pr                                             (the PR line, polled every 10 s while OPEN)
+← 200 {"number":71,"url":"https://github.com/o/r/pull/71","state":"OPEN","checks":{"passed":2,"failed":1,"pending":0}}
+  # `gh pr view 71 --repo o/r --json number,url,state,statusCheckRollup`; state is OPEN, MERGED, or CLOSED.
+  #   checks: SUCCESS/NEUTRAL/SKIPPED passed; FAILURE/ERROR/CANCELLED/TIMED_OUT/ACTION_REQUIRED/STARTUP_FAILURE
+  #   failed; anything else (no conclusion yet, PENDING) pending
+  # 404 "#12 has no PR" · 409 gh's message, or the gh refusals above
+
+POST /api/tasks/12/pr/merge                                       (Merge PR, 093, after a dialog)
+← 200 {"number":71,"state":"MERGED","notes":["Fast-forwarded main to origin/main.",
+       "Removed the worktree /code/api/.claude/worktrees/12-rate-limit-login.",
+       "Deleted the local branch factory/12-rate-limit-login.","Deleted the remote branch factory/12-rate-limit-login."]}
+  # an OPEN PR: `gh pr merge 71 --repo o/r --merge` (MERGE_METHOD), then an event (me, done → done, note
+  #   `PR #71 merged`); an already MERGED one skips it. Then `git fetch origin` in the main checkout and
+  #   `git merge --ff-only origin/<default>` only when it is on the default branch, `git status --porcelain`
+  #   is empty, and HEAD is an ancestor of origin's, else a "Skipped updating main: …" note. Then `git worktree
+  #   remove`, `git branch -d`, and `git push origin --delete`, none forced: a failed step is a note with git's
+  #   line ("Worktree already removed.", "Remote branch already deleted."), and the rest still run
+  # 409 "#12 is not done; approve it first" · "#12 has no PR; Create PR first" · "PR #71 is closed; reopen
+  #     it on GitHub" · the origin and gh refusals above · gh pr merge's message (checks failing, conflicts,
+  #     branch protection), with nothing fetched, cleaned up, or recorded
 ```
 
 ### 6.4 SPA routes and page data
@@ -744,10 +786,16 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
                                                 094: blocked_by and blocks, each [{id, title, status}] by id, and
                                                 project_tasks, the project's other tasks as {id, title, status} by
-                                                id (the Blocked by section's Add choices)
-GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; timeline; files with diff rows carrying
-                                                side, old/new line, kind, text, and the path:side:line anchor; inline
-                                                comments
+                                                id (the Blocked by section's Add choices); 093: pr (below)
+GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; pr; timeline; files with diff rows
+                                                carrying side, old/new line, kind, text, and the path:side:line
+                                                anchor; inline comments
+  # 093: pr is {"url","number","can_create","hint"}, null for a standalone task. number is parsed from url's
+  #   /pull/N (null with no url). can_create: a done task with no pr_url whose worktree exists and has
+  #   uncommitted changes or commits beyond default_branch. Otherwise hint is "Approve it first.", "The
+  #   worktree is gone.", or "Nothing to commit beyond main.", and null once a PR exists. Local git only, never
+  #   gh; the PR's state comes from GET /api/tasks/{id}/pr (§6.3). The history's labels end " · <note>" for
+  #   an event with a note, e.g. "done · PR #71 opened"
 GET  /api/pages/projects/{id}/code?path=&branch=  the project {id, name, path, workspace_id, workspace, web_url}, also on a
                                                 git failure; tree, README or file, branch (the checked-out one),
                                                 branches (local names, then origin/<name> with no local twin)

@@ -761,3 +761,44 @@ test('AC35: a failed first load shows only its alert; a failed reload after an a
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 Rate-limit login')
   expect(section('Rounds')).toBeTruthy()
 })
+
+// --- 093: Create PR and Merge PR ------------------------------------------------------------
+
+const PR_URL = 'https://github.com/o/r/pull/71'
+const DONE = { status: 'done', stage: null, commit_hint: HINT }
+
+test('093 AC39: Create PR sits on the title row beside Review changes, disabled with its hint; none with pr null', async () => {
+  const { unmount } = await open(reviewPage({}, { pr: { url: null, number: null, can_create: false, hint: 'Approve it first.' } }))
+  const buttons = within(titleRow()).getAllByRole('button').map((b) => b.textContent)
+  expect(buttons).toEqual(['Create PR', 'Review changes ▾'])
+  expect(headerButton('Create PR').disabled).toBe(true)
+  expect(within(titleRow()).getByText('Approve it first.')).toBeTruthy()
+  unmount()
+  await open(reviewPage({}, { pr: null }))
+  expect(within(titleRow()).queryByRole('button', { name: 'Create PR' })).toBeNull()
+})
+
+test('093 AC40: Create PR posts /pr, then the page refetches and the PR link appears', async () => {
+  const pr = { url: null, number: null, can_create: true, hint: null }
+  const { fetch, responses } = await open(reviewPage(DONE, { pr }), '/tasks/12/review', {
+    'POST /api/tasks/12/pr': [200, { number: 71, url: PR_URL, reused: false }],
+    'GET /api/tasks/12/pr': [200, { number: 71, url: PR_URL, state: 'OPEN', checks: { passed: 1, failed: 0, pending: 0 } }],
+  })
+  responses[`GET ${PAGE}`] = [200, reviewPage(DONE, { pr: { url: PR_URL, number: 71, can_create: false, hint: null } })]
+  fireEvent.click(headerButton('Create PR'))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  const [call] = fetch.mock.calls.filter(([u, init]) => u === '/api/tasks/12/pr' && init?.method === 'POST')
+  expect(call[1].headers['X-Requested-By']).toBe('fctl')
+  const link = await within(titleRow()).findByRole('link', { name: /^PR #71/ })
+  expect(link.getAttribute('href')).toBe(PR_URL)
+  expect(await within(titleRow()).findByText(/checks: 1 passed, 0 failed, 0 pending/)).toBeTruthy()
+  expect(headerButton('Merge PR').disabled).toBe(false)
+})
+
+test('093 AC45: Commit it yourself stays, saying the buttons above also commit and merge; Approve no longer says the app never runs git', async () => {
+  await open(reviewPage(DONE, { pr: { url: null, number: null, can_create: true, hint: null } }))
+  expect(within(commit()).getByText('Done. Commit and merge with the buttons above, or run these in a terminal.')).toBeTruthy()
+  const note = document.getElementById('decision-approve-note').textContent
+  expect(note).not.toMatch(/never runs git/)
+  expect(note).toMatch(/Create PR and Merge PR/)
+})

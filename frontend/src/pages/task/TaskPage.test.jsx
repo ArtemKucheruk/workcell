@@ -800,3 +800,67 @@ test('094 AC27: Remove sends the DELETE and reloads; a refusal shows in the sect
   sent(fetch, 'DELETE', '/api/tasks/12/blocked-by/9')
   expect(within(section('Blocked by')).queryByRole('alert')).toBeNull()
 })
+
+// --- 093: Create PR and Merge PR ------------------------------------------------------------
+
+const PR_URL = 'https://github.com/o/r/pull/71'
+const PR_STATE = '/api/tasks/12/pr'
+const DONE = { status: 'done', stage: null }
+const noPr = (extra = {}) => ({ url: null, number: null, can_create: false, hint: null, ...extra })
+
+test('093 AC39: Create PR sits on the title row, disabled with its hint beside it; none with pr null', async () => {
+  const { unmount } = await open(taskPage({}, { pr: noPr({ hint: 'Approve it first.' }) }))
+  expect(runButtons()).toEqual(['Create PR'])
+  expect(within(titleRow()).getByRole('button', { name: 'Create PR' }).disabled).toBe(true)
+  expect(within(titleRow()).getByText('Approve it first.')).toBeTruthy()
+  unmount()
+  await open(taskPage({}, { pr: null }))
+  expect(runButtons()).toEqual([])
+})
+
+test('093 AC40: Create PR posts /pr and reloads the page; a refusal shows in an alert beside it, enabled again', async () => {
+  const detail = 'gh is not logged in: run gh auth login'
+  const { fetch, responses } = await open(taskPage(DONE, { pr: noPr({ can_create: true }) }), {
+    [`POST ${PR_STATE}`]: [409, { detail }],
+  })
+  const create = within(titleRow()).getByRole('button', { name: 'Create PR' })
+  fireEvent.click(create)
+  expect((await within(titleRow()).findByRole('alert')).textContent).toBe(detail)
+  await waitFor(() => expect(create.disabled).toBe(false))
+  expect(loads(fetch)).toBe(1)
+  responses[`POST ${PR_STATE}`] = [200, { number: 71, url: PR_URL, reused: false }]
+  responses[`GET ${PR_STATE}`] = [200, { number: 71, url: PR_URL, state: 'MERGED', checks: { passed: 0, failed: 0, pending: 0 } }]
+  responses[`GET ${PAGE}`] = [200, taskPage(DONE, { pr: { url: PR_URL, number: 71, can_create: false, hint: null } })]
+  fireEvent.click(create)
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  const posts = sends(fetch, 'POST', PR_STATE)
+  expect(posts.map(([, init]) => init.headers['X-Requested-By'])).toEqual(['fctl', 'fctl']) // the refused one, then this
+  expect(await within(titleRow()).findByRole('link', { name: /^PR #71/ })).toBeTruthy()
+  expect(await within(titleRow()).findByText('Merged.')).toBeTruthy()
+  expect(within(titleRow()).getByRole('button', { name: 'Merge PR' }).disabled).toBe(true)
+})
+
+test('093 AC37, AC44: after a merge the notes show, the page reloads, and the history shows the note', async () => {
+  const pr = { url: PR_URL, number: 71, can_create: false, hint: null }
+  const notes = ['Fast-forwarded main to origin/main.', 'Worktree already removed.']
+  const { fetch, responses } = await open(taskPage(DONE, { pr }), {
+    [`GET ${PR_STATE}`]: [200, { number: 71, url: PR_URL, state: 'OPEN', checks: { passed: 0, failed: 0, pending: 0 } }],
+    [`POST ${PR_STATE}/merge`]: [200, { number: 71, state: 'MERGED', notes }],
+  })
+  const merge = await waitFor(() => {
+    const button = within(titleRow()).getByRole('button', { name: 'Merge PR' })
+    expect(button.disabled).toBe(false)
+    return button
+  })
+  responses[`GET ${PAGE}`] = [200, taskPage(DONE, {
+    pr, history: [{ created_at: '2026-10-18T01:02:00Z', label: 'done · PR #71 merged' }],
+  })]
+  fireEvent.click(merge)
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Merge PR' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  sent(fetch, 'POST', `${PR_STATE}/merge`)
+  expect(screen.queryByRole('dialog')).toBeNull()
+  const status = screen.getAllByRole('status').find((el) => el.querySelector('li'))
+  expect([...status.querySelectorAll('li')].map((li) => li.textContent)).toEqual(notes)
+  expect(await within(section('Status history')).findByText(/done · PR #71 merged/)).toBeTruthy()
+})

@@ -221,6 +221,25 @@ INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_
             conn.execute(TASK, (NOW, NOW, "factory:001-a"))
 
 
+def test_old_db_gets_pr_url():  # 093 AC1
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + f"""
+CREATE TABLE tasks (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), title TEXT NOT NULL,
+  description_md TEXT NOT NULL DEFAULT '', spec_md TEXT, status TEXT NOT NULL, stage TEXT, position REAL NOT NULL,
+  branch TEXT, worktree_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
+  import_key TEXT UNIQUE);
+INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)
+  VALUES (1, 1, 'old', 'done', 1, '{NOW}', '{NOW}'), (2, 1, 'old2', 'backlog', 2, '{NOW}', '{NOW}');
+""")
+    db.init()
+    db.init()  # a second init skips the ALTER
+    with closing(db.connect()) as conn:
+        assert [c[1] for c in conn.execute("PRAGMA table_info(tasks)")].count("pr_url") == 1
+        assert conn.execute("SELECT id, pr_url FROM tasks").fetchall() == [(1, None), (2, None)]
+
+
 FACTORY_COLUMNS = [("id", "INTEGER", 0), ("project_id", "INTEGER", 1), ("name", "TEXT", 1), ("graph", "TEXT", 1),
                    ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1)]  # 051 BE1: (name, type, notnull)
 

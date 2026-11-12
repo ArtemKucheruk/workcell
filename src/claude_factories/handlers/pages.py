@@ -30,6 +30,7 @@ from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_files, factory_hint, factory_state
 from .factory_import import sync
+from .pull_requests import page_pr
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
 from .runs import log_lines
@@ -381,7 +382,7 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
     """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, 094's Blocked by
     and Blocks, spec, rounds with build notes, verdict popovers, and agents (030), the approver's latest decision,
     the status history, the takeover command (Q9), and the run log. 094 Q8: `project_tasks`, the project's other
-    tasks by id, are Add's candidates."""
+    tasks by id, are Add's candidates. 093 AC36: `pr`, Create PR's state from local git."""
     found = page_task(tasks, task_id)
     run = runs.latest_detail(task_id)
     factory = factory_state(git, found["path"], found["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
@@ -397,7 +398,8 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
     return {
         "run": run, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
         "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4
-        "task": found, "rounds": summaries(rounds, reviews, task_id), "posted": posted_verdicts(reviews, task_id),
+        "task": found, "pr": page_pr(git, found),
+        "rounds": summaries(rounds, reviews, task_id), "posted": posted_verdicts(reviews, task_id),
         "build": {r["n"]: r["build_md"] for r in rounds.all(task_id)},
         "reviewers": REVIEWERS, "approver": reviews.approver_latest(task_id),
         "history": [e for e in tasks.timeline(task_id) if e["kind"] == 0],  # Q8: events only
@@ -439,10 +441,10 @@ def review_files(rounds: RoundsRepo, reviews: ReviewsRepo, round_id: int, target
     return files
 
 
-def review(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, n: str, tab: str,
+def review(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, git: Git, task_id: int, n: str, tab: str,
            path: str = "", side: str = "", line: str = "") -> dict:
     """§8.2's Conversation tab, or with `tab=files` §8.3's Files changed for the picked round (008).
-    `path`, `side`, and `line` open the inline comment form under that line (008 Q1)."""
+    `path`, `side`, and `line` open the inline comment form under that line (008 Q1). 093 AC36: `pr`."""
     found_task = page_task(tasks, task_id)
     listed = summaries(rounds, reviews, task_id)
     found = None  # AC11: with no rounds, `latest` is a page without a selector, not find_round's 404
@@ -452,7 +454,7 @@ def review(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id: 
     tab = "files" if tab == "files" else "conversation"  # 008 Q4
     files = review_files(rounds, reviews, found["id"], (path, side, line)) if tab == "files" and found else []
     return {
-        "task": found_task, "rounds": listed, "selected": next((r for r in listed if r["n"] == picked), None),
+        "task": found_task, "pr": page_pr(git, found_task), "rounds": listed, "selected": next((r for r in listed if r["n"] == picked), None),
         "posted": posted_verdicts(reviews, task_id), "reviewers": REVIEWERS,
         "approver": reviews.approver_latest(task_id), "timeline": tasks.timeline(task_id),
         "tab": tab, "files": files, "tree": file_tree(files),

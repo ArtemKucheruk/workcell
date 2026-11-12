@@ -166,10 +166,10 @@ def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Run
 
 
 @router.get("/api/pages/tasks/{task_id}/review")
-def review(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews,
+def review(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, git: GitAdapter,
            n: str = Query("latest", alias="round")) -> dto.ReviewPage:
-    """Q6: always with the round's files, whatever tab the SPA shows."""
-    page = handler.review(tasks, rounds, reviews, task_id, n, "files")
+    """Q6: always with the round's files, whatever tab the SPA shows. 093: git for `pr`."""
+    page = handler.review(tasks, rounds, reviews, git, task_id, n, "files")
     return page | {
         "task": obj(page["task"], "description", "spec") | {"commit_hint": page["commit_hint"]},
         "rounds": [r | {"posted": posted(page, r["n"])} for r in page["rounds"]],

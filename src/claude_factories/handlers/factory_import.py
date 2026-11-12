@@ -20,6 +20,7 @@ from ..domain.errors import Conflict, DomainError, Invalid, NotFound, TooLarge
 from ..dto.factory import ImportedJob, ImportOut
 from ..lib.backlog import ID, parse
 from ..lib.patch import split_patch
+from ..lib.pull_request import PULL  # Q6; 093 Q3 shares it
 from ..lib.transcript import agent_types, first_prompt, folder_name
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
@@ -31,7 +32,6 @@ from .transcripts import SESSION, agent_type, jsonl, load, store
 
 ROUND_DIR = re.compile(r"round-([1-9][0-9]{0,8})")
 FEEDBACK = re.compile(r"feedback-([1-9][0-9]{0,8})\.md")
-PULL = re.compile(r"/pull/([0-9]{1,9})\b")  # Q6
 TIME = "%Y-%m-%dT%H:%M:%SZ"  # db.now()'s format (Q4)
 STATUSES, STAGES = {s.value for s in Status}, {s.value for s in Stage}
 FILES = ("board.json", "backlog.md")  # 058
@@ -370,7 +370,8 @@ def sync(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: 
 
 
 def board_task(project_id: int, job: dict, f: dict, now: str) -> tuple[dict, list[dict]]:
-    """Q2: a board entry's task row for `save`, and its history as events."""
+    """Q2: a board entry's task row for `save`, and its history as events. 093 AC2: a `pr` that names a PR is also
+    its pr_url; the description keeps its `PR:` line."""
     history, pr = job["history"], job.get("pr")
     done = [h["at"] for h in history if h["status"] == "done"]
     row = {
@@ -379,6 +380,7 @@ def board_task(project_id: int, job: dict, f: dict, now: str) -> tuple[dict, lis
         "spec_md": f["spec_md"], "status": job["status"], "stage": job.get("stage"), "branch": job.get("branch"),
         "created_at": history[0]["at"] if history else now, "updated_at": history[-1]["at"] if history else now,
         "done_at": done[-1] if done and job["status"] == "done" else None,
+        "pr_url": pr if pr and PULL.search(pr) else None,
     }
     events = [{"actor": "orchestrator", "from_status": prev["status"] if prev else None, "to_status": h["status"],
                "stage": h.get("stage"), "created_at": h["at"]} for prev, h in zip([None, *history], history)]
