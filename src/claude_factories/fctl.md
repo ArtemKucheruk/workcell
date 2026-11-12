@@ -829,7 +829,10 @@ worktrunk`.
 **Exit codes and errors**
 
 - `fctl: 404 no task #12`, exit `1`.
-- `fctl: 409 run #41 active`: only one run at a time, across all projects, exit `1`.
+- `fctl: 409 run #41 is already running on #12; wait for it or stop it`: the task already has a
+  running run, exit `1`.
+- `fctl: 409 2 runs active (#41 on #12, #42 on #14); the limit is 2. Wait, stop one, or raise it in
+  Settings`: the run cap (`max_concurrent_runs`, across all projects) is full, exit `1`.
 - `fctl: 409 #12 is in review` or `fctl: 409 #12 is done`, exit `1`.
 - `fctl: 409 #15 is blocked by #12, #14; finish those first or remove the dependency`: the task
   waits on tasks that aren't done (only those are named). Finish them, or remove the link with
@@ -905,8 +908,9 @@ none
 
 - `fctl: 422 body_md must not be blank`: the note is blank, exit `1`.
 - `fctl: 409 #12 is not in review` and `fctl: 404 #12 has no rounds`, exit `1`.
-- `fctl: 409 run #41 active`: a factory task is refused while any run is active, before anything
-  is recorded, exit `1`.
+- `fctl: 409 run #41 is already running on #12; …` or `fctl: 409 2 runs active (…); the limit is
+  2. …`: a factory task is refused while its own run is running or the run cap is full, before
+  anything is recorded, exit `1`.
 - A factory task's rework run can still be refused after the note is recorded, with
   [fctl run](#fctl-run)'s messages, for example `fctl: 409 not on subscription auth` and its
   second line,

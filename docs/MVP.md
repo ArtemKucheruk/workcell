@@ -51,7 +51,7 @@ and what is waiting on me.
 | **Project** | One local git repo, identified by its main checkout path. It is registered by running `/factory-connect` inside the repo. |
 | **Task** | One feature or fix in a project. Its **status** is the kanban column: `backlog → in_progress → review → done`. |
 | **Stage** | The factory sub-step inside a status: `spec`, `build`, `agent_review`, `approval`, `rework` (all in_progress), and `human_review`, `escalated` (both review). See §5.2. |
-| **Run** | One headless `claude -p "/factory <id>"` process that the app spawns to move a task forward. Only one run is active at a time, across all projects (§4.4). |
+| **Run** | One headless `claude -p "/factory <id>"` process that the app spawns to move a task forward. A task has at most one active run; across all projects, at most `max_concurrent_runs` (default 2, set on Settings) run at once (§4.4). |
 | **Round** | One builder submission plus the four reviewer verdicts on it. A submission is a diff snapshot plus build notes. Rounds are numbered 1, 2, 3… per task and never reset. Each snapshot is the full diff against the base, not an increment. |
 | **Review** | The app's "PR": the review page of a task. It shows every round, the latest snapshot's files and diff with +/− counts, the agent verdicts, the inline comments, the approver's decision, and mine. |
 | **Verdict** | A reviewer agent's `PASS` or `CHANGES` on a round, plus a markdown body. |
@@ -309,8 +309,9 @@ interactive sessions.
   header shows the reported plan, `subscriptionType: "pro"`.
 - Runs never use `--bare`, which accepts only API keys, or the Agent SDK, which needs an API
   key. Headless `claude -p` is the only way a run starts.
-- There is no dollar budget, because the Pro usage limits are the budget. That is why only
-  one run is active at a time (§4.4).
+- There is no dollar budget, because the Pro usage limits are the budget. That is why a global
+  cap, `max_concurrent_runs` (default 2, editable on Settings), limits how many runs go at once
+  (§4.4).
 
 **Agents call the app through the `fctl` CLI.**
 - Not curl. Escaping markdown and multi-KB diffs as JSON inside Bash is fragile, and every
@@ -402,9 +403,21 @@ claude -p "/factory 12" \
   account's `.claude.json` when it's missing. Nobody can answer the trust dialog in a headless run,
   and an untrusted repo's `.claude/settings.json` allow rules are ignored. Connecting the repo is the
   consent.
-- Only one run is active at a time, across all projects. While a run is going, starting
-  another is refused with `409 run #41 active`. Pro limits are shared with my own sessions,
-  and parallel opus runs would use them up quickly.
+- Several tasks can run at once, each run with its own worktree, branch, log, pid, session, and
+  account. A task has at most one running run (the `one_run_per_task` index): starting it again
+  is refused with `409 run #41 is already running on #12; wait for it or stop it`. Across all
+  projects, at most `max_concurrent_runs` runs go at once (the `settings` row, default 2, 1–10,
+  editable on Settings). At the cap a start is refused with `409 2 runs active (#41 on #12, #42 on
+  #14); the limit is 2. Wait, stop one, or raise it in Settings`. Lowering the cap stops nothing;
+  new starts wait until the count drops under it. Pro limits are shared with my own sessions,
+  and many parallel opus runs would use them up quickly.
+- Each run remembers the account it started in (`runs.account_id`), so its transcripts come from
+  that account's config dir whichever account is active later.
+- Each run's environment holds `FCTL_BACKEND_PORT` and `FCTL_FRONTEND_PORT`, two free loopback
+  ports picked at start, so agents that start the app in parallel runs don't clash on 4545/3000.
+- Parallel starts take turns on the main checkout: the `info/exclude` write, `wt switch
+  --create`, and the trust write to `.claude.json` run under one lock. Copying the ignored files
+  doesn't.
 - The working directory is the worktree, so `acceptEdits` covers only that tree.
   `--permission-prompts none` denies anything not on the allowlist instead of hanging on a
   prompt. It also denies any Bash command over about 10,000 characters, which Claude Code can't
@@ -428,10 +441,11 @@ claude -p "/factory 12" \
 - When a run ends, on exit, on **Stop**, and in the startup cleanup (`failed: app restarted`),
   the app copies the run's Claude Code transcripts into `FCTL_HOME/transcripts/<run-id>/` and
   indexes each in `transcripts`. Claude Code prunes old transcripts and the worktree gets
-  removed, so the copy is the record. They come from the worktree's folder under the active
-  account's `<config dir>/projects/`: the run's own session, its teammates, and their subagents.
-  Make active and Disconnect are refused during a run, so that is the run's own account. A
-  failed copy leaves that file out and never fails the run.
+  removed, so the copy is the record. They come from the worktree's folder under the run's own
+  account's `<config dir>/projects/` (`runs.account_id`; a run from before that column uses the
+  active account): the run's own session, its teammates, and their subagents. Make active and
+  Disconnect stay refused while any run is active. A failed copy leaves that file out and never
+  fails the run.
 
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.
@@ -577,7 +591,7 @@ Rules:
 - Create factory (templates → `.claude/`).
 - Factory designer: named factories per project, designed on a canvas, with any reviewer set (§3.2).
 - Tasks, the board with drag and drop, Run / Run next / Stop / Retry, and run logs.
-- Subscription-only runs with the auth check (§4.3), one run at a time.
+- Subscription-only runs with the auth check (§4.3), one per task, up to a global cap at once.
 - Headless runs in worktrees, rework on Request changes, and takeover by
   `claude --resume`.
 - Review page: rounds, verdict chips, unified diff, inline comments, Approve, Request changes,
@@ -631,8 +645,8 @@ Rules:
 7. Runs use my Claude Pro subscription through my normal Claude Code login, checked as
    `authMethod: claude.ai`, `subscriptionType: pro` (§4.3). They share usage limits with my
    interactive sessions.
-8. One run is active at a time, across all projects. Stopping the app stops
-   all runs.
+8. A task has one active run at most, and at most `max_concurrent_runs` (default 2) run at once
+   across all projects. Stopping the app stops all runs.
 9. Task ids are global integers, the runs' reviewer set is fixed (security, ux, ui, code), and
    the port is 4545. A factory design's reviewers are stored in its graph only.
 10. Approve means done, whether or not I have committed yet. I commit and merge by hand or

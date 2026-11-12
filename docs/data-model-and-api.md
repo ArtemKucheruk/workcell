@@ -51,8 +51,10 @@ CREATE TABLE runs (
   status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','stopped')),
   exit_code INTEGER, error TEXT,
   log_path TEXT NOT NULL,
-  started_at TEXT NOT NULL, ended_at TEXT);
-CREATE UNIQUE INDEX one_active_run ON runs(status) WHERE status = 'running';  -- one run at a time, globally (Pro limits)
+  started_at TEXT NOT NULL, ended_at TEXT,
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);  -- the account it ran in; NULL = the active one
+-- one running run per task; settings.max_concurrent_runs caps them all (Pro limits). Replaced the global one_active_run
+CREATE UNIQUE INDEX one_run_per_task ON runs(task_id) WHERE status = 'running';
 
 CREATE TABLE rounds (
   id INTEGER PRIMARY KEY,
@@ -143,14 +145,24 @@ CREATE TABLE context_items (              -- a project's context cards and group
   source_path TEXT,                       -- the file or folder it was read from, else NULL
   position REAL NOT NULL,                 -- order within its parent's list
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+
+CREATE TABLE settings (                   -- the app's one settings row (Settings page, /api/settings)
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  max_concurrent_runs INTEGER NOT NULL DEFAULT 2 CHECK (max_concurrent_runs >= 1));  -- runs at once, all projects
+INSERT OR IGNORE INTO settings (id) VALUES (1);  -- seeded on every startup, never overwritten
 ```
+`db.init()` brings an old database up to date: it drops `one_active_run`, adds `runs.account_id` (NULL on old
+rows), and seeds the settings row.
+
 Relations: workspace 1–n project 1–n task. A project has 0–n factories and 0–n context items, removed with it
 (ON DELETE CASCADE). A task waits on 0–n tasks of its own project (`task_deps`, no self links, no cycles); it is
 **blocked** while any of them isn't `done` and **ready** otherwise. Blocked is worked out on read, never stored, so
 a blocker moving to done readies its dependents without writing them. Deleting a task, or its project, drops its
 links on both sides. A context item of kind group holds 0–n items one level deep, removed with it.
-A task has 1–n runs and 1–n rounds. A run uses the active Claude account's config dir, and no column records
-which. A run has 0–n
+A task has 1–n runs, at most one of them running, and 1–n rounds. At most `settings.max_concurrent_runs` runs
+are running at once, across all projects. A run records the Claude account it started in (`account_id`), whose
+config dir its transcripts come from; NULL (a run from before the column, or a disconnected account) means the
+active one. A run has 0–n
 transcripts. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
@@ -169,8 +181,8 @@ The server derives status whenever stage is set. Every change writes an `events`
 | `escalated` | review, highlighted | orchestrator (approver ESCALATE) |
 | — | done | app (my Approve) |
 
-A manual move on the board sets status and clears stage. It is refused with `409` while a
-run is active.
+A manual move on the board sets status and clears stage. It is refused with `409` while that
+task's run is active.
 
 ---
 
@@ -572,11 +584,15 @@ DELETE /api/tasks/12                                              (board Delete)
   # one transaction removes the task with its runs, rounds, round_files, verdicts, comments, decisions,
   #   events, and transcripts rows
   # on disk, the worktree, branch, run logs, and transcript copies stay
-  # 409 {"detail":"run #41 active"} while a run is running · 404 {"detail":"Task #99 not found"}
+  # 409 {"detail":"run #41 active"} while the task's own run is running · 404 {"detail":"Task #99 not found"}
 
 POST /api/tasks/12/run                                            (Run, Retry, fctl run 12)
 ← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login"}
-  # 409 if any run is active, auth isn't claude.ai, or the factory isn't committed on default_branch;
+  # 409, checked right after the 404, while the task's own run is running:
+  #   {"detail":"run #41 is already running on #12; wait for it or stop it"}; then at the run cap (runs by id):
+  #   {"detail":"2 runs active (#41 on #12, #42 on #14); the limit is 2. Wait, stop one, or raise it in Settings"}
+  #   ("1 run active (…)" when one); both again under the write lock; no run row, no wt call, no spawn
+  # 409 if auth isn't claude.ai, or the factory isn't committed on default_branch;
   #   a legacy factory (MVP §3.2 step 4): 409 {"detail":"this repo runs the file-based /factory loop:
   #   Create factory with Overwrite, then commit it on main"}
   # a blocked task, checked after the review/done 409 and before the factory check, for Run, Retry,
@@ -593,7 +609,8 @@ POST /api/tasks/12/run                                            (Run, Retry, f
 
 POST /api/projects/3/run-next                                     (Run next, fctl run next)
 ← 202 {"task_id":14,"run_id":42}                                  # 404 if backlog empty; 409 as run
-  # the top ready backlog card (lowest position, then id), skipping blocked ones; with every card blocked,
+  # the top ready backlog card (lowest position, then id) that has no running run, skipping blocked ones; at the
+  #   run cap, run's cap 409 and no run row; with every card blocked,
   #   409 {"detail":"all backlog tasks are blocked: #15 waits on #12, #14"}: the top card and its open blockers
 
 POST /api/runs/41/stop
@@ -654,6 +671,8 @@ POST /api/tasks/12/decision                                       (fctl decide �
 POST /api/tasks/12/request-changes                                (Request changes, fctl rework)
 → {"body_md":"Make the limit configurable via settings."}         # inline comments already posted
 ← 202 {"status":"in_progress","stage":"rework","run_id":43}       # run_id null for standalone tasks
+  # a factory task is refused before any write (no decision, no move) while its own run is running or the run
+  #   cap is full, with run's two 409 details (§6.2); another task's run under the cap doesn't stop it
 
 POST /api/tasks/12/approve                                        (Approve, fctl approve)
 → {"body_md":""}
@@ -775,6 +794,15 @@ DELETE /api/auth/accounts/{id}                                    (Settings: Dis
   # 500 {"detail":"claude auth logout didn't start: …"} / "claude auth logout didn't finish" (30 s)
   # 500 {"detail":"can't delete <config_dir>: <reason>"}; on any 500 the row stays
 
+GET  /api/settings                                                (Settings: the Runs section, loaded once)
+← 200 {"max_concurrent_runs":2}
+PUT  /api/settings                                                (Settings: Save)
+→ {"max_concurrent_runs":3}
+← 200 {"max_concurrent_runs":3}
+  # max_concurrent_runs: how many runs go at once, across all projects (MVP §4.4); an integer 1–10, else
+  #   422 (FastAPI's list detail) and the stored value stays. Lowering it below the running count stops
+  #   nothing; new starts get the cap 409 until the count drops under it
+
 GET  /api/pages/dashboard                       tiles, the waiting and escalated lists ({id, title, project_id,
                                                 project, round, since}, newest since first), open tasks per
                                                 workspace → project, rounds per task
@@ -788,7 +816,10 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 and factory_error (058): first syncs factory/ (§6.1's {}) when
                                                 board.json's or backlog.md's mtime or size changed; a refusal is
                                                 stored as factory_error, not a failed page, until a file changes.
-                                                With Sec-Fetch-Site: cross-site it skips the sync (MVP §4.5)
+                                                With Sec-Fetch-Site: cross-site it skips the sync (MVP §4.5).
+                                                096: runs_active (running runs across all projects) and
+                                                max_concurrent_runs; can_run is false at runs_active >=
+                                                max_concurrent_runs, as for an unready factory or no login
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
@@ -847,7 +878,7 @@ GET  /api/pages/agents                                            (/agents, poll
          "status":"failed","error":"exit code 1","started_at":"2026-10-21T09:40:00Z",
          "ended_at":"2026-10-21T09:52:03Z","transcripts":2}]}
   # read-only, no ids or query, so no error statuses; Stop is POST /api/runs/{id}/stop (§6.2)
-  # running: every running run (§4.4 allows one), newest started_at first, then id descending
+  # running: every running run (one per task, up to the run cap, MVP §4.4), newest started_at first, then id descending
   #   kind: always "factory" today (scheduled runs, §9 Later) · stage: the task's, or null ·
   #   round: the task's highest rounds.n, or null with no rounds
   # agents: from the run's stream-json log, read as GET /api/runs/{id}/log reads it (complete lines,

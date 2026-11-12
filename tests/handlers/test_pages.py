@@ -14,6 +14,7 @@ from claude_factories.repositories.projects import ProjectsRepo
 from claude_factories.repositories.reviews import ReviewsRepo
 from claude_factories.repositories.rounds import RoundsRepo
 from claude_factories.repositories.runs import RunsRepo
+from claude_factories.repositories.settings import SettingsRepo
 from claude_factories.repositories.tasks import TasksRepo
 from claude_factories.repositories.transcripts import TranscriptsRepo
 from claude_factories.repositories.workspaces import WorkspacesRepo
@@ -40,7 +41,7 @@ def test_page_handlers_raise_not_found(conn, repo):  # 036 AC11
     runs, workspaces, accounts = RunsRepo(conn), WorkspacesRepo(conn), ClaudeAccountsRepo(conn)
     assert detail(lambda: pages.workspace(workspaces, projects, git, 999)) == "Not Found"
     assert detail(lambda: pages.board(projects, tasks, rounds, reviews, runs, TranscriptsRepo(conn), workspaces, git,
-                                      claude, accounts, 999)) == "Not Found"
+                                      claude, accounts, SettingsRepo(conn), 999)) == "Not Found"
     assert detail(lambda: pages.task(tasks, rounds, reviews, runs, TranscriptsRepo(conn), git, claude, accounts,
                                      999)) == "Task #999 not found"
     assert detail(lambda: pages.review(tasks, rounds, reviews, git, 999, "latest", "")) == "Task #999 not found"

@@ -153,7 +153,11 @@ Loading, failures, times, and motion are the same on every page:
    header plus **+ New task**, **Run next**, and the hint for why runs are off, `legacy`'s included
    (`this repo runs the file-based /factory loop: …`, MVP §3.2 step 4). Under the hint, when
    the view-model's `factory_error` is set (the board's automatic `factory/` sync was refused, §6.4),
-   one muted line, `factory/: <factory_error>`, not an alert. **+ New task**
+   one muted line, `factory/: <factory_error>`, not an alert. Several tasks can run at once, each
+   card showing its own run. At the run cap (`runs_active >= max_concurrent_runs`, MVP §4.4) the
+   header adds one muted line, `2 of 2 runs active`, and **Run**, **Retry**, and **Run next** are
+   disabled with that text as their `title`; under the cap neither shows, and the line updates with the
+   3 s poll. **+ New task**
    opens its form in a native popover, which Esc or a click outside closes, and a created task
    closes it. Clicking a card opens the task detail.
    - Cards move by drag and drop (native HTML5, no library). While a card is dragged it dims,
@@ -178,7 +182,7 @@ Loading, failures, times, and motion are the same on every page:
      detail inside the popover or dialog, which stays open with what was typed; the board's alert
      is left alone.
    - A move, by menu or drop, is announced in a visually hidden `aria-live` status region
-     (`Moved #14 Export CSV to Review.`). A refusal, such as the 409 while a run is active,
+     (`Moved #14 Export CSV to Review.`). A refusal, such as the 409 while the card's run is active,
      shows in the board's alert instead. The alert holds only refusals of Run, Retry, Run next,
      and moves: the next of these empties it as it starts, and polls leave it alone.
    - From `md` up each column's card list scrolls on its own under its heading. Below `md` the
@@ -323,6 +327,11 @@ Loading, failures, times, and motion are the same on every page:
      detail inside the dialog, which stays open. On success the list reloads, focus goes to
      **+ Add account**, and the sidebar badge follows on its next poll.
    - Subscription login only (§4.3): no API key field.
+   - A `Runs` section below Claude accounts, from `GET /api/settings`, loaded once: the number field
+     **Concurrent runs** (1–10) holding `max_concurrent_runs`, the muted hint `How many runs can go at
+     once, across all projects.`, and **Save**, which sends `PUT /api/settings` with the number. A
+     success shows `Saved` in a status line; a refusal shows its detail in an alert and keeps the typed
+     value.
 10. **Reviews** (`/projects/{id}/reviews`, Closed at `?tab=closed`; wireframe §8.5)
     - From the board view-model, polled every 3 s.
     - **Open** is the Review column: escalated, then waiting on you, then the rest.

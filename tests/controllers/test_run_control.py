@@ -1,16 +1,21 @@
 import os
 import subprocess
+import threading
 import time
 from types import SimpleNamespace
 
 import pytest
-from conftest import commit, sql
+from conftest import commit, sql, wt_calls
 from fastapi.testclient import TestClient
 from controllers.test_pages_api import add_round
 from controllers.test_runs import (H, LEGACY, LEGACY_HINT, OLD, SKILL, add_running_run, add_task,  # noqa: F401
-                                   events, fake, project, run, run_row, started, task_row, wait)
+                                   cap, cap_detail, events, fake, project, run, run_row, started, task_row, wait)
 
+from claude_factories.adapters.claude import SubprocessClaude
+from claude_factories.adapters.git import SubprocessGit
+from claude_factories.handlers import runs as runs_handler
 from claude_factories.server.app import create_app
+from claude_factories.server.deps import transaction
 
 BASE = "http://127.0.0.1:4545"
 NOTE = "Make the limit configurable via settings."
@@ -365,12 +370,35 @@ def test_rework_standalone(client, project, fake):  # AC19
     assert not fake.invoked()
 
 
-def test_rework_while_running(client, project, factory_task, fake):  # AC20
+def test_rework_while_running(client, project, factory_task, fake):  # AC20; 096 AC20: at the cap
     task, _ = factory_task
-    running = add_running_run(add_task(project, "other", status="in_progress"))
+    other = add_task(project, "other", status="in_progress")
+    running = add_running_run(other)
+    cap(1)
     before = counts(), task_row(task)
     r = rework(client, task)
-    assert (r.status_code, r.json()) == (409, {"detail": f"run #{running} active"})
+    assert (r.status_code, r.json()) == (409, {"detail": cap_detail((running, other))})
+    assert (counts(), task_row(task)) == before
+    assert not fake.invoked()
+
+
+def test_rework_under_cap(client, project, factory_task, fake):  # 096 AC18
+    task, first = factory_task
+    add_running_run(add_task(project, "other", status="in_progress"))
+    r = rework(client, task)
+    assert r.status_code == 202, r.text
+    wait(r.json()["run_id"])
+    assert fake.recorded("run")["argv"][1] == f"/factory {task}"
+    assert decisions(task) == [("me", "CHANGES_REQUESTED")]
+
+
+def test_rework_own_run(client, project, factory_task, fake):  # 096 AC19, Q4
+    task, _ = factory_task
+    running = add_running_run(task)
+    before = counts(), task_row(task)
+    r = rework(client, task)
+    assert (r.status_code, r.json()) == (
+        409, {"detail": f"run #{running} is already running on #{task}; wait for it or stop it"})
     assert (counts(), task_row(task)) == before
     assert not fake.invoked()
 
@@ -420,3 +448,131 @@ def test_stop_skips_reaped_leader(client, project, sleeper):  # security review,
     assert (r.status_code, r.json()) == (200, {"id": run_id, "status": "stopped"})
     time.sleep(0.2)
     assert sleeper.poll() is None
+
+
+# --- 096: concurrent runs with a cap ---------------------------------------------------
+
+
+def alive(pid) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.fixture
+def two(project, long):
+    """096: backlog tasks A and B, both started (cap 2, the default)."""
+    a = long(task=add_task(project, "A"))
+    b = long(task=add_task(project, "B"))
+    return a, b
+
+
+def test_two_runs_at_once(two, fake):  # 096 AC5
+    a, b = two
+    assert run_row(a.run_id)["status"] == run_row(b.run_id)["status"] == "running"
+    assert a.pid != b.pid and alive(a.pid) and alive(b.pid)
+
+
+def test_third_over_cap(client, project, two, fake):  # 096 AC6
+    a, b = two
+    c = add_task(project, "C")
+    before, wt_before = counts()[2], len(wt_calls())
+    fake.clear()
+    r = run(client, c)
+    assert (r.status_code, r.json()) == (409, {"detail": cap_detail((a.run_id, a.task), (b.run_id, b.task))})
+    assert counts()[2] == before and len(wt_calls()) == wt_before
+    assert not fake.invoked()
+
+
+def test_cap_one_singular(client, project, long, fake):  # 096 AC7
+    cap(1)
+    a = long(task=add_task(project, "A"))
+    r = run(client, add_task(project, "C"))
+    assert (r.status_code, r.json()) == (409, {"detail": f"1 run active (#{a.run_id} on #{a.task}); the limit is 1."
+                                                         " Wait, stop one, or raise it in Settings"})
+
+
+def test_raise_cap_starts_third(client, project, two, long):  # 096 AC8
+    r = client.put("/api/settings", json={"max_concurrent_runs": 3}, headers=H)
+    assert r.status_code == 200, r.text
+    c = long(task=add_task(project, "C"))
+    assert run_row(c.run_id)["status"] == "running"
+
+
+def test_same_task_twice(client, two, fake):  # 096 AC9, Q1: own run first, even with the cap full
+    a, _ = two
+    before = counts()[2]
+    r = run(client, a.task)
+    assert (r.status_code, r.json()) == (
+        409, {"detail": f"run #{a.run_id} is already running on #{a.task}; wait for it or stop it"})
+    assert counts()[2] == before
+
+
+def test_stop_one_of_two(client, two):  # 096 AC10
+    a, b = two
+    assert stop(client, a.run_id).status_code == 200
+    assert run_row(a.run_id)["status"] == "stopped"
+    assert gone(a.pid)
+    assert run_row(b.run_id)["status"] == "running"
+    assert alive(b.pid) and alive(b.child)
+
+
+def test_shutdown_stops_both(project, long):  # 096 AC14
+    with TestClient(create_app(), base_url=BASE) as c:
+        a = long(c, add_task(project, "A"))
+        b = long(c, add_task(project, "B"))
+    assert run_row(a.run_id)["status"] == run_row(b.run_id)["status"] == "stopped"
+    assert all(gone(pid) for pid in (a.pid, a.child, b.pid, b.child))
+
+
+def test_startup_fails_both_leftovers(client, project, monkeypatch):  # 096 AC15
+    a = add_running_run(add_task(project, "A", status="in_progress"))
+    b = add_running_run(add_task(project, "B", status="in_progress"))
+    collected = []
+    monkeypatch.setattr(runs_handler, "collect", lambda tx, run_id: collected.append(run_id))
+    with TestClient(create_app(), base_url=BASE):
+        rows = [run_row(a), run_row(b)]
+    assert [(r["status"], r["error"]) for r in rows] == [("failed", "app restarted")] * 2
+    assert sorted(collected) == [a, b]
+
+
+def test_parallel_starts_take_turns(client, project, fake, monkeypatch):  # 096 AC13, Q7
+    """Two starts at once on one repo: the exclude write, wt_create, and trust_project never overlap."""
+    state = {"in": 0, "max": 0}
+    lock = threading.Lock()
+
+    def tracked(fn):
+        def call(*args, **kwargs):
+            with lock:
+                state["in"] += 1
+                state["max"] = max(state["max"], state["in"])
+            time.sleep(0.2)
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                with lock:
+                    state["in"] -= 1
+        return call
+
+    class TrackedGit(SubprocessGit):
+        wt_create = tracked(SubprocessGit.wt_create)
+
+    monkeypatch.setattr(runs_handler, "exclude_worktrees", tracked(runs_handler.exclude_worktrees))
+    monkeypatch.setattr(runs_handler, "trust_project", tracked(runs_handler.trust_project))
+    tasks = [add_task(project, "A"), add_task(project, "B")]
+    results = []
+
+    def go(task):
+        results.append(runs_handler.start(transaction, TrackedGit(), SubprocessClaude(), task, BASE).run_id)
+
+    threads = [threading.Thread(target=go, args=(t,)) for t in tasks]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert len(results) == 2
+    for run_id in results:
+        wait(run_id)
+    assert state["max"] == 1

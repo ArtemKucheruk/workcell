@@ -38,6 +38,8 @@ const LOGIN = 'POST /api/auth/login'
 const CODE = 'POST /api/auth/login/code'
 const ACTIVATE_2 = 'POST /api/auth/accounts/2/activate'
 const DELETE_2 = 'DELETE /api/auth/accounts/2'
+const SETTINGS = 'GET /api/settings'
+const PUT_SETTINGS = 'PUT /api/settings'
 const DISCONNECT_TEXT =
   'This signs the account out with claude auth logout and removes it from the app, with its config folder if the app ' +
   'created it.'
@@ -52,6 +54,7 @@ async function open(accounts, extra = {}) {
     'GET /api/auth': [200, AUTH],
     [ACCOUNTS]: [200, accounts],
     [LOGIN]: [200, { url: SIGN_IN, account_id: 3 }],
+    [SETTINGS]: [200, { max_concurrent_runs: 2 }],
     ...extra,
   }
   const fetch = mockFetch(responses)
@@ -383,6 +386,47 @@ test('FE11, 055 round 2: Esc while the DELETE is pending, then its 204, still re
   await act(async () => reply(new Response(null, { status: 204 })))
   await waitFor(() => expect(items(section)).toHaveLength(1))
   await waitFor(() => expect(document.activeElement).toBe(within(section).getByRole('button', { name: '+ Add account' })))
+})
+
+// --- 096: the Runs section ----------------------------------------------------------------
+
+const runsRegion = () => screen.findByRole('region', { name: 'Runs' })
+const capField = () => screen.findByRole('spinbutton', { name: 'Concurrent runs' })
+
+test('096 AC34: a Runs section below Claude accounts holds Concurrent runs (1–10) with the stored value, loaded once', async () => {
+  const { fetch, section } = await open([ONE], { [SETTINGS]: [200, { max_concurrent_runs: 4 }] })
+  const runs = await runsRegion()
+  expect(follows(section, runs)).toBe(true)
+  const input = await capField()
+  await waitFor(() => expect(input.value).toBe('4'))
+  expect([input.type, input.min, input.max]).toEqual(['number', '1', '10'])
+  expect(within(runs).getByText('How many runs can go at once, across all projects.').className).toMatch(cls('text-muted'))
+  expect(calls(fetch, SETTINGS)).toHaveLength(1)
+})
+
+test('096 AC35: Save sends PUT /api/settings with the number, then says Saved in a status line', async () => {
+  const { fetch } = await open([ONE], { [PUT_SETTINGS]: [200, { max_concurrent_runs: 3 }] })
+  const input = await capField()
+  await waitFor(() => expect(input.value).toBe('2'))
+  fireEvent.change(input, { target: { value: '3' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  const status = await within(await runsRegion()).findByRole('status')
+  expect(status.textContent).toBe('Saved')
+  const [put] = calls(fetch, PUT_SETTINGS)
+  expect(sent(put)).toEqual({ max_concurrent_runs: 3 })
+  expect(put[1].headers['X-Requested-By']).toBe('fctl')
+})
+
+test('096 AC36: a refused Save shows the alert and keeps the typed value', async () => {
+  await open([ONE], { [PUT_SETTINGS]: [422, { detail: [{ loc: ['body', 'max_concurrent_runs'], msg: 'too big' }] }] })
+  const input = await capField()
+  await waitFor(() => expect(input.value).toBe('2'))
+  fireEvent.change(input, { target: { value: '7' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  const runs = await runsRegion()
+  expect((await within(runs).findByRole('alert')).textContent).toContain('max_concurrent_runs: too big')
+  expect(input.value).toBe('7')
+  expect(within(runs).queryByRole('status')).toBeNull()
 })
 
 test('FE12, 046 FE14: a skeleton until the accounts list answers, then its error in an alert', async () => {

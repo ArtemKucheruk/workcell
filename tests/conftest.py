@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from contextlib import closing
 
 import pytest
@@ -89,6 +90,12 @@ def isolated(tmp_path, monkeypatch):
     for who in ("AUTHOR", "COMMITTER"):
         monkeypatch.setenv(f"GIT_{who}_NAME", "Test")
         monkeypatch.setenv(f"GIT_{who}_EMAIL", "test@example.com")
+    yield
+    # 096: a run's exit thread (handlers/runs.finish) still collecting once the test ends would open whatever
+    # FCTL_HOME is restored next, so it finishes here, while this test's env is still set
+    for thread in threading.enumerate():
+        if thread.name.endswith("(finish)"):
+            thread.join(15)
 
 
 def git(cwd, *args) -> str:

@@ -1,5 +1,5 @@
 """Page data for the dashboard, workspace, board, task, review, and agents pages (docs/ui.md §8), the sidebar
-(041), its login badge, the Settings page's Claude accounts (§8 item 9, 056), and the fctl reference
+(041), its login badge, the Settings page's Claude accounts (§8 item 9, 056) and run cap (096), and the fctl reference
 (§8 item 7). Each page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
 import re
@@ -25,6 +25,7 @@ from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
+from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TILE_TASKS, TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
@@ -260,6 +261,17 @@ def delete_account(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo,
     accounts.delete(account_id)
 
 
+def settings(settings: SettingsRepo) -> dict:
+    """096 Q2: GET /api/settings."""
+    return {"max_concurrent_runs": settings.max_concurrent_runs()}
+
+
+def put_settings(settings: SettingsRepo, max_concurrent_runs: int) -> dict:
+    """096 Q2, Q3: the DTO checked 1–10. Lowering it below the running count stops nothing."""
+    settings.set_max_concurrent_runs(max_concurrent_runs)
+    return {"max_concurrent_runs": max_concurrent_runs}
+
+
 def fctl_doc() -> dict:
     """029: the package's fctl.md rendered with heading ids, and its headings for the Contents nav.
     Read on every request, no cache: the file only changes with the install."""
@@ -326,9 +338,10 @@ def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, work
 
 def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
           transcripts: TranscriptsRepo, workspaces: WorkspacesRepo, git: Git, claude: Claude,
-          accounts: ClaudeAccountsRepo, project_id: int, may_sync: bool = True) -> dict:
+          accounts: ClaudeAccountsRepo, settings: SettingsRepo, project_id: int, may_sync: bool = True) -> dict:
     """058: syncs factory/ first when board.json or backlog.md changed, so the columns already hold it. With
-    `may_sync` False (a cross-site request, §4.5) it only reads the stored error."""
+    `may_sync` False (a cross-site request, §4.5) it only reads the stored error. 096 AC29: the running runs
+    across all projects and the cap; at the cap, `can_run` is false."""
     # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
     # add a /projects/{id}/board fragment route if that shows up in profiling
     project = projects.for_board(project_id)
@@ -349,10 +362,13 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
                                          "description_md": row["description_md"],
                                          "started_at": t["run"] and started[t["run"]["id"]]})
     factory = factory_state(git, project["path"], project["default_branch"])
+    active, cap = len(runs.running_ids()), settings.max_concurrent_runs()
     return {
         "project": project, "workspaces": workspaces.all(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
-        "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4: the server's checks still decide
+        "runs_active": active, "max_concurrent_runs": cap,
+        # Q4: the server's checks still decide
+        "can_run": factory == "ready" and active < cap and claude_login(claude, accounts)[1],
         "factory_error": factory_error, "factory_files": factory_files(project["path"]),  # 059
     }
 

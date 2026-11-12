@@ -22,21 +22,27 @@ class RunsRepo:
         ).fetchone()
 
     def any_running(self) -> sqlite3.Row | None:
-        """docs/MVP.md §4.4: one run at a time, across all projects."""
+        """Some running run, for 056's account switch and Disconnect, which stay refused while any run is
+        active (096: out of scope)."""
         return self.conn.execute("SELECT id FROM runs WHERE status = 'running'").fetchone()
 
     def running_ids(self) -> list[int]:
         return [i for (i,) in self.conn.execute("SELECT id FROM runs WHERE status = 'running'")]
 
+    def running_tasks(self) -> list[sqlite3.Row]:
+        """096: every running run as (id, task_id), by id, for the cap and its 409 detail."""
+        return self.conn.execute("SELECT id, task_id FROM runs WHERE status = 'running' ORDER BY id").fetchall()
+
     def exists(self, run_id: int) -> bool:
         return self.conn.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,)).fetchone() is not None
 
-    def add(self, task_id: int, session_id: str, now: str) -> int:
-        """A running row with no log path yet. Raises IntegrityError if one_active_run refuses it."""
+    def add(self, task_id: int, session_id: str, now: str, account_id: int | None = None) -> int:
+        """A running row with no log path yet, in account `account_id` (096 Q5). Raises IntegrityError if
+        one_run_per_task refuses it (the task already has a running run)."""
         return self.conn.execute(
-            "INSERT INTO runs (task_id, session_id, status, log_path, started_at)"
-            " VALUES (?, ?, 'running', '', ?) RETURNING id",
-            (task_id, session_id, now),
+            "INSERT INTO runs (task_id, session_id, status, log_path, started_at, account_id)"
+            " VALUES (?, ?, 'running', '', ?, ?) RETURNING id",
+            (task_id, session_id, now, account_id),
         ).fetchone()[0]
 
     def imported(self, task_id: int, session_id: str, started_at: str, ended_at: str | None) -> int:
@@ -119,7 +125,7 @@ class RunsRepo:
         ).fetchall()
 
     def running_rows(self) -> list[sqlite3.Row]:
-        """053: the Agents page's running runs (§4.4 allows one), newest first; round is the task's highest n
+        """053: the Agents page's running runs (096: up to the cap, one per task), newest first; round is the task's highest n
         (Q4)."""
         return self.conn.execute(
             "SELECT r.id, t.id AS task_id, t.title, p.id AS project_id, p.name AS project, t.stage,"

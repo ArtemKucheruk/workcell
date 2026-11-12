@@ -1129,6 +1129,66 @@ def test_board(client, project, repo):  # AC8
     assert page["columns"]["in_progress"] == page["columns"]["done"] == []
 
 
+# --- 096: concurrent runs: the cap on the board, the counts, and /api/settings -----------------
+
+
+def test_board_run_cap(client, project, tmp_path):  # 096 AC29
+    other = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "main", str(other))
+    add_run(add_task(connect(client, other), status="in_progress"), "running")  # another project counts too
+    page = api(client, f"/api/pages/projects/{project}")
+    assert (page["runs_active"], page["max_concurrent_runs"], page["can_run"]) == (1, 2, True)
+    add_run(add_task(project, status="in_progress"), "running")
+    page = api(client, f"/api/pages/projects/{project}")
+    assert (page["runs_active"], page["max_concurrent_runs"], page["factory"], page["can_run"]) == (2, 2, "ready", False)
+
+
+def test_running_counts_two_runs(client, project):  # 096 AC30, AC31
+    runs = [add_run(add_task(project, status="in_progress", stage="build"), "running") for _ in range(2)]
+    assert sidebar(client)["workspaces"][0]["projects"][0]["running"] == 2
+    assert api(client, "/api/pages/dashboard")["counts"]["running"] == 2
+    assert sorted(r["id"] for r in api(client, "/api/pages/agents")["running"]) == runs
+
+
+def put_settings(client, body, headers=H):
+    return client.put("/api/settings", json=body, headers=headers)
+
+
+def test_settings_default(client):  # 096 AC24
+    assert api(client, "/api/settings") == {"max_concurrent_runs": 2}
+
+
+def test_settings_put(client):  # 096 AC25
+    r = put_settings(client, {"max_concurrent_runs": 3})
+    assert (r.status_code, r.json()) == (200, {"max_concurrent_runs": 3})
+    assert api(client, "/api/settings") == {"max_concurrent_runs": 3}
+
+
+@pytest.mark.parametrize("body", [{"max_concurrent_runs": 0}, {"max_concurrent_runs": 11},
+                                  {"max_concurrent_runs": None}, {"max_concurrent_runs": "x"}, {}])
+def test_settings_put_invalid(client, body):  # 096 AC26
+    r = put_settings(client, body)
+    assert r.status_code == 422 and isinstance(r.json()["detail"], list)
+    assert api(client, "/api/settings") == {"max_concurrent_runs": 2}
+
+
+def test_settings_put_needs_header(client):  # 096 AC27
+    assert put_settings(client, {"max_concurrent_runs": 3}, headers={}).status_code == 403
+    assert api(client, "/api/settings") == {"max_concurrent_runs": 2}
+
+
+def test_lower_cap_below_running(client, project, fake):  # 096 AC28, Q3
+    put_settings(client, {"max_concurrent_runs": 3})
+    running = [(add_run(t := add_task(project, status="in_progress"), "running"), t) for _ in range(3)]
+    r = put_settings(client, {"max_concurrent_runs": 2})
+    assert (r.status_code, r.json()) == (200, {"max_concurrent_runs": 2})
+    assert sql("SELECT COUNT(*) FROM runs WHERE status = 'running'") == [(3,)]
+    r = client.post(f"/api/tasks/{add_task(project)}/run", headers=H)
+    listed = ", ".join(f"#{r_} on #{t}" for r_, t in running)
+    assert (r.status_code, r.json()) == (409, {"detail": f"3 runs active ({listed}); the limit is 2."
+                                                         " Wait, stop one, or raise it in Settings"})
+
+
 def test_board_card(client, project):  # AC9
     tid, bare = add_task(project, status="in_progress", stage="build"), add_task(project)
     rid = add_round(tid, 1, files=((5, 2),))
