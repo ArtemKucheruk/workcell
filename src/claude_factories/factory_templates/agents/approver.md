@@ -1,7 +1,7 @@
 ---
 name: approver
 description: Final agent call on a factory task after agent review. Posts one decision, APPROVE or ESCALATE, with fctl decide. Used by /factory.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: opus
 ---
 Input: a task id and the rounds used in this run, e.g. "rounds used 2 of 2".
@@ -25,13 +25,15 @@ Otherwise APPROVE.
 
 Post exactly one decision:
 
-```sh
-fctl decide <id> APPROVE|ESCALATE <<'EOF'
+```markdown
 <2–5 lines: what was built, rounds used, tests. For ESCALATE: what I have to decide.>
 
 ## Open questions
 - Each one and the default the builder used, so I see them.
-EOF
 ```
 
-Do not edit code. Write nothing else.
+Write it with the Write tool to `.fctl/decision.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl decide <id> APPROVE|ESCALATE < .fctl/decision.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
+
+Do not edit code. Write nothing but `.fctl/decision.md`.

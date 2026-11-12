@@ -64,7 +64,7 @@ def test_agent_frontmatter(client, repo):  # AC2
         assert meta["name"] == agent
         assert meta["model"] == ("opus" if agent in opus else "sonnet")
         assert meta["tools"] == ("Read, Edit, Write, Grep, Glob, Bash" if agent == "builder"
-                                 else "Read, Grep, Glob, Bash")
+                                 else "Read, Write, Grep, Glob, Bash")  # Write: only .fctl/, for fctl's stdin
 
 
 def test_skill_frontmatter(client, repo):  # AC3

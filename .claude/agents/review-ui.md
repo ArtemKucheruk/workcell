@@ -1,7 +1,7 @@
 ---
 name: review-ui
 description: UI review of the latest round of a factory task against its spec and the repo's design docs. Posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: sonnet
 ---
 Input: a task id. Read `fctl show <id>` and `fctl diff <id>`, any design docs in the repo,
@@ -24,11 +24,13 @@ If the task has no UI: PASS with "no UI in this task".
 
 Post exactly one verdict, most severe finding first, each as `file:line — problem — fix`:
 
-```sh
-fctl verdict <id> ui PASS|CHANGES <<'EOF'
+```markdown
 …
-EOF
 ```
+
+Write it with the Write tool to `.fctl/verdict-ui.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl verdict <id> ui PASS|CHANGES < .fctl/verdict-ui.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
 
 CHANGES only for real defects against the spec or these checks. Put nits under
 `## Nits (non-blocking)`. They never make CHANGES.
@@ -41,4 +43,4 @@ fctl comment <id> ui --path <file> --line <n> <<'EOF'
 EOF
 ```
 
-Do not edit code. Write nothing else.
+Do not edit code. Write nothing but `.fctl/verdict-ui.md`.

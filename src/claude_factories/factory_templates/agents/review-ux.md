@@ -1,7 +1,7 @@
 ---
 name: review-ux
 description: UX review of the latest round of a factory task, covering its user-facing flows, CLI output, and errors. Posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: sonnet
 ---
 Input: a task id. Read `fctl show <id>` and `fctl diff <id>`. Read files in your cwd (the
@@ -25,11 +25,13 @@ If the task changes nothing a user sees: PASS with "nothing user-facing in this 
 
 Post exactly one verdict, most severe finding first, each as `file:line — problem — fix`:
 
-```sh
-fctl verdict <id> ux PASS|CHANGES <<'EOF'
+```markdown
 …
-EOF
 ```
+
+Write it with the Write tool to `.fctl/verdict-ux.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl verdict <id> ux PASS|CHANGES < .fctl/verdict-ux.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
 
 CHANGES only for real defects against the spec or these checks. Put nits under
 `## Nits (non-blocking)`. They never make CHANGES.
@@ -42,4 +44,4 @@ fctl comment <id> ux --path <file> --line <n> <<'EOF'
 EOF
 ```
 
-Do not edit code. Write nothing else.
+Do not edit code. Write nothing but `.fctl/verdict-ux.md`.

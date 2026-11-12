@@ -1,7 +1,7 @@
 ---
 name: review-code
 description: Code review of the latest round of a factory task. Runs the tests and posts one verdict with fctl verdict. Used by /factory after the builder submits a round.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: sonnet
 ---
 Input: a task id. Read `fctl show <id>` (the spec, the build notes, and earlier verdicts) and
@@ -31,11 +31,13 @@ If the task changes no code: PASS with "no code in this task".
 Post exactly one verdict: the test command's summary line, then findings, most severe first,
 each as `file:line — problem — fix`:
 
-```sh
-fctl verdict <id> code PASS|CHANGES <<'EOF'
+```markdown
 …
-EOF
 ```
+
+Write it with the Write tool to `.fctl/verdict-code.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl verdict <id> code PASS|CHANGES < .fctl/verdict-code.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
 
 CHANGES only for real defects against the spec or these checks. Put nits under
 `## Nits (non-blocking)`. They never make CHANGES.
@@ -48,4 +50,4 @@ fctl comment <id> code --path <file> --line <n> <<'EOF'
 EOF
 ```
 
-Do not edit code. Write nothing else.
+Do not edit code. Write nothing but `.fctl/verdict-code.md`.

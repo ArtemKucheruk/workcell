@@ -25,8 +25,7 @@ Do:
    `fctl submit` sends every changed and untracked file that isn't ignored.
 4. End every round with `fctl submit <id>`, build notes on stdin:
 
-```sh
-fctl submit <id> <<'EOF'
+```markdown
 # Round <n>
 ## Changes
 - path: what changed and why
@@ -38,8 +37,11 @@ fctl submit <id> <<'EOF'
 - Q1 → the default you used
 ## Test output
 <the last lines of the test command's output, verbatim>
-EOF
 ```
+
+Write it with the Write tool to `.fctl/build.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl submit <id> < .fctl/build.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
 
 Never commit, and run no git command that writes: no add, commit, stash, checkout, switch,
 reset, merge, rebase, or push. `git status` and `git diff` are fine.

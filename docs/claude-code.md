@@ -108,21 +108,22 @@ Spawn the build step's agent fresh, with the name that step gives it: "Task <id>
 ---
 name: review-security
 description: Security review of the latest round of a factory task.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: opus
 ---
 Input: a task id. Read `fctl show <id>` and `fctl diff <id>`. Read files in your cwd (the
 worktree) as needed. Look for injection, missing authz, secret leaks, unsafe input handling.
-Post exactly one verdict, most severe finding first, each with file:line and the fix:
-  fctl verdict <id> security PASS|CHANGES <<'EOF'
-  …
-  EOF
+Post exactly one verdict, most severe finding first, each with file:line and the fix. Write it
+to .fctl/verdict-security.md, then run:
+  fctl verdict <id> security PASS|CHANGES < .fctl/verdict-security.md
+Never inline it in a heredoc: a run can't approve a Bash command over about 10,000 characters.
 Optional line comments: fctl comment <id> security --path <file> --line <n> <<'EOF' … EOF
-Do not edit code. Write nothing else.
+Do not edit code. Write nothing but `.fctl/verdict-security.md`.
 ```
 The builder template says: work only in your cwd, run `{{ test_cmd }}` against the spec's
-acceptance criteria, end every round with `fctl submit <id> <<'EOF' <build notes> EOF`, and
-never commit.
+acceptance criteria, end every round with `fctl submit <id> < .fctl/build.md` (build notes written
+there first), and never commit. Every agent that posts markdown (spec, build notes, verdict,
+decision) writes it under `.fctl/` the same way.
 
 All 13 agent templates (Create factory's 7, plus the 6 below) take the stack and conventions from
 the project context:

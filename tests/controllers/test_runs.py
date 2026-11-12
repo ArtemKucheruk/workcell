@@ -216,10 +216,24 @@ def test_exclude_line_once(client, project, repo):  # AC4
     exclude = repo / ".git" / "info" / "exclude"
     exclude.write_text("# mine\n*.log")  # no trailing newline
     started(client, add_task(project, "one"))
-    assert exclude.read_text() == "# mine\n*.log\n.claude/worktrees/\n"
+    assert exclude.read_text() == "# mine\n*.log\n.claude/worktrees/\n.fctl/\n"
     started(client, add_task(project, "two"))
-    assert exclude.read_text() == "# mine\n*.log\n.claude/worktrees/\n"
+    assert exclude.read_text() == "# mine\n*.log\n.claude/worktrees/\n.fctl/\n"
     assert git(repo, "status", "--porcelain") == ""
+
+
+def test_run_trusts_project(client, project, tmp_path):  # a headless run can't answer the trust dialog
+    conf = tmp_path / "claude-config" / ".claude.json"
+    conf.parent.mkdir()
+    conf.write_text('{"keep": 1, "projects": {"/other": {"x": 2}}}')
+    started(client, add_task(project, "one"))
+    [(path,)] = sql("SELECT path FROM projects WHERE id = ?", (project,))
+    assert json.loads(conf.read_text()) == {
+        "keep": 1, "projects": {"/other": {"x": 2}, path: {"hasTrustDialogAccepted": True}}}
+    assert conf.stat().st_mode & 0o777 == 0o600
+    conf.write_text("{not json")  # left alone, and the run still starts
+    started(client, add_task(project, "two"))
+    assert conf.read_text() == "{not json"
 
 
 def test_argv(client, project, fake):  # AC5
