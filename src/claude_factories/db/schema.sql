@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
   import_key TEXT UNIQUE);                -- 031: factory:<job id> of an imported bootstrap job; db.init() adds it to old DBs
 
+CREATE TABLE IF NOT EXISTS task_deps (    -- 094: task_id waits on blocked_by_id, a task of its own project; IF NOT EXISTS covers old DBs
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  blocked_by_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,  -- deleting either task drops the link
+  PRIMARY KEY (task_id, blocked_by_id));
+
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES tasks(id),

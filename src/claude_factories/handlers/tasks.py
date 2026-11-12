@@ -1,9 +1,10 @@
-"""Tasks: list, create, get, patch, and delete (docs/data-model-and-api.md §5.2, §6.2; docs/claude-code.md §7.5)."""
+"""Tasks: list, create, get, patch, delete, and 094's links between them (docs/data-model-and-api.md §5.2, §6.2;
+docs/claude-code.md §7.5)."""
 
 from ..domain.enums import STAGE_STATUS, Stage, Status
 from ..domain.errors import Conflict, Invalid, NotFound
-from ..dto.tasks import (DecisionOut, RunOut, TaskBody, TaskCreated, TaskItem, TaskOut, TaskPatch, TaskPatched,
-                         TaskSubmitted)
+from ..dto.tasks import (DecisionOut, Dep, RunOut, TaskBody, TaskCreated, TaskDeps, TaskItem, TaskOut, TaskPatch,
+                         TaskPatched, TaskSubmitted)
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -19,11 +20,23 @@ def latest_run(runs: RunsRepo, task_id: int) -> RunOut | None:
     return RunOut(**run) if run else None
 
 
+def links(tasks: TasksRepo, task_id: int) -> dict:
+    """094 AC8: the task's blocked_by and blocks, as TaskDeps takes them."""
+    return {"blocked_by": [Dep(**b) for b in tasks.blockers(task_id)],
+            "blocks": [d["id"] for d in tasks.dependents(task_id)]}
+
+
 def list_tasks(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
                project_id: int) -> list[TaskItem]:
-    """By column, then position, then id; each with its latest round's verdicts and +/−, and its latest run."""
+    """By column, then position, then id; each with its latest round's verdicts and +/−, its latest run, and its
+    links (094, from one query for the project)."""
     if not projects.exists(project_id):
         raise NotFound()
+    blocked_by: dict[int, list[Dep]] = {}
+    blocks: dict[int, list[int]] = {}
+    for link in tasks.project_links(project_id):  # by task_id, then blocker id: both lists come out sorted
+        blocked_by.setdefault(link["task_id"], []).append(Dep(**link))
+        blocks.setdefault(link["id"], []).append(link["task_id"])
     items = []
     # ponytail: 3 queries per task; one grouped query if a board grows past a few hundred tasks
     for t in sorted(tasks.for_project(project_id), key=lambda t: (COLUMNS.index(t["status"]), t["position"], t["id"])):
@@ -34,13 +47,24 @@ def list_tasks(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, rev
             round=last.get("n"), verdicts=last.get("verdicts"),
             additions=last.get("additions"), deletions=last.get("deletions"),
             run=latest_run(runs, t["id"]),
+            blocked_by=blocked_by.get(t["id"], []), blocks=blocks.get(t["id"], []),
         ))
     return items
 
 
+def check_blocker(tasks: TasksRepo, project_id: int, blocker_id: int) -> None:
+    """094 AC5: a blocker is a task of the same project."""
+    blocker = tasks.get(blocker_id)
+    if blocker is None:
+        raise Invalid(f"no task #{blocker_id}")
+    if blocker["project_id"] != project_id:
+        raise Invalid(f"#{blocker_id} is in another project; a task waits only on tasks of its own project")
+
+
 def create_task(tasks: TasksRepo, projects: ProjectsRepo, rounds: RoundsRepo, reviews: ReviewsRepo,
                 project_id: int, body: TaskBody, base_url: str) -> TaskCreated | TaskSubmitted:
-    """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (003 Q3)."""
+    """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (003 Q3). 094 AC10: with
+    its `blocked_by` links, each checked before the task is added, and a repeated id stored once."""
     title = body.title.strip()
     if not title:
         raise Invalid("title must not be blank")
@@ -48,9 +72,14 @@ def create_task(tasks: TasksRepo, projects: ProjectsRepo, rounds: RoundsRepo, re
     now = tasks.lock()  # the bottom position, the inserts, and the round, atomically
     if not projects.exists(project_id):
         raise NotFound()
+    blockers = list(dict.fromkeys(body.blocked_by))
+    for blocker_id in blockers:  # a new task has no dependents, so neither a self link nor a cycle can arise
+        check_blocker(tasks, project_id, blocker_id)
     position = tasks.bottom_position(project_id, status)
     task_id = tasks.add(project_id, title, body.description_md, status, stage, position, now)
     tasks.add_event(task_id, actor, None, status, stage, now)
+    for blocker_id in blockers:
+        tasks.link(task_id, blocker_id)
     if not body.submit:
         return TaskCreated(id=task_id, status=Status.BACKLOG)
     submitted = insert_round(rounds, reviews, task_id, body.submit)  # a refusal in here rolls the task back too
@@ -65,8 +94,51 @@ def get_task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: R
         id=task["id"], title=task["title"], status=task["status"], stage=task["stage"], branch=task["branch"],
         rounds=round_summaries(rounds, reviews, task_id),
         decisions=[DecisionOut(**d) for d in reviews.task_decisions(task_id)],
-        run=latest_run(runs, task_id),
+        run=latest_run(runs, task_id), **links(tasks, task_id),
     )
+
+
+def cycle(tasks: TasksRepo, project_id: int, task_id: int, blocker_id: int) -> list[int] | None:
+    """094 AC6: the shortest chain blocker → … → task along the project's waits-on links, which the new link
+    task → blocker would close; None when there is none."""
+    waits_on: dict[int, list[int]] = {}
+    for link in tasks.project_links(project_id):
+        waits_on.setdefault(link["task_id"], []).append(link["id"])
+    chains, todo = {blocker_id: [blocker_id]}, [blocker_id]
+    while todo:
+        at = todo.pop(0)
+        if at == task_id:
+            return chains[at]
+        for nxt in waits_on.get(at, ()):
+            if nxt not in chains:
+                chains[nxt] = chains[at] + [nxt]
+                todo.append(nxt)
+    return None
+
+
+def block(tasks: TasksRepo, task_id: int, blocker_id: int) -> TaskDeps:
+    """094: task_id waits on blocker_id from now on. Refused for itself, an unknown task, another project's task,
+    or a cycle. Q2: a link that's there already is a 200 with the same body."""
+    tasks.lock()  # the cycle walk and the insert commit together
+    task = tasks.get(task_id)
+    if task is None:
+        raise NotFound(f"Task #{task_id} not found")
+    if blocker_id == task_id:
+        raise Invalid(f"#{task_id} can't wait on itself")
+    check_blocker(tasks, task["project_id"], blocker_id)
+    if chain := cycle(tasks, task["project_id"], task_id, blocker_id):
+        raise Invalid(f"cycle: #{task_id} waits on " + ", which waits on ".join(f"#{n}" for n in chain))
+    tasks.link(task_id, blocker_id)
+    return TaskDeps(id=task_id, **links(tasks, task_id))
+
+
+def unblock(tasks: TasksRepo, task_id: int, blocker_id: int) -> TaskDeps:
+    """094 Q3: the link goes; one that isn't there is a 404."""
+    if not tasks.exists(task_id):
+        raise NotFound(f"Task #{task_id} not found")
+    if not tasks.unlink(task_id, blocker_id):
+        raise NotFound(f"#{task_id} is not blocked by #{blocker_id}")
+    return TaskDeps(id=task_id, **links(tasks, task_id))
 
 
 PATCH_GROUPS = ({"spec_md"}, {"stage"}, {"status", "position"}, {"title"}, {"description_md"},

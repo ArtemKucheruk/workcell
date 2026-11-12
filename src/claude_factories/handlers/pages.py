@@ -378,9 +378,10 @@ def page_task(tasks: TasksRepo, task_id: int):
 
 def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, transcripts: TranscriptsRepo,
          git: Git, claude: Claude, accounts: ClaudeAccountsRepo, task_id: int) -> dict:
-    """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, spec,
-    rounds with build notes, verdict popovers, and agents (030), the approver's latest decision, the status
-    history, the takeover command (Q9), and the run log."""
+    """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, 094's Blocked by
+    and Blocks, spec, rounds with build notes, verdict popovers, and agents (030), the approver's latest decision,
+    the status history, the takeover command (Q9), and the run log. 094 Q8: `project_tasks`, the project's other
+    tasks by id, are Add's candidates."""
     found = page_task(tasks, task_id)
     run = runs.latest_detail(task_id)
     factory = factory_state(git, found["path"], found["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
@@ -401,6 +402,9 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
         "reviewers": REVIEWERS, "approver": reviews.approver_latest(task_id),
         "history": [e for e in tasks.timeline(task_id) if e["kind"] == 0],  # Q8: events only
         "transcripts": [t.model_dump() for t in for_task(tasks, transcripts, task_id)],  # 030 Q11
+        "blocked_by": tasks.blockers(task_id), "blocks": tasks.dependents(task_id),
+        "project_tasks": sorted((t for t in tasks.for_project(found["project_id"]) if t["id"] != task_id),
+                                key=lambda t: t["id"]),
     }
 
 

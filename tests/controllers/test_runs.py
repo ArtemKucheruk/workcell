@@ -575,6 +575,65 @@ def test_run_next_while_running(client, project, queue):  # AC27
     assert task_row(queue)["status"] == "backlog"
 
 
+# --- 094: blocked tasks don't run -------------------------------------------------------
+
+
+def waits(task_id, *blockers):
+    for blocker in blockers:
+        sql("INSERT INTO task_deps (task_id, blocked_by_id) VALUES (?, ?)", (task_id, blocker))
+
+
+def test_refused_when_blocked(client, project, repo, fake, tmp_path):  # 094 AC12, Q1
+    first, done, second = add_task(project), add_task(project, status="done"), add_task(project, status="in_progress")
+    task = add_task(project)
+    waits(task, second, done, first)
+    r = run(client, task)
+    detail = f"#{task} is blocked by #{first}, #{second}; finish those first or remove the dependency"
+    assert (r.status_code, r.json()) == (409, {"detail": detail})
+    assert not (repo / ".claude" / "worktrees").exists()
+    assert not fake.invoked() and no_runs()
+    assert task_row(task)["status"] == "backlog"
+    review = add_task(project, status="review", stage="human_review")
+    waits(review, first)
+    assert run(client, review).json() == {"detail": f"#{review} is in review"}  # after the review/done 409
+    other = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "main", str(other))
+    blocker = add_task(connect(client, other))
+    blocked = add_task(sql("SELECT project_id FROM tasks WHERE id = ?", (blocker,))[0][0])
+    waits(blocked, blocker)
+    assert run(client, blocked).json() == {  # before the factory check: that repo has no factory
+        "detail": f"#{blocked} is blocked by #{blocker}; finish those first or remove the dependency"}
+    assert not fake.invoked() and no_runs()
+
+
+def test_run_next_skips_blocked(client, project, fake):  # 094 AC13
+    working = add_task(project, status="in_progress", position=0.5)
+    top = add_task(project, "top", position=1.0)
+    tie = add_task(project, "tie", position=1.0)
+    add_task(project, "later", position=2.0)
+    waits(top, working)
+    r = client.post(f"/api/projects/{project}/run-next", headers=H)
+    assert r.status_code == 202, r.text
+    assert r.json() == {"task_id": tie, "run_id": sql("SELECT id FROM runs")[0][0]}
+    wait(r.json()["run_id"])
+    assert (task_row(top)["status"], task_row(tie)["status"]) == ("backlog", "in_progress")
+
+
+def test_run_next_all_blocked(client, project, fake):  # 094 AC14, Q5
+    first, done, second = (add_task(project, status="in_progress"), add_task(project, status="done"),
+                           add_task(project, status="review", stage="human_review"))
+    top, later = add_task(project, "top", position=1.0), add_task(project, "later", position=2.0)
+    waits(top, second, done, first)
+    waits(later, first)
+    r = client.post(f"/api/projects/{project}/run-next", headers=H)
+    assert (r.status_code, r.json()) == (
+        409, {"detail": f"all backlog tasks are blocked: #{top} waits on #{first}, #{second}"})
+    assert no_runs() and not fake.invoked()
+    sql("DELETE FROM tasks WHERE id IN (?, ?)", (top, later))  # deleting a task drops its links (ON DELETE CASCADE)
+    r = client.post(f"/api/projects/{project}/run-next", headers=H)
+    assert (r.status_code, r.json()) == (404, {"detail": "backlog is empty"})
+
+
 # --- 036: the adapters come from Depends ------------------------------------------
 
 

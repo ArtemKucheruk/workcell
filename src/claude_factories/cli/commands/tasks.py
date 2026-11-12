@@ -1,9 +1,18 @@
+import argparse
 from pathlib import Path
 
 from ..client import api, base_url
 from ..git import main_checkout
 from ..output import fail, print_run, stdin_text
 from .projects import plural, project_at
+
+
+def task_ids(text: str) -> list[int]:
+    """094 AC18: `12,14` → [12, 14]. A part that isn't a positive integer is argparse's usage error (exit 2)."""
+    parts = text.split(",")
+    if not all(p.isascii() and p.isdigit() and int(p) > 0 for p in parts):
+        raise argparse.ArgumentTypeError(f"task ids must be positive integers separated by commas, not {text!r}")
+    return [int(p) for p in parts]
 
 
 def task_add(args):
@@ -13,12 +22,22 @@ def task_add(args):
         if not text.strip():  # Q1: refused before any request, like fctl spec
             fail("description is empty; pass it as text, or on stdin with --description -")
         body["description_md"] = text
+    if args.blocked_by is not None:  # 094 AC17
+        body["blocked_by"] = args.blocked_by
     project = project_at(main_checkout())
     task = api("POST", f"/api/projects/{project['id']}/tasks", body)
     # flush: a refused run's stderr line must come after this one, also when stdout is a pipe
     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}", flush=True)
     if args.run:  # Q11: a refused run leaves the task in Backlog, its Added line already printed
         print_run(task["id"], api("POST", f"/api/tasks/{task['id']}/run")["run_id"])
+
+
+def task_block(args):
+    """094 AC19: fctl task block (PUT) and unblock (DELETE), then every link left, with its blocker's status.
+    Task ids are global, so no repo is needed."""
+    deps = api(args.method, f"/api/tasks/{args.id}/blocked-by/{args.by}")
+    blockers = ", ".join(f"#{d['id']} ({d['status']})" for d in deps["blocked_by"])
+    print(f"#{deps['id']} blocked by {blockers}" if blockers else f"#{deps['id']} has no blockers")
 
 
 def export(args):

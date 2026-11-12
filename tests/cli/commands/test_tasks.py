@@ -182,6 +182,53 @@ def test_task_add_help(capsys):  # 060 BE6
     assert '"-" reads it from stdin' in out
 
 
+# --- 094: fctl task add --blocked-by, fctl task block, fctl task unblock ----------------------------------------
+
+
+def test_task_add_blocked_by(task_server, repo, monkeypatch, capsys):  # 094 AC17
+    monkeypatch.chdir(repo)
+    main(["task", "add", "T", "--blocked-by", "12,14"])
+    assert requests(task_server)[1] == ("POST", "/api/projects/3/tasks", {"title": "T", "blocked_by": [12, 14]})
+    assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+
+
+@pytest.mark.parametrize("value", ["12,x", "x", "0", "12,-1", "12,,14", "1.5", "12, 14", ""])
+def test_task_add_blocked_by_usage(server, repo, monkeypatch, capsys, value):  # 094 AC18
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        main(["task", "add", "T", f"--blocked-by={value}"])
+    assert e.value.code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("usage: fctl task add") and "argument --blocked-by: task ids must be positive" in err
+    assert server.requests == []
+
+
+DEPS = {"id": 15, "blocked": True, "blocked_by": [{"id": 12, "title": "A", "status": "backlog"},
+                                                  {"id": 14, "title": "B", "status": "done"}], "blocks": []}
+
+
+@pytest.mark.parametrize("words, method", [("block", "PUT"), ("unblock", "DELETE")])
+def test_task_block(server, tmp_path, monkeypatch, capsys, words, method):  # 094 AC19
+    monkeypatch.chdir(tmp_path)  # task ids are global: no repo needed
+    server.replies = [reply(DEPS), reply(DEPS | {"blocked": False, "blocked_by": []})]
+    main(["task", words, "15", "--by", "12"])
+    main(["task", words, "15", "--by", "12"])
+    assert requests(server) == [(method, "/api/tasks/15/blocked-by/12", None)] * 2
+    assert capsys.readouterr().out == "#15 blocked by #12 (backlog), #14 (done)\n#15 has no blockers\n"
+
+
+@pytest.mark.parametrize("argv, status, detail", [
+    (["block", "15", "--by", "12"], 422, "cycle: #15 waits on #12, which waits on #15"),
+    (["unblock", "15", "--by", "12"], 404, "#15 is not blocked by #12"),
+])
+def test_task_block_refused(server, monkeypatch, capsys, argv, status, detail):  # 094 AC20
+    server.reply = reply({"detail": detail}, status)
+    with pytest.raises(SystemExit) as e:
+        main(["task", *argv])
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", f"fctl: {status} {detail}\n")
+
+
 # --- 032: fctl export, fctl import -------------------------------------------------------------
 
 ZIP = b"PK\x05\x06" + b"\x00" * 18  # an empty zip's bytes

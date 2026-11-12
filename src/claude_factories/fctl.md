@@ -619,14 +619,15 @@ fctl import task-12.zip
 
 ## fctl task add
 
-Adds a task to the bottom of the current repo's Backlog, with an optional markdown description, and
-with `--run` starts a factory run on it. Calls `POST /api/projects/{id}/tasks` with `title` and,
-when given, `description_md`, then with `--run` `POST /api/tasks/{id}/run`.
+Adds a task to the bottom of the current repo's Backlog, with an optional markdown description and
+the tasks it waits on, and with `--run` starts a factory run on it. Calls
+`POST /api/projects/{id}/tasks` with `title` and, when given, `description_md` and `blocked_by`,
+then with `--run` `POST /api/tasks/{id}/run`.
 
 **Synopsis**
 
 ```
-fctl task add "title" [--description TEXT] [--run]
+fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]
 ```
 
 **Arguments and flags**
@@ -635,6 +636,10 @@ fctl task add "title" [--description TEXT] [--run]
 - `--description TEXT`: the task's description, as markdown, sent unchanged. `--description -`
   reads it from stdin instead, so a literal `-` is sent by piping it:
   `printf '%s\n' - | fctl task add "T" --description -`. Without the flag the task has only a title.
+- `--blocked-by IDS`: the tasks it waits on, comma-separated with no spaces, for example `12,14`.
+  Each must be a task of the same project. The new task is blocked until all of them are done. Change
+  the links later with [fctl task block](#fctl-task-block) and
+  [fctl task unblock](#fctl-task-unblock).
 - `--run`: then start a factory run on it, as `fctl run <id>` does.
 
 **Stdin**
@@ -659,10 +664,15 @@ Run #41 on #12 → http://127.0.0.1:4545/tasks/12
 **Exit codes and errors**
 
 - `fctl: description is empty; pass it as text, or on stdin with --description -`, exit `1`.
+- `--blocked-by` with a part that isn't a positive integer, such as `12,x`: argparse's usage error,
+  with no call to the app, exit `2`.
 - `fctl: 422 title must not be blank`, exit `1`.
+- `fctl: 422 no task #99` or
+  `fctl: 422 #30 is in another project; a task waits only on tasks of its own project`: no task is
+  added, exit `1`.
 - `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
 - With `--run`, any refusal of [fctl run](#fctl-run), exit `1`. The task stays in Backlog and the
-  `Added` line is already printed.
+  `Added` line is already printed. A task added with open blockers is refused as blocked.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 
@@ -677,6 +687,104 @@ fctl task add "Rate-limit login endpoint" --run --description - <<'EOF'
 ## Why
 Max 5 failed logins per minute per IP.
 EOF
+```
+
+## fctl task block
+
+Makes a task wait on another task of its project: the task is blocked until that one is done, and
+Run, Retry, and Run next refuse it until then. Calls `PUT /api/tasks/{id}/blocked-by/{blocker}`.
+
+**Synopsis**
+
+```
+fctl task block <id> --by <id>
+```
+
+Task ids are global, so it works from any directory. Blocking a task again on the same task changes
+nothing and prints the same line.
+
+**Arguments and flags**
+
+- `<id>`: the task that waits.
+- `--by <id>`: the task it waits on, one per call.
+
+**Stdin**
+
+none
+
+**Output**
+
+Every task it now waits on, by id, with that task's status:
+
+```
+#15 blocked by #12 (backlog), #14 (done)
+```
+
+**Exit codes and errors**
+
+- `fctl: 404 Task #15 not found`, exit `1`.
+- `fctl: 422 #15 can't wait on itself`, exit `1`.
+- `fctl: 422 no task #99`, exit `1`.
+- `fctl: 422 #30 is in another project; a task waits only on tasks of its own project`, exit `1`.
+- `fctl: 422 cycle: #15 waits on #12, which waits on #14, which waits on #15`: the link would close a
+  loop, so nothing is added, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl task block 15 --by 12
+```
+
+## fctl task unblock
+
+Stops a task waiting on another task. Calls `DELETE /api/tasks/{id}/blocked-by/{blocker}`.
+
+**Synopsis**
+
+```
+fctl task unblock <id> --by <id>
+```
+
+Task ids are global, so it works from any directory.
+
+**Arguments and flags**
+
+- `<id>`: the task that waits.
+- `--by <id>`: the task to stop waiting on, one per call.
+
+**Stdin**
+
+none
+
+**Output**
+
+Every task it still waits on, as [fctl task block](#fctl-task-block) prints them, or, with none left:
+
+```
+#15 has no blockers
+```
+
+**Exit codes and errors**
+
+- `fctl: 404 Task #15 not found`, exit `1`.
+- `fctl: 404 #15 is not blocked by #12`, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl task unblock 15 --by 12
 ```
 
 ## fctl run
@@ -694,7 +802,7 @@ fctl run next
 **Arguments and flags**
 
 - `<id>`: the task to run. It works from any directory.
-- `next`: the top of the current repo's Backlog. It needs the repo.
+- `next`: the top ready task of the current repo's Backlog, skipping blocked ones. It needs the repo.
 
 **Stdin**
 
@@ -714,6 +822,9 @@ branch `factory/12-rate-limit-login` from the default branch. Later runs reuse i
 - `fctl: 404 no task #12`, exit `1`.
 - `fctl: 409 run #41 active`: only one run at a time, across all projects, exit `1`.
 - `fctl: 409 #12 is in review` or `fctl: 409 #12 is done`, exit `1`.
+- `fctl: 409 #15 is blocked by #12, #14; finish those first or remove the dependency`: the task
+  waits on tasks that aren't done (only those are named). Finish them, or remove the link with
+  [fctl task unblock](#fctl-task-unblock), exit `1`.
 - `fctl: 409 factory isn't committed on main: …`: the message names the next step, exit `1`.
 - `fctl: 409 this repo runs the file-based /factory loop: …`: the committed SKILL.md isn't the app's
   template, and the message names the fix, exit `1`.
@@ -726,6 +837,9 @@ branch `factory/12-rate-limit-login` from the default branch. Later runs reuse i
 - `fctl: 500 can't start claude: <reason>`, exit `1`.
 - `next` only: `fctl: 404 backlog is empty` and
   `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+- `next` only: `fctl: 409 all backlog tasks are blocked: #15 waits on #12, #14`: `next` skips
+  blocked tasks and takes the top ready one; with none ready it names the top Backlog task and the
+  tasks it waits on, exit `1`.
 - A target that is neither a number nor `next`:
   `fctl run: error: target must be a task id or next, not 'abc'`, exit `2`.
 

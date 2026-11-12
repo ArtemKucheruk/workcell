@@ -1141,6 +1141,7 @@ def test_board_card(client, project):  # AC9
         "verdicts": {"security": "PASS", "ux": "CHANGES", "ui": "pending", "code": "pending"},
         "additions": 5, "deletions": 2, "run": {"id": run, "status": "running"}, "started_at": STARTED,
         "waiting": False, "escalated": False, "stalled": False, "branch": None, "description_md": "",
+        "blocked": False, "blocked_by": [], "blocks": [],  # 094 AC15
     }
     assert [found[bare][k] for k in ("round", "verdicts", "additions", "deletions", "run", "started_at")] == [None] * 6
 
@@ -1176,7 +1177,42 @@ def test_card_description(client, project):  # 048 BE12
 def test_task_list_keys(client, project):  # 042 BE4: the card's branch and position stay off §6.2's list
     review_task(project, branch="factory/12-x")
     [item] = api(client, f"/api/projects/{project}/tasks")
-    assert set(item) == {"id", "title", "status", "stage", "round", "verdicts", "additions", "deletions", "run"}
+    assert set(item) == {"id", "title", "status", "stage", "round", "verdicts", "additions", "deletions", "run",
+                         "blocked", "blocked_by", "blocks"}  # 094 AC8
+
+
+def link(task_id, *blockers):
+    for blocker in blockers:
+        sql("INSERT INTO task_deps (task_id, blocked_by_id) VALUES (?, ?)", (task_id, blocker))
+
+
+def test_card_links(client, project):  # 094 AC15
+    done, open_ = add_task(project, "D", status="done"), add_task(project, "O", status="in_progress")
+    task = add_task(project, "T")
+    link(task, open_, done)
+    found = cards(client, project)
+    assert {k: found[task][k] for k in ("blocked", "blocked_by", "blocks")} == {
+        "blocked": True, "blocks": [],
+        "blocked_by": [{"id": done, "title": "D", "status": "done"}, {"id": open_, "title": "O", "status": "in_progress"}]}
+    assert (found[done]["blocked"], found[done]["blocks"]) == (False, [task])
+    assert (found[open_]["blocked"], found[open_]["blocked_by"], found[open_]["blocks"]) == (False, [], [task])
+
+
+def test_task_page_links(client, project):  # 094 AC16, Q8
+    later, task = add_task(project, "Later", status="done"), add_task(project, "Task")
+    first, waiting = add_task(project, "First", status="review", stage="human_review"), add_task(project, "Waiting")
+    add_task(connect(client, "/code/other"), "Elsewhere")
+    link(task, first, later)
+    link(waiting, task)
+    page = api(client, f"/api/pages/tasks/{task}")
+    assert page["blocked_by"] == [{"id": later, "title": "Later", "status": "done"},
+                                  {"id": first, "title": "First", "status": "review"}]
+    assert page["blocks"] == [{"id": waiting, "title": "Waiting", "status": "backlog"}]
+    assert page["project_tasks"] == [{"id": later, "title": "Later", "status": "done"},
+                                     {"id": first, "title": "First", "status": "review"},
+                                     {"id": waiting, "title": "Waiting", "status": "backlog"}]
+    bare = api(client, f"/api/pages/tasks/{first}")
+    assert (bare["blocked_by"], bare["blocks"]) == ([], [{"id": task, "title": "Task", "status": "backlog"}])
 
 
 def test_card_waiting(client, project):  # AC10

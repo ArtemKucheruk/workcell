@@ -183,6 +183,14 @@ Loading, failures, times, and motion are the same on every page:
      and moves: the next of these empties it as it starts, and polls leave it alone.
    - From `md` up each column's card list scrolls on its own under its heading. Below `md` the
      columns stack and the page scrolls.
+   - A blocked card (one waiting on a task that isn't done, §5.1) in Backlog, In progress, or
+     Review looks muted: the column's `raised` background with no shadow, its text in the usual
+     tokens, so nothing drops below 4.5:1. It shows a lock icon and the text `Blocked by #12, #14`,
+     naming only the blockers that aren't done. Each `#id` links to that task, and hovering or
+     focusing it shows `<title> · <Status>` (`Rate-limit login · Backlog`), which is also the link's
+     accessible description. Ready cards and every Done card show no badge. **Run** stays enabled
+     on a blocked card; the server's 409 (`#15 is blocked by #12; …`) shows in the board's alert.
+     **Run next** skips blocked cards and starts the top ready one.
 4. **Task detail** (`/tasks/{id}`)
    - Header: the breadcrumb, then the title row: the title, Run / Stop / Retry, the run
      status (`run #N <status>`, and for a running run its start as a relative time:
@@ -194,6 +202,14 @@ Loading, failures, times, and motion are the same on every page:
      **Download** link to the task bundle (`GET /api/tasks/{id}/export`, a plain
      `<a download>`, with `?transcripts=1` while the box is ticked). Esc or a click outside
      closes it, and a download leaves it open.
+   - Description, then **Blocked by**: one row per task this one waits on, done ones included,
+     by id: its `#id` link, title, status pill, and a **Remove** button; `No blockers.` with none.
+     Under the rows, a native `<select>` of the project's other tasks, minus the current blockers,
+     and **Add**. Add sends `PUT /api/tasks/{id}/blocked-by/{picked}`, Remove
+     `DELETE /api/tasks/{id}/blocked-by/{blocker}` (§6.2), then the page reloads. A refusal (a
+     cycle, say) shows its detail inside the section, and the select keeps its pick. Then
+     **Blocks**: the `#id` link and title of each task waiting on this one, or `Blocks nothing.`;
+     read-only, so a link is edited from the waiting task's page.
    - Spec (rendered markdown).
    - Rounds: build notes (collapsible), 4 chips that open the verdict, and +/−.
    - Agents per round: one row per transcript of that round, with its name (else agent type,

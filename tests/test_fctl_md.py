@@ -126,13 +126,27 @@ def test_claude_code_links_the_page():  # AC15
     assert "](../src/claude_factories/fctl.md)" in commands
 
 
-def test_claude_code_task_add_row():  # 060 BE8
+def test_claude_code_task_add_row():  # 060 BE8, 094 AC21
     doc = (REPO / "docs" / "claude-code.md").read_text()
     start = doc.index("### 7.2 Commands")
     commands = doc[start:doc.index("### 7.3", start)]
     [row] = [line for line in commands.splitlines() if line.startswith("| `fctl task add")]
-    assert row.startswith('| `fctl task add "title" [--description TEXT] [--run]`')
+    assert row.startswith('| `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]`')
     assert "`--description -`" in row and "`description_md`" in row.split("|")[3]
+    assert "`blocked_by`" in row.split("|")[3]
+
+
+def test_task_block_sections():  # 094 AC21: the new commands' rows, and fctl run's new 409s
+    doc = (REPO / "docs" / "claude-code.md").read_text()
+    commands = doc[doc.index("### 7.2 Commands"):doc.index("### 7.3")]
+    for words, method in (("block", "PUT"), ("unblock", "DELETE")):
+        [row] = [line for line in commands.splitlines() if line.startswith(f"| `fctl task {words} <id> --by <id>`")]
+        assert f"`{method} /api/tasks/{{id}}/blocked-by/{{blocker}}`" in row
+        assert f"fctl task {words} <id> --by <id>" in section(f"task {words}")
+    assert "--blocked-by IDS" in section("task add")
+    run = section("run")
+    assert "409 #15 is blocked by #12, #14; finish those first or remove the dependency" in run
+    assert "409 all backlog tasks are blocked: #15 waits on #12, #14" in run
 
 
 def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example
