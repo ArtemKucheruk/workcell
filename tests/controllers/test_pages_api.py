@@ -1498,7 +1498,7 @@ def test_review(client, project):  # AC16
     add_comment(tid, r1, "me", "hi *there*", at="2026-01-01T00:00:05Z")
     add_round(tid, 2, trigger="human", files=((2, 1), (1, 1)), at="2026-01-01T00:00:06Z")
     page = api(client, f"/api/pages/tasks/{tid}/review")
-    assert set(page) == {"task", "rounds", "selected", "approver", "files", "timeline"}
+    assert set(page) == {"task", "pr", "rounds", "selected", "approver", "files", "timeline"}  # 093: pr
     assert set(page["task"]) == TASK_KEYS | {"commit_hint"}
     assert page["task"]["spec_html"] == "<h2>Goal</h2>\n"
     assert [set(r) for r in page["rounds"]] == [SUMMARY_KEYS | {"posted"}] * 2

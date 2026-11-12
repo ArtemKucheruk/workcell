@@ -11,6 +11,7 @@ import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { FileTree } from '../../components/FileTree.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { PullRequest } from '../../components/PullRequest.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TabsSkeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, popover, smallButton, tab } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
@@ -325,7 +326,7 @@ function Files({ page, onSent }) {
 // --- Review changes and Commit it yourself (docs/ui.md §8 item 5) -----------------------
 
 const DECISIONS = [
-  ['approve', 'Approve', 'Mark it done. The app never runs git, so you commit it yourself.'],
+  ['approve', 'Approve', 'Mark it done. Then commit and merge it with Create PR and Merge PR, or by hand.'], // 093 AC45
   ['changes', 'Request changes', 'Send it back for another round, with the summary as its brief.'],
 ]
 
@@ -436,7 +437,7 @@ function CommitHint({ hint }) {
       <h2 id="review-commit" className="mt-0">
         Commit it yourself
       </h2>
-      <p className={muted}>Done. The app never runs git; run these in a terminal.</p>
+      <p className={muted}>Done. Commit and merge with the buttons above, or run these in a terminal.</p>
       <div className="mt-2 flex items-start gap-2">
         <pre ref={pre} className="min-w-0 grow overflow-x-auto rounded-md border border-line p-3 text-sm">
           {hint}
@@ -521,9 +522,11 @@ export function ReviewPage() {
     <>
       <header className="mb-6 grid gap-2">
         <Breadcrumbs items={[...projectTrail(task), { label: `#${task.id}`, to: `/tasks/${task.id}` }, { label: 'Review' }]} />
-        {/* 047: the title row, Review changes at its end as on GitHub; it wraps under a long title */}
+        {/* 047: the title row, Review changes at its end as on GitHub; it wraps under a long title. 093 Q1: the PR's
+            buttons beside it */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <h1 className="mr-auto wrap-anywhere">{heading}</h1>
+          {page.pr && <PullRequest key={task.id} taskId={task.id} pr={page.pr} onChange={refresh} />}
           <ReviewChanges task={task} off={off} onDone={refresh} />
         </div>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">

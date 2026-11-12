@@ -129,6 +129,17 @@ def test_description_and_pr(client, repo, project):  # AC5
     assert task("003-c")["description_md"] == "Build 003-c"
 
 
+def test_pr_url(client, repo, project):  # 093 AC2
+    url = "https://github.com/me/r/pull/5"
+    no_pr = entry("003-c")
+    del no_pr["pr"]
+    board(repo, entry("001-a", pr=url), entry("002-b"), no_pr, entry("004-d", pr="https://github.com/me/r/issues/5"))
+    ok(client, project)
+    assert task("001-a")["pr_url"] == url
+    assert task("001-a")["description_md"] == f"Build 001-a\n\nPR: {url}"
+    assert [task(j)["pr_url"] for j in ("002-b", "003-c", "004-d")] == [None, None, None]
+
+
 def test_dates(client, repo, project):  # AC6
     reopened = [{"at": T[0], "status": "in_progress", "stage": "spec"}, {"at": T[1], "status": "done", "stage": None},
                 {"at": T[2], "status": "review", "stage": "escalated"}, {"at": T[3], "status": "done", "stage": None}]

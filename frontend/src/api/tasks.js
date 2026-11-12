@@ -24,3 +24,14 @@ export const blockTask = (id, blocker) => api(blockedBy(id, blocker), { method: 
 
 /** 094: task `id` stops waiting on task `blocker`; resolves to <Deps>. */
 export const unblockTask = (id, blocker) => api(blockedBy(id, blocker), { method: 'DELETE' })
+
+const pr = (id) => `/api/tasks/${encodeURIComponent(id)}/pr`
+
+/** 093: commit, push, and open (or reuse) the task's PR; resolves to {number, url, reused}. */
+export const createPr = (id) => api(pr(id), { method: 'POST' })
+
+/** 093: the PR's state from gh; resolves to {number, url, state, checks: {passed, failed, pending}}. */
+export const prState = (id) => api(pr(id))
+
+/** 093: merge the PR, update main if safe, and clean up; resolves to {number, state, notes}. */
+export const mergePr = (id) => api(`${pr(id)}/merge`, { method: 'POST' })

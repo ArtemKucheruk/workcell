@@ -11,6 +11,7 @@ import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
+import { PullRequest } from '../../components/PullRequest.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
@@ -351,10 +352,12 @@ export function TaskPage() {
     <>
       <header className="mb-6 grid gap-2">
         <Breadcrumbs items={[...projectTrail(task), { label: `#${task.id}` }]} />
-        {/* 047: the title row; the run controls sit at its end, and wrap under the title when it's long */}
+        {/* 047: the title row; the run controls sit at its end, and wrap under the title when it's long. 093 Q1: the
+            PR's buttons beside them */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <h1 className="mr-auto wrap-anywhere">{heading}</h1>
           <RunControls page={page} onAction={runAction} />
+          {page.pr && <PullRequest key={task.id} taskId={task.id} pr={page.pr} onChange={refresh} />}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <TaskState task={task} />

@@ -197,6 +197,22 @@ Loading, failures, times, and motion are the same on every page:
      `run #41 running · started 5m ago`), and beside Run or Retry the hint for why runs are
      off. The row wraps on narrow screens. Under it, the status line: the status pill and
      stage, branch, Review, and an **Export** button.
+   - On a factory task (one with a branch and worktree), the title row also holds the PR
+     controls, after the run controls (093, shared with item 5). With no PR: **Create PR**,
+     enabled only for a done task whose worktree has changes or commits beyond the default
+     branch (`pr.can_create`), else disabled with its hint beside it (`Approve it first.`,
+     `The worktree is gone.`, `Nothing to commit beyond main.`). It sends `POST /api/tasks/{id}/pr`
+     (§6.3) and reloads the page; a refusal (gh's or git's message) shows in an alert beside it.
+     With a PR: the `PR #71` link (new tab, announced as such), its state as an icon plus text
+     (`● Open`, `✓ Merged`, `✕ Closed`), and its checks as text (`checks: 2 passed, 1 failed,
+     0 pending`, or `no checks`), from `GET /api/tasks/{id}/pr` every 10 s while open or unknown,
+     stopping at Merged or Closed. Then **Merge PR**, enabled only while Open, else disabled with
+     `Merged.`, `Closed on GitHub.`, or `Loading PR state…`. It opens the shared native
+     `<dialog>` (`Merge PR #71?`, saying it merges with a merge commit, fast-forwards main if
+     safe, and deletes the worktree, local branch, and remote branch); Cancel and Esc send
+     nothing, Merge PR sends `POST /api/tasks/{id}/pr/merge`, and a refusal stays in the dialog.
+     On success the dialog closes, the step notes are listed in a status region, and the page
+     reloads.
    - **Export** opens a native popover holding an **Include transcripts** checkbox,
      labelled with the warning that they can hold paths, env, and secrets, and a
      **Download** link to the task bundle (`GET /api/tasks/{id}/export`, a plain
@@ -219,7 +235,8 @@ Loading, failures, times, and motion are the same on every page:
      **Other agents** after Rounds, each with its `run #`.
    - The approver's decision.
    - Status history (`events`): each entry's relative time, then its label
-     (`5m ago created · backlog`).
+     (`5m ago created · backlog`), ending in the event's note when it has one
+     (`2m ago done · PR #71 opened`).
    - Run log tail (collapsed; `/tasks/{id}#run-log` opens it and scrolls to it).
    - "Take over in terminal" command.
    - A link to Review.
@@ -235,9 +252,12 @@ Loading, failures, times, and motion are the same on every page:
      least one round. **Submit review** stays disabled until a choice is picked, and for
      Request changes until the summary has text. The summary goes with either choice:
      Approve sends it as its `body_md`, blank or not. A success closes and resets the
-     popover; a refusal shows its detail inside it and keeps what was typed.
-   - On a done task, **Commit it yourself** shows the commit commands (§3.7) with a **Copy**
-     button. It writes them with `navigator.clipboard` and then reads `Copied`. Without the
+     popover; a refusal shows its detail inside it and keeps what was typed. Approve's note
+     says to commit and merge with Create PR and Merge PR, or by hand.
+   - The PR controls of item 4 sit on the title row before **Review changes** (093).
+   - On a done task, **Commit it yourself** stays, for doing it by hand: `Done. Commit and merge
+     with the buttons above, or run these in a terminal.`, then the commit commands (§3.7) with a
+     **Copy** button. It writes them with `navigator.clipboard` and then reads `Copied`. Without the
      clipboard, or when the write fails, it selects the commands' text and says to press
      Ctrl+C (⌘C on a Mac).
 6. **Project code** (`/projects/{id}/code`)
@@ -514,6 +534,14 @@ columns: from md up each card list scrolls on its own under its heading
 personal › api-server › #12 › Review
 #12 Rate-limit login endpoint                                    [Review changes ▾]
 (Review) (waiting on you)   factory/12-rate-limit-login   round [2 ▾]   4 files  +126 −9
+
+once done, the title row gets the PR controls before Review changes:
+#12 Rate-limit login endpoint   [Create PR]                     [Review changes ▾]
+#12 Rate-limit login endpoint   [Create PR] Approve it first.   [Review changes ▾]   (disabled)
+#12 Rate-limit login endpoint   PR #71 ↗  ● Open · checks: 2 passed, 1 failed, 0 pending
+                                [Merge PR]                      [Review changes ▾]
+[Merge PR]: a native dialog, "Merge PR #71?", [Cancel] [Merge PR]; then the step notes:
+  • Fast-forwarded main to origin/main.  • Removed the worktree ….  • Deleted the local branch ….
 ─ Conversation ─┬─ Files changed 4 ─────────────────────────────────────────────────────
                 │
  Description    Max 5 failed logins/min per IP.  (spec ▸)

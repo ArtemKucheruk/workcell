@@ -2,7 +2,8 @@
 
 A local control center for Claude Code "software factories": a loop of subagents that
 specs a feature, builds it in a git worktree, reviews it four ways, and hands it to you.
-Claude never commits. You review the diff and commit yourself.
+Agents never commit. You review the diff, then commit and merge by hand or with the app's
+Create PR and Merge PR buttons.
 
 > **Status: early.** The app is being built by its own bootstrap factory, a file-based
 > version of the same loop that lives in [`factory/`](factory/). Job 001 (package layout,

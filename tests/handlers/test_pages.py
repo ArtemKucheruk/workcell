@@ -43,7 +43,7 @@ def test_page_handlers_raise_not_found(conn, repo):  # 036 AC11
                                       claude, accounts, 999)) == "Not Found"
     assert detail(lambda: pages.task(tasks, rounds, reviews, runs, TranscriptsRepo(conn), git, claude, accounts,
                                      999)) == "Task #999 not found"
-    assert detail(lambda: pages.review(tasks, rounds, reviews, 999, "latest", "")) == "Task #999 not found"
+    assert detail(lambda: pages.review(tasks, rounds, reviews, git, 999, "latest", "")) == "Task #999 not found"
     assert detail(lambda: code.code(projects, git, 999, "")) == "Project #999 not found"
     commit(repo, {"README.md": "# hi\n"})
     project = projects.add(workspaces.get_or_create("personal"), "api", str(repo), None, "main", None)

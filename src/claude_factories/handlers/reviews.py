@@ -94,7 +94,8 @@ def decide(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task, now
 
 
 def approve(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, body: ApproveBody) -> ApproveOut:
-    """§3.7: my APPROVE → done, and the commands I run myself. The app never runs git."""
+    """§3.7: my APPROVE → done, and the commands I can run myself. Approving runs no git; 093's Create PR and
+    Merge PR do, only when I click them."""
     now, task = locked_task(tasks, task_id)
     decide(tasks, rounds, reviews, task, now, "APPROVE", body.body_md, Status.DONE, None)
     return ApproveOut(status=Status.DONE, commit_hint=commit_hint(task))
