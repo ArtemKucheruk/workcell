@@ -582,6 +582,14 @@ POST /api/tasks/12/run                                            (Run, Retry, f
   # a blocked task, checked after the review/done 409 and before the factory check, for Run, Retry,
   #   Run next, and rework's run alike: 409 {"detail":"#15 is blocked by #12, #14; finish those first or
   #   remove the dependency"}, naming only the blockers that aren't done; no run row, no worktree
+  # 099, after the factory check and before auth: the first run makes the worktree with `wt switch --create`,
+  #   then every run copies the main checkout's ignored files in with `wt step copy-ignored` (.venv/,
+  #   .claude/settings.local.json, and .fctl/ left out; MVP §4.4). 409 "wt (worktrunk) isn't installed: brew
+  #   install worktrunk, then run again" · "wt switch failed: <stderr line>" · "wt step copy-ignored failed:
+  #   <stderr line>" · "wt <step> timed out" · "wt put the worktree at <path>, expected <path>" · "<path> is
+  #   ignored in the main checkout but not on main, so it was left out of the worktree: commit its .gitignore
+  #   line on main, then run again" (the copied file is deleted); no run row, and a worktree made before the
+  #   refusal stays stored
 
 POST /api/projects/3/run-next                                     (Run next, fctl run next)
 ← 202 {"task_id":14,"run_id":42}                                  # 404 if backlog empty; 409 as run
@@ -684,9 +692,9 @@ POST /api/tasks/12/pr/merge                                       (Merge PR, 093
   # an OPEN PR: `gh pr merge 71 --repo o/r --merge` (MERGE_METHOD), then an event (me, done → done, note
   #   `PR #71 merged`); an already MERGED one skips it. Then `git fetch origin` in the main checkout and
   #   `git merge --ff-only origin/<default>` only when it is on the default branch, `git status --porcelain`
-  #   is empty, and HEAD is an ancestor of origin's, else a "Skipped updating main: …" note. Then `git worktree
-  #   remove`, `git branch -d`, and `git push origin --delete`, none forced: a failed step is a note with git's
-  #   line ("Worktree already removed.", "Remote branch already deleted."), and the rest still run
+  #   is empty, and HEAD is an ancestor of origin's, else a "Skipped updating main: …" note. Then `wt remove
+  #   --foreground --no-delete-branch --no-hooks <branch>` (099), `git branch -d`, and `git push origin --delete`,
+  #   none forced: a failed step is a note with wt's or git's line (no `wt` included) ("Worktree already removed.", "Remote branch already deleted."), and the rest still run
   # 409 "#12 is not done; approve it first" · "#12 has no PR; Create PR first" · "PR #71 is closed; reopen
   #     it on GitHub" · the origin and gh refusals above · gh pr merge's message (checks failing, conflicts,
   #     branch protection), with nothing fetched, cleaned up, or recorded

@@ -137,20 +137,23 @@ def trust_project(config_dir: str, repo: str) -> None:
 
 
 def worktree(tx, git: Git, task) -> str:
-    """Q5: the exclude line, then Q4: the stored worktree, or a new one from the default branch, stored
-    right away so an auth refusal leaves it for the next run."""
+    """Q5: the exclude line, then Q4: the stored worktree, or a new one from the default branch made by
+    worktrunk (099 AC1), stored right away so a refusal after it leaves it for the next run (099 AC5). Then,
+    new or reused, the main checkout's ignored files copied in, minus any the default branch doesn't ignore
+    (099 AC2, AC3, round 1 security finding 2)."""
     path = task["path"]
     exclude_worktrees(git, path)
     if task["worktree_path"]:  # reused as stored, even if the title changed since
         if not os.path.isdir(task["worktree_path"]):
             raise Conflict(f"worktree {task['worktree_path']} is missing")
-        return task["worktree_path"]
-    name = f"{task['id']}-{slug(task['title'])}"
-    branch, wt = f"factory/{name}", os.path.join(path, ".claude", "worktrees", name)
-    if error := git.add_worktree(path, branch, wt, task["default_branch"]):
-        raise Conflict(f"git worktree add failed: {error}")
-    with tx() as conn:
-        TasksRepo(conn).set_worktree(task["id"], branch, wt)
+        wt = task["worktree_path"]
+    else:
+        name = f"{task['id']}-{slug(task['title'])}"
+        branch = f"factory/{name}"
+        wt = git.wt_create(path, branch, os.path.join(path, ".claude", "worktrees", name), task["default_branch"])
+        with tx() as conn:
+            TasksRepo(conn).set_worktree(task["id"], branch, wt)
+    git.wt_copy_ignored(wt, task["default_branch"])
     return wt
 
 

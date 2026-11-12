@@ -58,7 +58,7 @@ and what is waiting on me.
 | **Decision** | The approver's `APPROVE`/`ESCALATE`, or my own `APPROVE`/`CHANGES_REQUESTED`. |
 | **Factory** | The `/factory` orchestrator skill plus 7 subagents, which Create factory writes into `<repo>/.claude/` from the app's templates. A project can also hold named factory designs: graphs of agents and conditions edited on a canvas and saved in the app (§3.2). |
 | **Agent** | One subagent file: `spec-writer`, `builder`, `review-security`, `review-ux`, `review-ui`, `review-code`, `approver`. |
-| **Worktree** | A git worktree at `<repo>/.claude/worktrees/<id>-<slug>` on branch `factory/<id>-<slug>`. The builder edits only this directory. |
+| **Worktree** | A git worktree at `<repo>/.claude/worktrees/<id>-<slug>` on branch `factory/<id>-<slug>`, made with worktrunk (`wt`). Before every run it gets the main checkout's gitignored files (`.env`, `node_modules`, caches), never `.venv/` (§4.4). The builder edits only this directory. |
 | **fctl** | The app's CLI. Agents use it to talk to the API, and I use it to start the server. |
 
 ---
@@ -153,7 +153,7 @@ I click **Run** on #12, or **Run next**. What follows:
 
 | # | Who | What happens | Status · stage |
 |---|---|---|---|
-| 1 | app | Creates the worktree `.claude/worktrees/12-rate-limit-login` on `factory/12-rate-limit-login` from `main`, then spawns `claude -p "/factory 12"` in it (§4.4) | backlog → **in_progress** · — |
+| 1 | app | Creates the worktree `.claude/worktrees/12-rate-limit-login` on `factory/12-rate-limit-login` from `main` with `wt switch`, copies the main checkout's gitignored files into it with `wt step copy-ignored`, then spawns `claude -p "/factory 12"` in it (§4.4) | backlog → **in_progress** · — |
 | 2 | orchestrator | `fctl stage 12 spec`, spawns spec-writer → `fctl spec 12` | in_progress · spec |
 | 3 | orchestrator | `fctl stage 12 build`, spawns `builder-12` → edits the worktree, runs `pytest -q`, `fctl submit 12` → round 1 | in_progress · build |
 | 4 | orchestrator | `fctl stage 12 agent_review`, spawns 4 reviewers in one message → each runs `fctl verdict 12 <reviewer> …`. The chips fill in live. | in_progress · agent_review |
@@ -191,7 +191,7 @@ Agents never commit. I commit and merge either by hand (step 2) or with the butt
    cd .claude/worktrees/12-rate-limit-login
    git add -A && git commit -m "Rate-limit login endpoint"
    git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
-   git worktree remove .claude/worktrees/12-rate-limit-login
+   cd /Users/artem/code/api-server && wt remove factory/12-rate-limit-login
    ```
 3. Or **Create PR** (task and review pages, docs/ui.md §8.2), for a done task whose worktree has
    uncommitted changes or commits beyond the default branch. It runs `git add -A` and
@@ -204,9 +204,9 @@ Agents never commit. I commit and merge either by hand (step 2) or with the butt
 4. **Merge PR** asks in a dialog, then runs `gh pr merge <n> --merge` (a merge commit). Then
    `git fetch origin` in the main checkout and `git merge --ff-only origin/<default>`, but only
    when the checkout is on the default branch, clean (untracked files count), and behind origin;
-   otherwise it skips that and says why. Last, `git worktree remove`, `git branch -d`, and
-   `git push origin --delete <branch>`, none forced; a failed step is a note, and the rest still
-   run.
+   otherwise it skips that and says why. Last, `wt remove --foreground --no-delete-branch
+   --no-hooks <branch>`, `git branch -d`, and `git push origin --delete <branch>`, none forced; a
+   failed step (no `wt` included) is a note, and the rest still run.
 
 Both buttons need `origin` on github.com and `gh` installed and logged in (`gh auth status`).
 Every refusal shows git's or gh's own message.
@@ -252,8 +252,10 @@ Review from the current working tree. The full example is in §7.4.
 - **Agents → app.** Agents run `fctl …` through Bash, which makes a JSON HTTP call to
   127.0.0.1. Agents never touch the database or any file outside the worktree.
 - **App → DB.** stdlib `sqlite3`, WAL mode. The app is the only process that writes.
-- **App → git.** The app shells out to `git` to add worktrees, list files, show files, and
-  check whether the factory is committed.
+- **App → git.** The app shells out to `git` to list files, show files, and check whether the
+  factory is committed, and to worktrunk (`wt`) to create task worktrees, copy the main
+  checkout's gitignored files into them, and remove them on Merge PR. Every call is an argument
+  list with a timeout, in `adapters/git.py`.
 
 ### 4.2 Stack
 Python 3.12 with FastAPI and uvicorn. Storage is stdlib `sqlite3`, with no ORM and one
@@ -343,6 +345,40 @@ is never touched. The branch is created but gets no commits.
   single entry point, `/factory <id>`, which continues from the task's current stage.
 
 ### 4.4 How a run is spawned
+The run's worktree comes first. The first run on a task creates it with worktrunk; a later run
+(Retry, rework) reuses the stored one. Either way the app then copies the main checkout's
+gitignored files in, before the auth check:
+```
+wt -C /Users/artem/code/api-server switch --create factory/12-rate-limit-login --base main \
+   --no-cd --no-hooks --format json                    # first run only
+wt -C /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login step copy-ignored
+```
+- Each `wt` call gets `WORKTRUNK_CONFIG_PATH` pointing at a config file the app writes for that
+  one call, so my own worktrunk config is never read or written. It sets `worktree-path` to
+  `<repo>/.claude/worktrees/<id>-<slug>` (the path and branch stay as before worktrunk), and
+  `[step.copy-ignored] exclude = [".venv/", ".claude/worktrees/", ".claude/settings.local.json",
+  ".fctl/"]`. A venv holds absolute paths, so the builder runs `uv sync` (or the repo's install
+  step) when the tests need it. My `settings.local.json` would add its permissions and hooks to the
+  run's `--allowedTools`, and old `.fctl/` drafts are stale. A repo's `.worktreeinclude` narrows the
+  copy, as wt does. Files already in the worktree are skipped, so a reused worktree gets only
+  what's new. The path in wt's JSON must be the expected one, else
+  `409 wt put the worktree at <path>, expected <path>`.
+- The copy follows the main checkout's ignore rules, but the worktree has the default branch's. Any
+  file the copy adds that the worktree doesn't ignore (say an uncommitted `.gitignore` line in the
+  main checkout) would reach the round's diff and a PR. The app lists the worktree's untracked files
+  (`git ls-files --others --exclude-standard`) before and after the copy, deletes the new ones, and
+  refuses: `409 conf/.env.local is ignored in the main checkout but not on main, so it was left out
+  of the worktree: commit its .gitignore line on main, then run again`.
+- `--no-hooks`: the app runs the copy itself and no wt hook, so this works without my config
+  (Docker) and never waits on wt's approval prompt for project hooks.
+- Refusals, each a `409` with no run row: `wt (worktrunk) isn't installed: brew install worktrunk,
+  then run again`, `wt switch failed: <wt's first stderr line>`, `wt step copy-ignored failed:
+  <…>`, and `wt switch timed out` (60 s) or `wt step copy-ignored timed out` (300 s). A worktree
+  created before a refusal stays stored, so Retry reuses it and copies again.
+- Agents never quote secrets from the copied `.env` in what they post, and gitignored files never
+  reach a round's diff: `fctl submit` sends only files git doesn't ignore.
+
+Then the spawn:
 ```
 cd /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN FCTL_URL=http://127.0.0.1:4545 \
@@ -470,8 +506,10 @@ Single user and no auth still need these, because the API can start processes th
   and **Make active** picks it. **Disconnect** runs `claude auth logout` in the account's dir and
   removes the account, deleting its dir only if it is under `claude-accounts/`. Make active and
   Disconnect are refused while a run is active. §4.3's env stripping and auth check are unchanged.
-- **Image.** The backend image has git, uv, node, and the `claude` CLI. Anything else a
-  project's test command needs goes in a custom image, set in compose.override.yaml.
+- **Image.** The backend image has git, uv, node, a pinned worktrunk (`wt`, built from a fixed
+  crates.io version with `cargo install --locked`, so every crate is sha256-checked), and the
+  `claude` CLI. Anything else a project's test command needs goes in a custom image, set in
+  compose.override.yaml.
 - **No gh login.** The image has no `gh` and no GitHub login, so Create PR and Merge PR (§3.7)
   are refused in Docker with a hint to create the PR from the host.
 - **Takeover.** The session lives in the container, so §4.4's takeover command becomes
@@ -580,9 +618,12 @@ Rules:
 3. The factory files must be committed on `default_branch` before the first Run, because
    worktrees branch from it. The app shows the command; agents never commit, and the app
    commits only a task's worktree, and only when I click Create PR (§3.7).
-4. Worktrees live in `<repo>/.claude/worktrees/<id>-<slug>` (Claude Code's own convention).
-   The app adds `.claude/worktrees/` and `.fctl/` (agents' text for fctl's stdin, §4.4) to
-   `.git/info/exclude`, so the main checkout stays clean and no tracked file changes.
+4. Worktrees live in `<repo>/.claude/worktrees/<id>-<slug>` (Claude Code's own convention),
+   created by worktrunk (`wt switch`) and filled with the main checkout's gitignored files except
+   `.venv/` (`wt step copy-ignored`, §4.4). Worktrees git made before worktrunk keep working and
+   get the copy on their next run. The app adds `.claude/worktrees/` and `.fctl/` (agents' text
+   for fctl's stdin, §4.4) to `.git/info/exclude`, so the main checkout stays clean and no
+   tracked file changes.
 5. Each round's snapshot is the full diff against `HEAD`, which is the base, because agents
    never commit.
 6. Rework starts a fresh session. The builder gets its context from the app, not from
@@ -596,7 +637,8 @@ Rules:
    the port is 4545. A factory design's reviewers are stored in its graph only.
 10. Approve means done, whether or not I have committed yet. I commit and merge by hand or
     with Create PR and Merge PR.
-11. The app runs on macOS or Linux. `git`, `claude`, and `uv` are on PATH.
+11. The app runs on macOS or Linux. `git`, `wt` (worktrunk: `brew install worktrunk`), `claude`,
+    and `uv` are on PATH.
 12. Reviewer agents may leave inline comments, and they render like mine.
 13. Polling every 3 s is fast enough. There are no websockets in the MVP.
 14. The agents keep FACTORY.md's models: opus for spec-writer, builder, security, and

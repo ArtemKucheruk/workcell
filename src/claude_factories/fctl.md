@@ -259,9 +259,12 @@ Next, start the app on the same `FCTL_HOME`, with your own `fctl serve` stopped,
   Nothing is written.
 - `fctl: <FCTL_HOME>/demo exists; seed an empty FCTL_HOME`, exit `1`: probably left by a seed that
   failed. Delete that folder and run `fctl seed` again.
-- `fctl: can't run git: <reason>`, `fctl: git failed: <git's error>`, and
-  `fctl: git worktree add failed: <git's error>`, exit `1`. No rows are written, but `demo/` may be
-  left behind.
+- `fctl: can't run git: <reason>` and `fctl: git failed: <git's error>`, exit `1`. No rows are
+  written, but `demo/` may be left behind.
+- The task worktrees come from worktrunk's `wt switch`, as `fctl run`'s do, with no copy step (the
+  demo repos have no ignored files). So `fctl: wt (worktrunk) isn't installed: brew install
+  worktrunk, then run again`, `fctl: wt switch failed: <wt's first stderr line>`, and
+  `fctl: wt switch timed out`, exit `1`, the same way.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 
@@ -815,7 +818,13 @@ Run #41 on #12 → http://127.0.0.1:4545/tasks/12
 ```
 
 The first run on a task creates its worktree, `.claude/worktrees/12-rate-limit-login`, on a new
-branch `factory/12-rate-limit-login` from the default branch. Later runs reuse it.
+branch `factory/12-rate-limit-login` from the default branch, with worktrunk (`wt switch --create`,
+no hooks). Later runs reuse it. Before every run, new or reused, the app copies the main checkout's
+gitignored files (`.env`, `node_modules`, caches) into it with `wt step copy-ignored`, so the
+agents' tests run as in the main checkout. It skips files already there, `.venv/`,
+`.claude/settings.local.json` (its permissions would widen the run's tools), and `.fctl/`. A
+repo's `.worktreeinclude` narrows the copy, as wt does. `wt` must be on PATH: `brew install
+worktrunk`.
 
 **Exit codes and errors**
 
@@ -828,8 +837,17 @@ branch `factory/12-rate-limit-login` from the default branch. Later runs reuse i
 - `fctl: 409 factory isn't committed on main: …`: the message names the next step, exit `1`.
 - `fctl: 409 this repo runs the file-based /factory loop: …`: the committed SKILL.md isn't the app's
   template, and the message names the fix, exit `1`.
-- `fctl: 409 worktree <path> is missing` and `fctl: 409 git worktree add failed: <git's error>`,
-  exit `1`.
+- `fctl: 409 worktree <path> is missing`, exit `1`.
+- `fctl: 409 wt (worktrunk) isn't installed: brew install worktrunk, then run again`, exit `1`.
+- `fctl: 409 wt switch failed: <wt's first stderr line>`,
+  `fctl: 409 wt step copy-ignored failed: <wt's first stderr line>`,
+  `fctl: 409 wt switch timed out` (60 s), `fctl: 409 wt step copy-ignored timed out` (300 s), and
+  `fctl: 409 wt put the worktree at <path>, expected <path>`, exit `1`. No run starts. A worktree
+  made before the refusal stays, so the next run reuses it and copies again.
+- `fctl: 409 conf/.env.local is ignored in the main checkout but not on main, so it was left out of
+  the worktree: commit its .gitignore line on main, then run again`: the copy added a file the
+  worktree doesn't ignore, which would reach the round's diff. The app deletes it from the worktree.
+  With several, the first is named, followed by `(and 2 more)`. Exit `1`.
 - `fctl: 409 not on subscription auth`, then a second line,
   `Sign in to a Claude account, or make one active, under Settings → Claude accounts, then run again.`:
   no Claude account is active, the active one isn't signed in, or it is logged in with an API key,
@@ -937,8 +955,10 @@ The new status, then the commands. For a factory task:
 cd /Users/me/code/api-server/.claude/worktrees/12-rate-limit-login
 git add -A && git commit -m 'Rate-limit login endpoint'
 git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
-cd /Users/me/code/api-server && git worktree remove .claude/worktrees/12-rate-limit-login
+cd /Users/me/code/api-server && wt remove factory/12-rate-limit-login
 ```
+
+The last line removes the worktree with worktrunk once the work is committed.
 
 For a task from `/factory-submit`, which has no worktree, only the commit line:
 

@@ -2,7 +2,6 @@
 request changes (docs/MVP.md §3.6, §3.7), and the context markdown (§6.2). Only my decisions touch the
 task row or write events (docs/claude-code.md §7.5)."""
 
-import os
 import shlex
 
 from ..adapters.claude import Claude
@@ -64,7 +63,7 @@ def commit_hint(task) -> str:
         f"cd {shlex.quote(wt)}",
         commit,
         f"git push -u origin {shlex.quote(task['branch'])}     # then open a PR, or merge locally",
-        f"cd {shlex.quote(root)} && git worktree remove {shlex.quote(os.path.relpath(wt, root))}",
+        f"cd {shlex.quote(root)} && wt remove {shlex.quote(task['branch'])}",  # 099 AC9
     ])
 
 

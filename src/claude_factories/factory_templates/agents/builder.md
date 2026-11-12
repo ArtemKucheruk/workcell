@@ -17,6 +17,11 @@ Read:
 Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
 don't re-read docs for them. No such section → take them from the repo's docs and code.
 
+Your worktree comes from worktrunk (`wt`) and already holds the main checkout's gitignored
+files (`.env`, `node_modules`, caches), so the tests run as they do in the main checkout. `.venv/`
+isn't copied: run `uv sync` (or the repo's install step) first when the tests need it. Never
+print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions.
+
 Do:
 1. Implement the spec in your cwd. Read the code around it first and follow its conventions.
 2. One test per acceptance criterion. Run the test command until it passes.

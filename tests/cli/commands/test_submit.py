@@ -65,6 +65,16 @@ def test_submit_leaves_real_index(round_server, repo, monkeypatch):  # AC28
     assert "diff --git a/a.py b/a.py\n" in patch and "diff --git a/c.py b/c.py\n" in patch
 
 
+def test_submit_leaves_out_ignored_files(round_server, repo, monkeypatch):  # 099 AC14
+    commit(repo, {".gitignore": ".env\nnode_modules/\n", "a.py": "x = 1\n"})
+    write(repo, {"a.py": "x = 2\n", ".env": "API_TOKEN=not-a-real-secret\n", "node_modules/p/i.js": "1;\n"})
+    monkeypatch.chdir(repo)
+    fctl(monkeypatch, "submit", "12")
+    patch = sent_round(round_server)["patch"]
+    assert "diff --git a/a.py b/a.py\n" in patch
+    assert ".env" not in patch and "not-a-real-secret" not in patch and "node_modules" not in patch
+
+
 @pytest.mark.parametrize("files, shown", [(3, "3 files"), (1, "1 file")])
 def test_submit_new_prints_review(new_server, changed, monkeypatch, capsys, files, shown):  # AC29
     new_server.replies[1] = reply(SUBMITTED | {"files_changed": files}, 201)

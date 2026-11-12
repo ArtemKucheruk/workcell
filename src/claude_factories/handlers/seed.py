@@ -13,7 +13,7 @@ from pathlib import Path
 from .. import config
 from ..adapters.git import Git
 from ..domain.enums import STAGE_STATUS, Reviewer
-from ..domain.errors import Conflict, Failed
+from ..domain.errors import Conflict
 from ..dto.rounds import RoundBody
 from ..lib.context_file import derive
 from ..lib.diff import diff_rows
@@ -147,14 +147,14 @@ class Demo:
         self.move(task, "orchestrator", status, stage)
 
     def worktree(self, task: dict) -> str:
-        """Q3: as handlers/runs.worktree makes it, once per task: the exclude line, then a new branch from main."""
+        """Q3: as handlers/runs.worktree makes it, once per task: the exclude line, then a new branch from main.
+        099 Q4: through the same `wt switch`, with no copy step (the demo repos hold no ignored files)."""
         if not task["wt"]:
             repo = task["project"]["path"]
             exclude_worktrees(self.git, repo)
             name = f"{task['id']}-{slug(task['title'])}"
-            branch, wt = f"factory/{name}", os.path.join(repo, ".claude", "worktrees", name)
-            if error := self.git.add_worktree(repo, branch, wt, "main"):
-                raise Failed(f"git worktree add failed: {error}")
+            branch = f"factory/{name}"
+            wt = self.git.wt_create(repo, branch, os.path.join(repo, ".claude", "worktrees", name), "main")
             self.tasks.set_worktree(task["id"], branch, wt)
             task["wt"] = wt
         return task["wt"]

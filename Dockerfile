@@ -1,7 +1,16 @@
-# docs/MVP.md §4.6: the backend image. git, uv, Node 22 with npm, and a pinned claude CLI, which is
-# what runs get. Anything else goes in a custom image FROM this one (compose.override.example.yaml).
+# docs/MVP.md §4.6: the backend image. git, uv, Node 22 with npm, a pinned worktrunk (wt), and a pinned
+# claude CLI, which is what runs get. Anything else goes in a custom image FROM this one
+# (compose.override.example.yaml).
+
+# 099 Q7: wt makes every task worktree. A fixed crates.io version, built --locked: cargo checks each crate's
+# sha256 against the registry index and Cargo.lock, on amd64 and arm64 alike. A new pin is how it updates.
+FROM rust:1-slim AS worktrunk
+RUN cargo install worktrunk --version 0.81.0 --locked --root /opt/worktrunk
+
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+COPY --from=worktrunk /opt/worktrunk/bin/wt /usr/local/bin/wt
+RUN wt --version
 COPY --from=ghcr.io/astral-sh/uv:0.8.20 /uv /bin/uv
 # 028 Q3: Debian's nodejs isn't 22, so node comes from frontend/Dockerfile's tag
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node

@@ -14,6 +14,11 @@ Read:
 Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
 don't re-read docs for them. No such section → take them from the repo's docs and code.
 
+Your worktree comes from worktrunk (`wt`) and already holds the main checkout's gitignored
+files (`.env`, `node_modules`, caches), so the tests run as they do in the main checkout. `.venv/`
+isn't copied: run `uv sync` (or the repo's install step) first when the tests need it. Never
+print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions.
+
 Read files with Read, Grep, and Glob. Use Bash only for `fctl` and the test command.
 Test command for this repo: {{ test_cmd }}
 
