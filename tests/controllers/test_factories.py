@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 from conftest import sql
 
+from claude_factories.handlers.factories import preset_graph
+
 from .test_projects import H, connect
 
 TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
@@ -173,6 +175,71 @@ def test_create_factory_name_taken(client, project):  # BE7
 def test_create_factory_unknown_project(client):  # BE8
     r = create(client, 999)
     assert (r.status_code, r.json()) == (404, {"detail": "Project #999 not found"})
+    assert sql("SELECT COUNT(*) FROM factories") == [(0,)]
+
+
+# --- 088: templates -------------------------------------------------------------------
+
+TEMPLATE_KEYS = ["standard", "bug-fix", "security-audit", "ml-experiment", "test-coverage"]
+
+
+def test_list_templates(client):  # 088 AC1
+    r = client.get("/api/factory-templates")
+    assert r.status_code == 200
+    assert r.json() == [
+        {"key": "standard", "name": "Standard", "description": "Spec, build, then security, UX, UI, and code reviews;"
+         " up to 2 rounds; the approver decides."},
+        {"key": "bug-fix", "name": "Bug fix", "description": "Reproduce the bug as a failing test, fix its root cause,"
+         " then code and security reviews."},
+        {"key": "security-audit", "name": "Security audit", "description": "Audit dependencies, secrets, and code;"
+         " write SECURITY-AUDIT.md and fix what is safe; security review. Built for scheduled runs."},
+        {"key": "ml-experiment", "name": "ML experiment", "description": "Check the data and baseline, run the"
+         " experiment, and gate it on eval metrics against the baseline."},
+        {"key": "test-coverage", "name": "Test coverage", "description": "Find risky untested code and pin its"
+         " behavior with tests, leaving production code unchanged."},
+    ]
+    assert all(t["description"].strip() and "\n" not in t["description"] for t in r.json())
+
+
+@pytest.mark.parametrize("key", TEMPLATE_KEYS)
+def test_create_from_template(client, project, key):  # 088 AC10
+    r = client.post(f"/api/projects/{project}/factories", json={"name": "x", "template": key}, headers=H)
+    assert r.status_code == 201, r.text
+    expected = preset_graph(key).model_dump()
+    assert r.json()["graph"] == expected
+    assert row(r.json()["id"])[1] == expected
+
+
+@pytest.mark.parametrize("body", [{"name": "x"}, {"name": "x", "template": None}])
+def test_create_without_template(client, project, body):  # 088 AC11
+    r = client.post(f"/api/projects/{project}/factories", json=body, headers=H)
+    assert r.status_code == 201, r.text
+    standard = client.post(f"/api/projects/{project}/factories", json={"name": "y", "template": "standard"},
+                           headers=H).json()["graph"]
+    assert r.json()["graph"] == standard
+    assert len(standard["nodes"]) == 10
+
+
+def test_create_unknown_template(client, project):  # 088 AC12
+    unknown = (422, {"detail": "unknown template nightly: use standard, bug-fix, security-audit, ml-experiment,"
+                               " or test-coverage"})
+    r = client.post(f"/api/projects/{project}/factories", json={"name": "x", "template": "nightly"}, headers=H)
+    assert (r.status_code, r.json()) == unknown
+    assert sql("SELECT COUNT(*) FROM factories") == [(0,)]
+    r = client.post(f"/api/projects/{project}/factories", json={"name": " ", "template": "nightly"}, headers=H)
+    assert (r.status_code, r.json()) == (422, {"detail": "name must not be blank"})
+    r = client.post("/api/projects/999/factories", json={"name": "x", "template": "nightly"}, headers=H)
+    assert (r.status_code, r.json()) == unknown
+    created(client, project, "x")
+    r = client.post(f"/api/projects/{project}/factories", json={"name": "x", "template": "nightly"}, headers=H)
+    assert (r.status_code, r.json()) == unknown
+    assert sql("SELECT COUNT(*) FROM factories") == [(1,)]
+
+
+def test_create_template_not_a_string(client, project):  # 088 AC13
+    r = client.post(f"/api/projects/{project}/factories", json={"name": "x", "template": 5}, headers=H)
+    assert r.status_code == 422
+    assert isinstance(r.json()["detail"], list)
     assert sql("SELECT COUNT(*) FROM factories") == [(0,)]
 
 

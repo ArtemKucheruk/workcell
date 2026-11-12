@@ -353,10 +353,18 @@ GET  /api/projects/3/factories                                    (Factories lis
   # by name, then id; [] with none. nodes = len(graph.nodes), start and conditions included. No graph here.
   # 404 {"detail":"Project #99 not found"}
 
+GET  /api/factory-templates                                       (+ New factory's Template radios)
+← 200 [{"key":"standard","name":"Standard","description":"Spec, build, then security, UX, UI, …"},
+       {"key":"bug-fix",…}, {"key":"security-audit",…}, {"key":"ml-experiment",…}, {"key":"test-coverage",…}]
+  # in this order, Standard first; each description is one line. The graphs are listed below
+
 POST /api/projects/3/factories                                    (+ New factory)
-→ {"name":"default"}
-← 201 <Factory>, whose graph is the default graph (below), with created_at = updated_at
+→ {"name":"default","template":"bug-fix"}
+← 201 <Factory>, whose graph is the template's graph (below), with created_at = updated_at
+  # template is optional: left out or null → standard, the default graph
   # name is trimmed: 422 {"detail":"name must not be blank"}; missing, null, or not a string → 422 FastAPI's list detail
+  # 422 {"detail":"unknown template nightly: use standard, bug-fix, security-audit, ml-experiment, or test-coverage"};
+  #   a template that isn't a string → 422 FastAPI's list detail. Checked after the blank name, before the 404 and 409
   # 409 {"detail":"factory default already exists"} when this project has a factory by that name (exact match after trim)
   # 404 {"detail":"Project #99 not found"}
 
@@ -474,7 +482,24 @@ each reviewer → all-pass (all_pass)
 all-pass yes → approver (approver)          all-pass no → rounds (rounds_below, n 2)
 rounds yes → builder                        rounds no → approver
 ```
-That makes 14 edges.
+That makes 14 edges. It is the `standard` template.
+
+The other templates (088) have fewer than 4 reviewers, so they branch on `any-changes` (any_changes) instead of
+`all-pass`. Their agents come from `factory_templates/agents/` the same way, and a name two templates share is the
+same file (`docs/claude-code.md §7.3`). Each one ends in the same tail:
+```
+each reviewer → any-changes (any_changes)
+any-changes yes → rounds (rounds_below)     any-changes no → approver (approver)
+rounds yes → builder                        rounds no → approver
+```
+- `bug-fix`: start → bug-spec-writer (spec_writer) → builder (builder, side both) → review-code, review-security
+  (reviewer, focus code / security); rounds n 2. 8 nodes, 10 edges.
+- `security-audit`: start → security-auditor (spec_writer) → builder → review-security (focus security); rounds n 2.
+  7 nodes, 8 edges.
+- `ml-experiment`: start → data-check (spec_writer) → builder → review-eval (focus custom); rounds n 3. 7 nodes,
+  8 edges.
+- `test-coverage`: start → coverage-planner (spec_writer) → builder → review-tests (focus custom); rounds n 2.
+  7 nodes, 8 edges.
 
 ### 6.2 Tasks & runs
 ```
@@ -602,7 +627,8 @@ The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces
 `/docs/fctl` · `/settings`. Any other path outside `/api` gets the SPA's not-found page.
 `/agents` loads `GET /api/pages/agents`. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
 `GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does. `/projects/{id}/factories` loads
-`GET /api/projects/{id}/factories` (§6.1), plus `GET /api/pages/projects/{id}` for its header, and the designer at
+`GET /api/projects/{id}/factories` and `GET /api/factory-templates` (§6.1), plus `GET /api/pages/projects/{id}` for
+its header, and the designer at
 `/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1). `/projects/{id}/context` loads
 `GET /api/projects/{id}/context` for the pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1),
 plus `GET /api/pages/projects/{id}` for its header, once each.

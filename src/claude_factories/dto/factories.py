@@ -85,6 +85,14 @@ class Graph(BaseModel):
 
 class NewFactory(BaseModel):
     name: str
+    template: str | None = None  # 088 Q7: a FactoryTemplate key; null or left out → standard
+
+
+class FactoryTemplate(BaseModel):
+    """088: one of + New factory's templates."""
+    key: str
+    name: str
+    description: str
 
 
 class FactoryPatch(BaseModel):

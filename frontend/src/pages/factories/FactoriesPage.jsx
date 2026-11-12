@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
-import { addFactory, deleteFactory, listFactories, saveFactory } from '../../api/factories.js'
+import { addFactory, deleteFactory, listFactories, listTemplates, saveFactory } from '../../api/factories.js'
 import { boardPage } from '../../api/pages.js'
 import { DeleteDialog } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
@@ -20,17 +20,19 @@ const NEW = 'new-factory'
 
 /**
  * FE3, Q15: + New factory's native popover, like + New task. The server judges the name (blank, taken), and its refusal
- * shows inside, which stays open with what was typed; a 201 opens the designer.
+ * shows inside, which stays open with what was typed; a 201 opens the designer. 088 Q6: `templates` ({data, error})
+ * are radios with their descriptions, Standard checked; with none (Q7), the POST's template is null, which is Standard.
  */
-function NewFactory({ projectId }) {
+function NewFactory({ projectId, templates }) {
   const navigate = useNavigate()
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   async function submit(event) {
     event.preventDefault()
     setBusy(true)
+    const form = new FormData(event.currentTarget)
     try {
-      const made = await addFactory(projectId, new FormData(event.currentTarget).get('name'))
+      const made = await addFactory(projectId, form.get('name'), form.get('template'))
       navigate(`/projects/${projectId}/factories/${made.id}`)
     } catch (err) {
       setError(err)
@@ -45,7 +47,7 @@ function NewFactory({ projectId }) {
       <div
         id={NEW}
         popover="auto"
-        className={`${popover} w-80 max-w-[90vw] p-3 [position-anchor:--new-factory] [position-area:bottom_span-left]`}
+        className={`${popover} w-96 max-w-[90vw] p-3 [position-anchor:--new-factory] [position-area:bottom_span-left]`}
       >
         <form onSubmit={submit} className="grid gap-2">
           <label className="grid gap-1">
@@ -53,6 +55,31 @@ function NewFactory({ projectId }) {
             {/* board Q10: the autofocus attribute, which the popover focuses as it opens */}
             <input ref={(el) => el?.setAttribute('autofocus', '')} type="text" name="name" className={field} />
           </label>
+          <fieldset className="grid gap-2">
+            <legend className="mb-1">Template</legend>
+            {templates.error ? (
+              <ErrorMessage error={templates.error} />
+            ) : (
+              templates.data?.map(({ key, name, description }) => (
+                <div key={key} className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2">
+                  <input
+                    id={`template-${key}`}
+                    type="radio"
+                    name="template"
+                    value={key}
+                    defaultChecked={key === 'standard'}
+                    aria-describedby={`template-${key}-note`}
+                  />
+                  <label htmlFor={`template-${key}`} className="font-medium">
+                    {name}
+                  </label>
+                  <p id={`template-${key}-note`} className={`col-start-2 text-sm ${muted}`}>
+                    {description}
+                  </p>
+                </div>
+              ))
+            )}
+          </fieldset>
           <button disabled={busy} className={`${button} justify-self-start`}>
             Create
           </button>
@@ -133,13 +160,17 @@ function FactoriesSkeleton() {
   )
 }
 
-/** docs/ui.md §8 item 14. Q18: the header's board view-model and the list load once each; the list reloads after an action. */
+/**
+ * docs/ui.md §8 item 14. Q18: the header's board view-model, the list, and (088) the templates load once each; the list
+ * reloads after an action.
+ */
 function Factories({ id }) {
   const [tick, setTick] = useState(0)
   const reload = useCallback(() => setTick((n) => n + 1), [])
   const { data: page, error: pageError } = usePoll(useCallback(() => boardPage(id), [id]))
   // board Q3: `tick` is in the deps only to hand usePoll a new load, which fetches at once
   const { data: factories, error } = usePoll(useCallback(() => listFactories(id), [id, tick]))
+  const templates = usePoll(listTemplates) // 088 AC14: once, beside the two; its failure stays in the popover (AC17)
   const [deleting, setDeleting] = useState(null) // {factory, opener}
   const name = page?.project.name
   useEffect(() => {
@@ -155,7 +186,7 @@ function Factories({ id }) {
   return (
     <>
       <ProjectHeader project={page.project} factory={page.factory}>
-        <NewFactory projectId={page.project.id} />
+        <NewFactory projectId={page.project.id} templates={templates} />
       </ProjectHeader>
       {error && <ErrorMessage error={error} />}
       {factories.length ? (
