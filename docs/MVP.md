@@ -120,8 +120,8 @@ node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run
    decides, not the one on disk. Meanwhile the board's automatic `factory/` sync
    (`docs/data-model-and-api.md §6.1` import-factory) keeps showing the bootstrap's jobs.
 
-Design a factory: Project → **Factories** → **+ New factory** (a name) → the designer opens on the
-default loop → drag or click agents and conditions from the palette, connect handles, and edit the
+Design a factory: Project → **Factories** → **+ New factory** (a name and a template) → the designer
+opens on the template's graph → drag or click agents and conditions from the palette, connect handles, and edit the
 selected node in the side panel → **Save** or Ctrl/⌘+S. Save shows a refusal (a bad graph,
 `docs/data-model-and-api.md §6.1`) beside it, and the design stays unsaved. → **Files** shows the
 last saved design compiled into Claude Code files (`docs/claude-code.md §7.3`):
@@ -131,6 +131,16 @@ writes them with step 2's writer: existing files skipped unless *Overwrite*, the
 skipped lists, and a commit hint naming `.claude/skills/<factory-slug>`. A design reaches
 `.claude/` only through Write to repo, and runs use `.claude/skills/factory/`: only a factory
 whose name slugs to `factory` writes the skill runs start, and step 4 is unchanged.
+
+The templates (088; graphs in `docs/data-model-and-api.md §6.1`, agents in `docs/claude-code.md §7.3`):
+- **Standard** (the default): the default loop. Spec, build, then security, UX, UI, and code reviews; up to 2
+  rounds; the approver decides.
+- **Bug fix**: reproduce the bug as a failing test, fix its root cause, then code and security reviews.
+- **Security audit**: audit dependencies, secrets, and code; write `SECURITY-AUDIT.md` and fix what is safe;
+  security review. Built for scheduled runs (the cron recipe is in §7.3; the app has no scheduler).
+- **ML experiment**: check the data and baseline, run the experiment, and gate it on eval metrics against the
+  baseline.
+- **Test coverage**: find risky untested code and pin its behavior with tests, leaving production code unchanged.
 
 ### 3.3 Add a feature
 Board → **+ New task** → title and description (markdown) → the card lands at the bottom of

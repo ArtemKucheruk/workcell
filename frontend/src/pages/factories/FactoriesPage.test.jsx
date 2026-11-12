@@ -14,18 +14,28 @@ const item = (id, name, nodes, updated_at = '2026-10-21T09:30:00Z') => ({
 })
 const DEFAULT = item(7, 'default', 10)
 const NIGHTLY = item(8, 'nightly', 1, '2026-10-20T09:30:00Z')
+const TEMPLATES = '/api/factory-templates'
+const TEMPLATE_LIST = [
+  { key: 'standard', name: 'Standard', description: 'Spec, build, four reviews, the approver decides.' },
+  { key: 'bug-fix', name: 'Bug fix', description: 'Reproduce the bug as a failing test, then fix it.' },
+  { key: 'test-coverage', name: 'Test coverage', description: 'Pin risky untested code with tests.' },
+]
 
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
-/** Renders /projects/3/factories with `list` as the list's reply; waits for the header. */
+const templateGroup = () => screen.getByRole('group', { name: 'Template', hidden: true })
+
+/** Renders /projects/3/factories with `list` as the list's reply; waits for the header and the templates (088). */
 async function open(list = [200, [DEFAULT, NIGHTLY]], more = {}) {
-  const responses = { [`GET ${BOARD}`]: [200, board()], [`GET ${LIST}`]: list, ...more }
+  const responses = { [`GET ${BOARD}`]: [200, board()], [`GET ${LIST}`]: list, [`GET ${TEMPLATES}`]: [200, TEMPLATE_LIST], ...more }
   const fetch = mockFetch(responses)
   const view = renderAt('/projects/3/factories')
   await screen.findByRole('button', { name: '+ New factory' })
+  // the legend, then the radios or the templates' alert
+  await waitFor(() => expect(templateGroup().children.length).toBeGreaterThan(1))
   return { fetch, responses, ...view }
 }
 
@@ -112,7 +122,7 @@ test('FE3: + New factory opens a popover with Name and Create; a 201 opens the d
   await waitFor(() => expect(router.state.location.pathname).toBe('/projects/3/factories/9'))
   const [[, init]] = calls(fetch, 'POST', LIST)
   expect(init.headers['X-Requested-By']).toBe('fctl')
-  expect(JSON.parse(init.body)).toEqual({ name: 'nightly' })
+  expect(JSON.parse(init.body)).toEqual({ name: 'nightly', template: 'standard' })
 })
 
 test('FE3: a 409 or 422 shows its detail inside the popover, which keeps the typed name', async () => {
@@ -130,6 +140,55 @@ test('FE3: a 409 or 422 shows its detail inside the popover, which keeps the typ
     expect(router.state.location.pathname).toBe('/projects/3/factories')
     unmount()
   }
+})
+
+test('088 AC14: the templates load once beside the board and the list, never polled', async () => {
+  vi.useFakeTimers()
+  const fetch = mockFetch({ [`GET ${BOARD}`]: [200, board()], [`GET ${LIST}`]: [200, []], [`GET ${TEMPLATES}`]: [200, TEMPLATE_LIST] })
+  renderAt('/projects/3/factories')
+  await advance(0)
+  expect([count(fetch, BOARD), count(fetch, LIST), count(fetch, TEMPLATES)]).toEqual([1, 1, 1])
+  await advance(10_000)
+  expect([count(fetch, BOARD), count(fetch, LIST), count(fetch, TEMPLATES)]).toEqual([1, 1, 1])
+})
+
+test('088 AC15: a Template fieldset, one radio per template in the API order, each described by its muted description; Standard checked', async () => {
+  await open()
+  const radios = within(templateGroup()).getAllByRole('radio', { hidden: true })
+  expect(radios.map((r) => r.labels[0].textContent)).toEqual(['Standard', 'Bug fix', 'Test coverage'])
+  expect(radios.map((r) => r.value)).toEqual(['standard', 'bug-fix', 'test-coverage'])
+  radios.forEach((radio, i) => {
+    const note = document.getElementById(radio.getAttribute('aria-describedby'))
+    expect(note.textContent).toBe(TEMPLATE_LIST[i].description)
+    expect(note.className).toMatch(cls('text-muted'))
+  })
+  expect(radios.map((r) => r.checked)).toEqual([true, false, false])
+})
+
+test('088 AC16: pick Bug fix, type a name, and Create → the POST carries the key; a 201 opens the designer', async () => {
+  const { fetch, router } = await open(undefined, { [`POST ${LIST}`]: [201, { id: 9, project_id: 3, name: 'nightly' }] })
+  const group = templateGroup()
+  fireEvent.click(within(group).getByRole('radio', { name: 'Bug fix', hidden: true }))
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name', hidden: true }), { target: { value: 'nightly' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create', hidden: true }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/projects/3/factories/9'))
+  const [[, init]] = calls(fetch, 'POST', LIST)
+  expect(JSON.parse(init.body)).toEqual({ name: 'nightly', template: 'bug-fix' })
+})
+
+test('088 AC17: a failed templates request shows its detail where the radios go; Create still posts the name', async () => {
+  const { fetch, router } = await open(undefined, {
+    [`GET ${TEMPLATES}`]: [500, { detail: 'templates unavailable' }],
+    [`POST ${LIST}`]: [201, { id: 9, project_id: 3, name: 'nightly' }],
+  })
+  const group = templateGroup()
+  expect(within(group).getByRole('alert', { hidden: true }).textContent).toBe('templates unavailable')
+  expect(within(group).queryAllByRole('radio', { hidden: true })).toEqual([])
+  fireEvent.change(screen.getByRole('textbox', { name: 'Name', hidden: true }), { target: { value: 'nightly' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create', hidden: true }))
+  await waitFor(() => expect(router.state.location.pathname).toBe('/projects/3/factories/9'))
+  const [[, init]] = calls(fetch, 'POST', LIST)
+  expect(JSON.parse(init.body).name).toBe('nightly')
 })
 
 test('FE4: Rename swaps the name for a focused, selected field; Enter PUTs the name and the list reloads with it', async () => {

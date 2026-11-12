@@ -6,7 +6,12 @@ const ofProject = (projectId) => `/api/projects/${encodeURIComponent(projectId)}
 
 export const listFactories = (projectId) => api(ofProject(projectId))
 
-export const addFactory = (projectId, name) => api(ofProject(projectId), { method: 'POST', body: { name } })
+/** 088: `template` is a key from listTemplates; null means Standard. */
+export const addFactory = (projectId, name, template) =>
+  api(ofProject(projectId), { method: 'POST', body: { name, template } })
+
+/** 088: + New factory's templates, `[{key, name, description}]`, Standard first. */
+export const listTemplates = () => api('/api/factory-templates')
 
 export const getFactory = (id) => api(one(id))
 

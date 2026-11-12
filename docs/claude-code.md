@@ -122,10 +122,65 @@ The builder template says: work only in your cwd, run `{{ test_cmd }}` against t
 acceptance criteria, end every round with `fctl submit <id> <<'EOF' <build notes> EOF`, and
 never commit.
 
-All 7 agent templates take the stack and conventions from the project context:
+All 13 agent templates (Create factory's 7, plus the 6 below) take the stack and conventions from
+the project context:
 "Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
 don't re-read docs for them. No such section → take them from the repo's docs and code."
 The spec-writer and approver still read the docs the request or spec relies on.
+
+**Factory templates (088).** + New factory starts a design from one of five graph presets
+(`GET /api/factory-templates`; graphs in `docs/data-model-and-api.md §6.1`). Create factory in
+Settings still writes Standard's 8 files.
+
+| Template | Spec writer | Reviewers (slot) | Rounds |
+|---|---|---|---|
+| Standard (default) | spec-writer | review-security, review-ux, review-ui, review-code | 2 |
+| Bug fix | bug-spec-writer | review-code (code), review-security (security) | 2 |
+| Security audit | security-auditor | review-security (security) | 2 |
+| ML experiment | data-check | review-eval (code) | 3 |
+| Test coverage | coverage-planner | review-tests (code) | 2 |
+
+All five reuse `builder` and `approver`. The 6 new agents live in `factory_templates/agents/`:
+- `bug-spec-writer` (opus): reproduces the bug, names its root cause as `file:line` and every
+  caller of the function the fix touches; AC1 is a regression test that fails before the fix.
+- `security-auditor` (opus): audits dependencies, secrets, and code; cites a secret's
+  `file:line`, never its value. Its spec's `## Report` is what the builder writes to
+  `SECURITY-AUDIT.md`, the whole file, on every run, so a clean audit still submits a round.
+  Only findings with a safe, testable fix become criteria; the rest are Open questions.
+- `data-check` (opus): checks schema, splits, leakage, and balance, finds the baseline, and
+  writes a `## Metrics gate` (baseline table, target, tolerance; none given → "no metric worse
+  than baseline").
+- `review-eval` (opus): CHANGES on a missed target, a regression past the tolerance, missing
+  metrics, test data used to train or tune, leakage, an unseeded run, or an eval harness changed
+  without the spec asking.
+- `coverage-planner` (opus): at most 5 risky untested behaviors, tested through the public
+  interface; production code stays unchanged.
+- `review-tests` (sonnet): CHANGES on a non-test change, a test that can't fail, a flaky or
+  duplicate test, or an AC with no test.
+
+Rules the templates keep:
+- Verdicts have only the slots security, ux, ui, and code. A reviewer with its own focus posts
+  under `code`, one per template, so slots never clash, and the review chips show it as code.
+- With fewer than 4 reviewers, the unused slots stay pending, so "All reviews PASS?" can't
+  pass. Those templates branch on "Any review CHANGES?" (yes → rounds, no → approver) instead,
+  which pending slots can't trip. SKILL.md and `fctl round` still say 4 slots.
+- Write to repo skips existing `.claude/agents/<name>.md`, so a name two templates share is the
+  identical file, and every new prompt has a new name.
+- The audit tools (`npm audit`, `pip-audit`, `osv-scanner`, `gitleaks`, `semgrep`) run only if
+  installed and on the run's allowlist, which holds only fctl and the test command. Add them to
+  the repo's `.claude/settings.json` `permissions.allow` (`docs/MVP.md §4.4`); otherwise the
+  auditor reads files and names the tools it didn't run. The same goes for an ML eval command
+  that isn't the test command.
+
+**Scheduling the security audit.** The app has no scheduler, and every run starts
+`/factory <id>`, so a scheduled task runs whichever design was written to the repo as
+`factory`. Write the Security audit design under the name `factory`, commit it on the default
+branch, then add a crontab line:
+```
+0 6 * * 1 cd /path/to/repo && fctl task add "Security audit" --run
+```
+It needs `fctl serve` running, `fctl` on cron's `PATH`, and no other run active (else 409). A
+scheduler in the app, and picking the factory per task, are follow-ups.
 
 **Compiling a design.** `GET /api/factories/{id}/files`, its zip, and Write to repo (`docs/data-model-and-api.md
 §6.1`) compile the factory's stored graph in `lib/factory_compile.py`. The default graph compiles byte for byte to

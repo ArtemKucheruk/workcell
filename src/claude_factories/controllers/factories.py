@@ -2,12 +2,17 @@
 
 from fastapi import APIRouter, Response
 
-from ..dto.factories import FactoryDesign, FactoryFile, FactoryItem, FactoryPatch, NewFactory
+from ..dto.factories import FactoryDesign, FactoryFile, FactoryItem, FactoryPatch, FactoryTemplate, NewFactory
 from ..dto.factory import FactoryBody, FactoryOut
 from ..handlers import factories as handler
 from ..server.deps import Factories, Projects, Tasks
 
 router = APIRouter()
+
+
+@router.get("/api/factory-templates")
+def list_templates() -> list[FactoryTemplate]:
+    return handler.list_templates()
 
 
 @router.get("/api/projects/{project_id}/factories")
@@ -18,7 +23,7 @@ def list_factories(project_id: int, projects: Projects, factories: Factories) ->
 @router.post("/api/projects/{project_id}/factories", status_code=201)
 def create_factory(project_id: int, body: NewFactory, projects: Projects, factories: Factories,
                    tasks: Tasks) -> FactoryDesign:
-    return handler.create_factory(projects, factories, tasks, project_id, body.name)
+    return handler.create_factory(projects, factories, tasks, project_id, body.name, body.template)
 
 
 @router.get("/api/factories/{factory_id}")

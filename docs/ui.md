@@ -368,13 +368,18 @@ Loading, failures, times, and motion are the same on every page:
     - A factory is a design: a graph of agents and conditions saved in the app
       (`docs/data-model-and-api.md §6.1`). Runs still use the `.claude/` files that Create factory
       or a design's **Write to repo** wrote.
-    - The list loads `GET /api/pages/projects/{id}` (the project header) and
-      `GET /api/projects/{id}/factories` once each, with no polling, and again after each of its
-      actions. The title reads `<project> · Factories`. **+ New factory** sits in the header.
+    - The list loads `GET /api/pages/projects/{id}` (the project header),
+      `GET /api/projects/{id}/factories`, and `GET /api/factory-templates` once each, with no
+      polling. The list loads again after each of its actions. The title reads
+      `<project> · Factories`. **+ New factory** sits in the header.
     - Each row: the name, linking to the designer, the node count (`10 nodes`, `1 node`), and
       Updated as a relative time. With none, `No factories yet.`
-    - **+ New factory** opens a native popover with a `Name` field and **Create**
-      (`POST /api/projects/{id}/factories`). On 201 the designer opens on the default loop. A
+    - **+ New factory** opens a native popover with a `Name` field, a `Template` fieldset, and
+      **Create** (`POST /api/projects/{id}/factories` `{"name","template"}`). The fieldset has
+      one radio per template in the API's order, each labeled by its name and described
+      (`aria-describedby`, muted) by its one-line description; `Standard` is checked. A failed
+      templates request shows its detail (`role="alert"`) in the fieldset instead, and Create
+      still posts the name. On 201 the designer opens on the chosen template's graph. A
       refusal (`factory default already exists`) shows inside the popover, which keeps the typed
       name.
     - **Rename** (`Rename <name>`) works in place, the sidebar's way: Enter sends
