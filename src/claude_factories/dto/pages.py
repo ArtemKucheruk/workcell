@@ -3,7 +3,7 @@ keys, with sqlite rows as objects; Q4: every `*_md` keeps its rendered `*_html` 
 
 from typing import Literal
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 from .rounds import RoundSummary
 from .tasks import Dep, TaskItem
@@ -18,6 +18,11 @@ class AuthOut(BaseModel):
     plan: str | None
     runs_enabled: bool
     email: str | None  # 039 Q3: the claude.ai login's account
+
+
+class SettingsBody(BaseModel):
+    """096 Q2: GET and PUT /api/settings. Outside 1–10, or not an integer, is FastAPI's 422."""
+    max_concurrent_runs: int = Field(ge=1, le=10, strict=True)  # strict: "3", 2.0, and true aren't integers
 
 
 class LoginStart(BaseModel):
@@ -257,7 +262,9 @@ class BoardPage(BaseModel):
     project: BoardProject
     factory: Factory
     hint: str | None
-    can_run: bool
+    can_run: bool  # 096: false at the run cap too
+    runs_active: int  # 096 AC29: running runs across all projects
+    max_concurrent_runs: int
     workspaces: list[WorkspaceOut]
     columns: dict[str, list[Card]]  # backlog, in_progress, review, done
     factory_error: str | None  # 058 Q10: the last automatic factory/ sync's refusal

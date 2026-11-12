@@ -167,12 +167,18 @@ function MoveMenu({ card, moves, nudges, running, onEdit, onDelete }) {
   )
 }
 
-function Card({ card, canRun, onRun, moves, nudges, onEdit, onDelete, dragging, drop, onDragStart, onDragEnd }) {
+function Card({ card, canRun, runTitle, onRun, moves, nudges, onEdit, onDelete, dragging, drop, onDragStart, onDragEnd }) {
   const running = card.status === 'in_progress' && card.run?.status === 'running'
   // 094 Q6: every column but Done; the text keeps its tokens, which clear 4.5:1 on raised. Q10: Run stays enabled
   const blocked = card.blocked && card.status !== 'done'
   const runButton = (label) => (
-    <ActionButton action={() => onRun(card.id)} disabled={!canRun} className={smallButton} aria-describedby={`task-${card.id}`}>
+    <ActionButton
+      action={() => onRun(card.id)}
+      disabled={!canRun}
+      title={runTitle}
+      className={smallButton}
+      aria-describedby={`task-${card.id}`}
+    >
       {label}
     </ActionButton>
   )
@@ -417,6 +423,9 @@ export function BoardPage() {
   if (error?.status === 404) return <NotFound detail={error.message} />
   if (!page) return error ? <ErrorMessage error={error} /> : <BoardSkeleton />
   const { project } = page
+  // 096 Q9: at or over the run cap, one muted header line and the same text as the title of every disabled Run
+  const capHint =
+    page.runs_active >= page.max_concurrent_runs ? `${page.runs_active} of ${page.max_concurrent_runs} runs active` : undefined
 
   /**
    * Q1, Q3, Q9: Run, Retry, Run next, and moves share the board's alert. Starting one empties the alert and the status
@@ -537,10 +546,11 @@ export function BoardPage() {
       {/* 042: Code, Create factory, Import, Project context, and Move live on the project's other pages */}
       <ProjectHeader project={project} factory={page.factory}>
         <NewTask projectId={project.id} editing={editing} setEditing={setEditing} onCreated={refresh} onSaved={saved} />
-        <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run}>
+        <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run} title={capHint}>
           Run next ▶
         </ActionButton>
         {page.hint && <p className={`basis-full text-sm ${muted}`}>{page.hint}</p>}
+        {capHint && <p className={`basis-full text-sm ${muted}`}>{capHint}</p>}
         {/* 058 FE5, FE6: the last automatic sync's refusal, muted like the hint and not an alert: polls repeat it */}
         {page.factory_error && <p className={`basis-full text-sm ${muted}`}>{`factory/: ${page.factory_error}`}</p>}
       </ProjectHeader>
@@ -577,6 +587,7 @@ export function BoardPage() {
                       key={card.id}
                       card={card}
                       canRun={page.can_run}
+                      runTitle={capHint}
                       onRun={(taskId) => boardAction(() => runTask(taskId))}
                       {...menu(card, status, cards)}
                       onEdit={edit}

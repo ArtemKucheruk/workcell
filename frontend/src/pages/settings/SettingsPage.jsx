@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { activateAccount, deleteAccount, getAccounts, planName, sendLoginCode, startLogin } from '../../api/auth.js'
+import { getSettings, putSettings } from '../../api/settings.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { ActivePill } from '../../components/Badge.jsx'
 import { DeleteDialog } from '../../components/DeleteDialog.jsx'
@@ -67,6 +68,76 @@ function AccountItem({ account, loginLabel, onActivate, onLogin, onDisconnect, c
       </div>
       {children}
     </li>
+  )
+}
+
+/**
+ * 096 Q8, docs/ui.md §8 item 9: the Runs section, the global run cap, loaded once. Save sends the number; a success says
+ * Saved, a refusal shows the alert and keeps the typed value.
+ */
+function RunsSection() {
+  const { data, error } = usePoll(getSettings) // no interval: once
+  const [typed, setTyped] = useState(null) // null until edited, so the loaded value shows
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [failure, setFailure] = useState(null)
+
+  async function save(event) {
+    event.preventDefault()
+    setBusy(true)
+    setSaved(false)
+    setFailure(null)
+    try {
+      await putSettings({ max_concurrent_runs: Number(typed ?? data.max_concurrent_runs) })
+      setSaved(true)
+    } catch (err) {
+      setFailure(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section aria-labelledby="runs" className="mt-8 grid max-w-xl gap-4">
+      <h2 id="runs" className="mt-0 mb-0">
+        Runs
+      </h2>
+      {/* one small field, so no skeleton of its own */}
+      {!data ? (
+        error && <ErrorMessage error={error} />
+      ) : (
+        <form onSubmit={save} className="grid gap-2">
+          <label className="grid gap-1 justify-self-start">
+            Concurrent runs
+            <input
+              type="number"
+              min="1"
+              max="10"
+              required
+              value={typed ?? data.max_concurrent_runs}
+              onChange={(e) => {
+                setTyped(e.target.value)
+                setSaved(false)
+              }}
+              aria-describedby="runs-hint"
+              className={`${field} w-24`}
+            />
+          </label>
+          <p id="runs-hint" className={`text-sm ${muted}`}>
+            How many runs can go at once, across all projects.
+          </p>
+          <button disabled={busy} className={`${button} justify-self-start`}>
+            Save
+          </button>
+          {saved && (
+            <p role="status" className="font-semibold text-success">
+              Saved
+            </p>
+          )}
+          {failure && <ErrorMessage error={failure} />}
+        </form>
+      )}
+    </section>
   )
 }
 
@@ -257,6 +328,8 @@ export function SettingsPage() {
           )}
         </section>
       )}
+      {/* 046 FE14: until the accounts load, the skeleton stands alone in main */}
+      {shown && <RunsSection />}
     </>
   )
 }

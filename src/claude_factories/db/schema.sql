@@ -41,8 +41,10 @@ CREATE TABLE IF NOT EXISTS runs (
   status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','stopped')),
   exit_code INTEGER, error TEXT,
   log_path TEXT NOT NULL,
-  started_at TEXT NOT NULL, ended_at TEXT);
-CREATE UNIQUE INDEX IF NOT EXISTS one_active_run ON runs(status) WHERE status = 'running';  -- one run at a time, globally (Pro limits)
+  started_at TEXT NOT NULL, ended_at TEXT,
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);  -- 096 Q5: its account; NULL = the active one (pre-096); db.init() adds it
+-- 096: one running run per task; settings.max_concurrent_runs caps them all. db.init() drops the old global one_active_run
+CREATE UNIQUE INDEX IF NOT EXISTS one_run_per_task ON runs(task_id) WHERE status = 'running';
 
 CREATE TABLE IF NOT EXISTS rounds (
   id INTEGER PRIMARY KEY,
@@ -133,3 +135,8 @@ CREATE TABLE IF NOT EXISTS context_items (  -- 057: a project's context cards an
   source_path TEXT,                       -- the file or folder it was read from, else NULL
   position REAL NOT NULL,                 -- order within its parent's list
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS settings (     -- 096 Q2: the app's one settings row, edited on the Settings page
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  max_concurrent_runs INTEGER NOT NULL DEFAULT 2 CHECK (max_concurrent_runs >= 1));  -- the global run cap
+INSERT OR IGNORE INTO settings (id) VALUES (1);  -- seeded once, never overwritten (096 AC3)

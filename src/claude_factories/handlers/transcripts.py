@@ -84,19 +84,19 @@ def sources(folder: Path, session: str) -> list[dict]:
 
 
 def collect(tx, run_id: int) -> None:
-    """Q7: copy the run's transcripts from the worktree's Claude Code folder (Q1), in the active account's
-    config dir (056), to `<run-id>/` under the store, mirroring the folder's layout (Q8), and upsert one row
-    per copy. Called after the run's own row is written; an OSError leaves that file out (or all of them) and
-    never fails the caller. No active account copies nothing (056 Q8)."""
+    """Q7: copy the run's transcripts from the worktree's Claude Code folder (Q1), in the run's own account's
+    config dir (096 AC22), else the active account's (056; a pre-096 run, AC23), to `<run-id>/` under the
+    store, mirroring the folder's layout (Q8), and upsert one row per copy. Called after the run's own row is
+    written; an OSError leaves that file out (or all of them) and never fails the caller. No account copies
+    nothing (056 Q8)."""
     with COLLECTING:
         with tx() as conn:
             run = TranscriptsRepo(conn).source(run_id)
-            # ponytail (056 Q8): the account active now, the run's own unless one was made active between a
-            # Stop and the exit thread's second copy; runs.account_id would pin it
-            account = ClaudeAccountsRepo(conn).active()
-        if run is None or account is None or not run["worktree_path"] or not SESSION.fullmatch(run["session_id"]):
+            active = ClaudeAccountsRepo(conn).active()
+        config_dir = run and run["config_dir"] or active and active["config_dir"]
+        if run is None or not config_dir or not run["worktree_path"] or not SESSION.fullmatch(run["session_id"]):
             return
-        folder = Path(account["config_dir"]) / "projects" / folder_name(run["worktree_path"])
+        folder = Path(config_dir) / "projects" / folder_name(run["worktree_path"])
         try:
             found = sources(folder, run["session_id"])
         except OSError:

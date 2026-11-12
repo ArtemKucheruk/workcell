@@ -13,9 +13,11 @@ class TranscriptsRepo:
         self.conn = conn
 
     def source(self, run_id: int) -> sqlite3.Row | None:
-        """What collecting a run needs: its task, its session, and the task's worktree."""
+        """What collecting a run needs: its task, its session, the task's worktree, and its own account's
+        config_dir (096 Q5: NULL for a run with no account_id, or whose account is gone)."""
         return self.conn.execute(
-            "SELECT r.task_id, r.session_id, t.worktree_path FROM runs r JOIN tasks t ON t.id = r.task_id"
+            "SELECT r.task_id, r.session_id, t.worktree_path, a.config_dir FROM runs r"
+            " JOIN tasks t ON t.id = r.task_id LEFT JOIN claude_accounts a ON a.id = r.account_id"
             " WHERE r.id = ?",
             (run_id,),
         ).fetchone()

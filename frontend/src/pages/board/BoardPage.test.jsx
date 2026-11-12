@@ -16,7 +16,7 @@ const card = (id, status, extra = {}) => ({
 })
 /** A BoardPage view-model; `columns` fills in the rest of the four. */
 const board = (columns = {}, extra = {}) => ({
-  project: PROJECT, factory: 'ready', hint: null, can_run: true, workspaces: WORKSPACES,
+  project: PROJECT, factory: 'ready', hint: null, can_run: true, runs_active: 0, max_concurrent_runs: 2, workspaces: WORKSPACES,
   columns: { backlog: [], in_progress: [], review: [], done: [], ...columns }, ...extra,
 })
 
@@ -203,6 +203,37 @@ test('AC4: can_run disables or enables Run next, every Run, and every Retry', as
     expect(buttons.map((b) => b.disabled)).toEqual(Array(4).fill(!canRun))
     unmount()
   }
+})
+
+// --- 096: the run cap ------------------------------------------------------------------
+
+const CAP_COLUMNS = {
+  backlog: [card(1, 'backlog')],
+  in_progress: [
+    card(2, 'in_progress', { stage: 'build', run: { id: 8, status: 'running' } }),
+    card(3, 'in_progress', { stage: 'build', run: { id: 9, status: 'failed' }, stalled: true }),
+  ],
+}
+const runButtons = () => [
+  screen.getByRole('button', { name: 'Run next ▶' }),
+  within(cardEl(1)).getByRole('button', { name: 'Run' }),
+  within(cardEl(3)).getByRole('button', { name: 'Retry' }),
+]
+
+test('096 AC32: under the cap Run and Run next are enabled, with no runs active hint and no run #N active line', async () => {
+  await open(board(CAP_COLUMNS, { runs_active: 1, max_concurrent_runs: 2, can_run: true }))
+  expect(runButtons().map((b) => [b.disabled, b.getAttribute('title')])).toEqual(Array(3).fill([false, null]))
+  expect(document.body.textContent).not.toMatch(/runs active/)
+  expect(document.body.textContent).not.toMatch(/run #\d+ active/)
+})
+
+test('096 AC33: at the cap Run, Retry, and Run next are disabled, titled, and the header says 2 of 2 runs active', async () => {
+  await open(board(CAP_COLUMNS, { runs_active: 2, max_concurrent_runs: 2, can_run: false }))
+  expect(runButtons().map((b) => [b.disabled, b.getAttribute('title')])).toEqual(Array(3).fill([true, '2 of 2 runs active']))
+  const line = within(header()).getByText('2 of 2 runs active')
+  expect(line.tagName).toBe('P')
+  expect(line.className).toContain('text-muted')
+  expect(screen.queryByRole('alert')).toBeNull()
 })
 
 // --- Columns and cards -----------------------------------------------------------------

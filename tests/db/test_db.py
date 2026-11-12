@@ -36,9 +36,9 @@ def test_schema_has_every_table_and_index():  # AC10
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
               "decisions", "events", "transcripts", "factories", "claude_accounts",
-              "context_items", "task_deps"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094
+              "context_items", "task_deps", "settings"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094, 096
     assert {("table", t) for t in tables} <= rows
-    assert {("index", "one_active_run"), ("index", "one_active_account")} <= rows
+    assert {("index", "one_run_per_task"), ("index", "one_active_account")} <= rows
 
 
 def test_journal_mode_is_wal():  # AC11
@@ -56,21 +56,80 @@ def test_restart_keeps_data():  # AC12
         assert conn.execute("SELECT name FROM workspaces").fetchall() == [("personal",)]
 
 
-def test_one_active_run():  # AC13
+def test_one_run_per_task():  # AC13; 096 AC4
     start_app()
     with closing(db.connect()) as conn:
         conn.execute("INSERT INTO workspaces (id, name, created_at) VALUES (1, 'w', ?)", (NOW,))
         conn.execute(
             "INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at)"
             " VALUES (1, 1, 'p', '/p', 'main', ?)", (NOW,))
-        conn.execute(
-            "INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)"
-            " VALUES (1, 1, 't', 'in_progress', 1, ?, ?)", (NOW, NOW))
+        for task in (1, 2):
+            conn.execute(
+                "INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)"
+                " VALUES (?, 1, 't', 'in_progress', 1, ?, ?)", (task, NOW, NOW))
         run = ("INSERT INTO runs (task_id, session_id, status, log_path, started_at)"
-               " VALUES (1, ?, 'running', '/log', ?)")
-        conn.execute(run, ("s1", NOW))
+               " VALUES (?, ?, 'running', '/log', ?)")
+        conn.execute(run, (1, "s1", NOW))
+        conn.execute(run, (2, "s2", NOW))  # another task's running run is fine
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(run, ("s2", NOW))
+            conn.execute(run, (1, "s3", NOW))
+
+
+def settings_value() -> int:
+    with closing(db.connect()) as conn:
+        return conn.execute("SELECT max_concurrent_runs FROM settings").fetchall()
+
+
+def test_fresh_db_concurrent_runs():  # 096 AC1
+    db.init()
+    with closing(db.connect()) as conn:
+        indexes = {name: sql for name, sql in conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'index'")}
+        columns = [c[1] for c in conn.execute("PRAGMA table_info(runs)")]
+        fks = {(fk[2], fk[3], fk[4], fk[6]) for fk in conn.execute("PRAGMA foreign_key_list(runs)")}
+    assert "one_active_run" not in indexes
+    assert "ON runs(task_id) WHERE status = 'running'" in indexes["one_run_per_task"]
+    assert "account_id" in columns
+    assert ("claude_accounts", "account_id", "id", "SET NULL") in fks
+    assert settings_value() == [(2,)]
+
+
+BEFORE_096 = """
+CREATE TABLE tasks (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id), title TEXT NOT NULL,
+  description_md TEXT NOT NULL DEFAULT '', spec_md TEXT, status TEXT NOT NULL, stage TEXT, position REAL NOT NULL,
+  branch TEXT, worktree_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
+  import_key TEXT UNIQUE, pr_url TEXT);
+CREATE TABLE runs (id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id), session_id TEXT NOT NULL,
+  pid INTEGER, status TEXT NOT NULL, exit_code INTEGER, error TEXT, log_path TEXT NOT NULL,
+  started_at TEXT NOT NULL, ended_at TEXT);
+CREATE UNIQUE INDEX one_active_run ON runs(status) WHERE status = 'running';
+"""
+
+
+def test_old_db_gets_concurrent_runs():  # 096 AC2
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + BEFORE_096 + f"INSERT INTO tasks (id, project_id, title, status, position, created_at,"
+                                        f" updated_at) VALUES (1, 1, 'a', 'backlog', 1, '{NOW}', '{NOW}');"
+                                        f"INSERT INTO runs (task_id, session_id, status, log_path, started_at)"
+                                        f" VALUES (1, 's', 'succeeded', 'l', '{NOW}');")
+    db.init()
+    with closing(db.connect()) as conn:
+        indexes = {name for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+        assert "one_active_run" not in indexes and "one_run_per_task" in indexes
+        assert "account_id" in [c[1] for c in conn.execute("PRAGMA table_info(runs)")]
+        assert conn.execute("SELECT id, account_id FROM runs").fetchall() == [(1, None)]
+    assert settings_value() == [(2,)]
+    db.init()  # a second init skips the ALTER
+    assert settings_value() == [(2,)]
+
+
+def test_init_keeps_setting():  # 096 AC3
+    db.init()
+    with closing(db.connect()) as conn, conn:
+        conn.execute("UPDATE settings SET max_concurrent_runs = 5")
+    db.init()
+    assert settings_value() == [(5,)]
 
 
 def test_foreign_keys_on():  # AC14

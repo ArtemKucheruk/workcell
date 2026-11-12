@@ -22,6 +22,10 @@ files (`.env`, `node_modules`, caches), so the tests run as they do in the main 
 isn't copied: run `uv sync` (or the repo's install step) first when the tests need it. Never
 print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions.
 
+Other runs may be going at the same time. If you start the app or any server to try the change,
+listen on `$FCTL_BACKEND_PORT` and `$FCTL_FRONTEND_PORT`, free ports this run got, never the
+repo's default ports, and stop it before you finish.
+
 Do:
 1. Implement the spec in your cwd. Read the code around it first and follow its conventions.
 2. One test per acceptance criterion. Run the test command until it passes.

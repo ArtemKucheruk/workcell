@@ -150,6 +150,41 @@ def test_copies_from_active_account(tmp_path, wt):  # 056 BE19, Q8
     assert copy(f"{run_id}/{SID}.jsonl").read_bytes() == source.read_bytes()
 
 
+def test_copies_from_each_runs_account(tmp_path):  # 096 AC22
+    """Two runs in two accounts; account 3, holding neither's transcripts, is the active one."""
+    made = []
+    for n in (1, 2):
+        wt = tmp_path / f"wt-{n}"
+        wt.mkdir()
+        task = add_task(wt)
+        config_dir = tmp_path / f"account-{n}"
+        account = sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?) RETURNING id",
+                      (str(config_dir), OLD))[0][0]
+        run_id = add_run(task, status="succeeded")
+        sql("UPDATE runs SET account_id = ? WHERE id = ?", (account, run_id))
+        source = config_dir / "projects" / folder_name(str(wt)) / f"{SID}.jsonl"
+        source.parent.mkdir(parents=True)
+        source.write_text(MAIN.replace("hi", f"run {n}"))
+        made.append((run_id, source))
+    third = tmp_path / "account-3"
+    sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?)", (str(third), OLD))
+    sql("UPDATE claude_accounts SET active = 0")
+    sql("UPDATE claude_accounts SET active = 1 WHERE config_dir = ?", (str(third),))
+    for run_id, source in made:
+        collect(transaction, run_id)
+        assert copy(f"{run_id}/{SID}.jsonl").read_bytes() == source.read_bytes()
+    assert [r["run_id"] for r in rows()] == [made[0][0], made[1][0]]
+
+
+def test_run_without_account_uses_active(tmp_path, wt):  # 096 AC23: a run from before 096
+    task = add_task(wt)
+    run_id = add_run(task, status="succeeded")
+    assert sql("SELECT account_id FROM runs WHERE id = ?", (run_id,)) == [(None,)]
+    source = plant(wt, f"{SID}.jsonl", MAIN)  # the active account's dir: the server's CLAUDE_CONFIG_DIR
+    collect(transaction, run_id)
+    assert copy(f"{run_id}/{SID}.jsonl").read_bytes() == source.read_bytes()
+
+
 def test_subagents(ran, wt):  # AC5
     plant(wt, f"{SID}.jsonl", MAIN)
     sub = f"{SID}/subagents"

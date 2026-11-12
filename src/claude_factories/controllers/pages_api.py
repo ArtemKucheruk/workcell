@@ -1,4 +1,5 @@
-"""docs/data-model-and-api.md §6.4: /api/auth, its login (039), and the Claude accounts (056), /api/docs/fctl,
+"""docs/data-model-and-api.md §6.4: /api/auth, its login (039), and the Claude accounts (056), /api/settings
+(096), /api/docs/fctl,
 and one view-model per SPA page. Each route calls its page handler in handlers/pages.py and maps the dict onto
 dto/pages.py (020 Q2): rows become objects, markdown gets `*_html`."""
 
@@ -19,6 +20,7 @@ from ..server.deps import (
     Reviews,
     Rounds,
     Runs,
+    Settings,
     Tasks,
     Transcripts,
     Workspaces,
@@ -101,6 +103,18 @@ def delete_account(account_id: int, claude: ClaudeAdapter, accounts: ClaudeAccou
     handler.delete_account(claude, accounts, runs, account_id)
 
 
+@router.get("/api/settings")
+def get_settings(settings: Settings) -> dto.SettingsBody:
+    """096 Q2: the app's settings, loaded once by the Settings page."""
+    return handler.settings(settings)
+
+
+@router.put("/api/settings")
+def put_settings(body: dto.SettingsBody, settings: Settings) -> dto.SettingsBody:
+    """096 Q2: the whole settings object; the middleware's X-Requested-By check covers it (AC27)."""
+    return handler.put_settings(settings, body.max_concurrent_runs)
+
+
 @router.get("/api/docs/fctl")
 def fctl_doc() -> dto.FctlDoc:
     """029 Q8: docs/ui.md §8 item 7's reference, next to the page view-models."""
@@ -143,11 +157,11 @@ def workspace(workspace_id: int, workspaces: Workspaces, projects: Projects, git
 @router.get("/api/pages/projects/{project_id}")
 def board(project_id: int, projects: Projects, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs,
           transcripts: Transcripts, workspaces: Workspaces, git: GitAdapter, claude: ClaudeAdapter,
-          accounts: ClaudeAccounts, sec_fetch_site: str | None = Header(None)) -> dto.BoardPage:
+          accounts: ClaudeAccounts, settings: Settings, sec_fetch_site: str | None = Header(None)) -> dto.BoardPage:
     """058: Transcripts for the factory/ sync's import. §4.5: this GET writes when it syncs, which the
     X-Requested-By check doesn't cover, so a cross-site request gets the page without the sync."""
     page = handler.board(projects, tasks, rounds, reviews, runs, transcripts, workspaces, git, claude, accounts,
-                         project_id, sec_fetch_site != "cross-site")
+                         settings, project_id, sec_fetch_site != "cross-site")
     return page | {"project": obj(page["project"]), "workspaces": objs(page["workspaces"])}
 
 

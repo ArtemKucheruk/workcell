@@ -6,6 +6,7 @@
 
 import json
 import os
+import socket
 import sqlite3
 import threading
 import uuid
@@ -22,6 +23,7 @@ from ..lib.slug import slug
 from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.runs import RunsRepo
+from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
 from .factory import factory_hint, factory_state
 from .transcripts import collect
@@ -38,6 +40,10 @@ DISALLOWED_TOOLS = (
 )
 # .fctl/: the text agents write for fctl's stdin, since a run can't approve a Bash command over ~10,000 chars
 EXCLUDE_LINES = (b".claude/worktrees/", b".fctl/")
+# 096 Q7: parallel starts take turns on the main checkout (info/exclude, .git/index.lock, worktrees/) and on
+# the account's .claude.json (its shared .fctl-tmp). ponytail: global, so starts in different repos also wait;
+# per-repo locks if that bites. wt_copy_ignored (up to 300 s) stays outside it.
+CHECKOUT_LOCK = threading.Lock()
 
 
 def command_parts(cmd: str) -> list[list[str]]:
@@ -97,10 +103,26 @@ def open_blockers(tasks: TasksRepo, task_id: int) -> str:
     return ", ".join(f"#{b['id']}" for b in tasks.blockers(task_id) if b["status"] != "done")
 
 
-def refuse_if_running(runs: RunsRepo):
-    """§4.4: one run at a time, across all projects."""
-    if run := runs.any_running():
-        raise Conflict(f"run #{run[0]} active")
+def refuse_if_running(runs: RunsRepo, settings: SettingsRepo, task_id: int):
+    """096, §4.4: the task's own running run first (Q1), then the global cap, max_concurrent_runs. Each detail
+    names the runs in the way and the fix. Start and Request changes share it (Q4)."""
+    if run := runs.running(task_id):
+        raise Conflict(f"run #{run['id']} is already running on #{task_id}; wait for it or stop it")
+    active, cap = runs.running_tasks(), settings.max_concurrent_runs()
+    if len(active) >= cap:  # Q3: a lowered cap stops nothing; new starts wait until the count drops under it
+        listed = ", ".join(f"#{r['id']} on #{r['task_id']}" for r in active)
+        raise Conflict(f"{len(active)} run{'' if len(active) == 1 else 's'} active ({listed}); the limit is {cap}."
+                       " Wait, stop one, or raise it in Settings")
+
+
+def free_ports() -> tuple[int, int]:
+    """096 Q6: two free loopback ports, for FCTL_BACKEND_PORT and FCTL_FRONTEND_PORT. Both sockets stay open
+    until both are read, so they differ. ponytail: a port can be taken between the pick and its use; reserve
+    ports if that bites."""
+    with socket.socket() as a, socket.socket() as b:
+        a.bind(("127.0.0.1", 0))
+        b.bind(("127.0.0.1", 0))
+        return a.getsockname()[1], b.getsockname()[1]
 
 
 def exclude_worktrees(git: Git, repo: str) -> None:
@@ -140,9 +162,10 @@ def worktree(tx, git: Git, task) -> str:
     """Q5: the exclude line, then Q4: the stored worktree, or a new one from the default branch made by
     worktrunk (099 AC1), stored right away so a refusal after it leaves it for the next run (099 AC5). Then,
     new or reused, the main checkout's ignored files copied in, minus any the default branch doesn't ignore
-    (099 AC2, AC3, round 1 security finding 2)."""
+    (099 AC2, AC3, round 1 security finding 2). 096 Q7: the exclude write and wt_create hold CHECKOUT_LOCK."""
     path = task["path"]
-    exclude_worktrees(git, path)
+    with CHECKOUT_LOCK:
+        exclude_worktrees(git, path)
     if task["worktree_path"]:  # reused as stored, even if the title changed since
         if not os.path.isdir(task["worktree_path"]):
             raise Conflict(f"worktree {task['worktree_path']} is missing")
@@ -150,7 +173,9 @@ def worktree(tx, git: Git, task) -> str:
     else:
         name = f"{task['id']}-{slug(task['title'])}"
         branch = f"factory/{name}"
-        wt = git.wt_create(path, branch, os.path.join(path, ".claude", "worktrees", name), task["default_branch"])
+        with CHECKOUT_LOCK:
+            wt = git.wt_create(path, branch, os.path.join(path, ".claude", "worktrees", name),
+                               task["default_branch"])
         with tx() as conn:
             TasksRepo(conn).set_worktree(task["id"], branch, wt)
     git.wt_copy_ignored(wt, task["default_branch"])
@@ -158,17 +183,18 @@ def worktree(tx, git: Git, task) -> str:
 
 
 def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStarted:
-    """Q2's order: 404, run active, status (Q1), blockers (094), factory (Q12), worktree (Q4), auth; then the run
-    row, the move, and the event in one transaction, then the spawn (§4.4). `base_url` becomes FCTL_URL: the
-    controller's loopback URL on the server's own port (028 Q5). 056: the auth check and the spawn run in
-    the active account's CLAUDE_CONFIG_DIR; with none active, the run is refused without calling claude (Q7).
+    """Q2's order: 404, the task's own run and the cap (096 Q1), status (Q1), blockers (094), factory (Q12),
+    worktree (Q4), auth; then the run row, the move, and the event in one transaction, then the spawn (§4.4).
+    `base_url` becomes FCTL_URL: the controller's loopback URL on the server's own port (028 Q5). 056: the auth
+    check and the spawn run in the active account's CLAUDE_CONFIG_DIR; with none active, the run is refused
+    without calling claude (Q7). 096: the row keeps that account's id (Q5), and the env two free ports (Q6).
     094 Q1, Q4: a blocked task is refused outright, for Run, Retry, Run next, and rework's run alike."""
     with tx() as conn:
         task = TasksRepo(conn).for_run(task_id)
     if task is None:
         raise NotFound(f"no task #{task_id}")
     with tx() as conn:
-        refuse_if_running(RunsRepo(conn))
+        refuse_if_running(RunsRepo(conn), SettingsRepo(conn), task_id)
     if task["status"] in ("review", "done"):
         raise Conflict(f"#{task_id} is {'in review' if task['status'] == 'review' else 'done'}")
     with tx() as conn:
@@ -179,17 +205,19 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
     if hint := factory_hint(factory_state(git, task["path"], branch), branch):
         raise Conflict(hint)
     wt = worktree(tx, git, task)
-    # ponytail (Q8): an account made active between this read and the run row's insert goes unnoticed, and
-    # the run uses this one; runs.account_id would pin it
+    # 096 Q5: the run keeps this account (runs.account_id), whichever is made active later
     with tx() as conn:
         account = ClaudeAccountsRepo(conn).active()
     if account is None:
         raise Conflict("not on subscription auth")
+    backend_port, frontend_port = free_ports()
     env = stripped_env() | {"FCTL_URL": base_url.rstrip("/"),  # §4.3, passed to both exactly as built
-                            "CLAUDE_CONFIG_DIR": account["config_dir"]}
+                            "CLAUDE_CONFIG_DIR": account["config_dir"],
+                            "FCTL_BACKEND_PORT": str(backend_port), "FCTL_FRONTEND_PORT": str(frontend_port)}
     if claude.auth_status(wt, env) is None:  # each run's own check, never cached (§4.3: before every run)
         raise Conflict("not on subscription auth")
-    trust_project(account["config_dir"], task["path"])
+    with CHECKOUT_LOCK:
+        trust_project(account["config_dir"], task["path"])
     session_id = str(uuid.uuid4())
     allowed = ALLOWED_TOOLS + test_rules(task["test_cmd"] or "")
     args = ["-p", PROMPT.format(task_id=task_id), "--session-id", session_id,
@@ -199,13 +227,13 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
     runs_dir = config.data_dir() / "runs"
     runs_dir.mkdir(exist_ok=True)
     with tx() as conn:
-        tasks, runs = TasksRepo(conn), RunsRepo(conn)
+        tasks, runs, settings = TasksRepo(conn), RunsRepo(conn), SettingsRepo(conn)
         now = tasks.lock()
-        refuse_if_running(runs)
+        refuse_if_running(runs, settings, task_id)  # 096 Q1: again under the write lock, so parallel starts count
         try:
-            run_id = runs.add(task_id, session_id, now)
-        except sqlite3.IntegrityError:  # one_active_run
-            refuse_if_running(runs)
+            run_id = runs.add(task_id, session_id, now, account["id"])
+        except sqlite3.IntegrityError:  # one_run_per_task
+            refuse_if_running(runs, settings, task_id)
             raise
         log_path = runs_dir / f"{run_id}.jsonl"
         runs.set_log_path(run_id, str(log_path))
@@ -246,7 +274,8 @@ def finish(tx, run_id: int, proc, log_path: Path):
 
 def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> RunNextOut:
     """Q13: the top backlog card, lowest position then lowest id, through all of start's checks. 094: the top
-    ready one; with every card blocked, a 409 naming the top card's open blockers (Q5)."""
+    ready one; with every card blocked, a 409 naming the top card's open blockers (Q5). 096 Q10: a card with a
+    running run is skipped; start's checks refuse it at the cap (AC17)."""
     with tx() as conn:
         if not ProjectsRepo(conn).exists(project_id):
             raise NotFound()

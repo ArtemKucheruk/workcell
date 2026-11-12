@@ -17,6 +17,10 @@ files (`.env`, `node_modules`, caches), so the tests run as they do in the main 
 isn't copied: run `uv sync` (or the repo's install step) first when the tests need it. Never
 print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions.
 
+Other runs may be going at the same time. If you start the app or any server to try the change,
+listen on `$FCTL_BACKEND_PORT` and `$FCTL_FRONTEND_PORT`, free ports this run got, never the
+repo's default ports, and stop it before you finish.
+
 Check what a user sees:
 - The task's user-facing flows work as the spec describes, with no extra steps, prompts, or
   flags.

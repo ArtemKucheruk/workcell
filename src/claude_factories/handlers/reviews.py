@@ -14,6 +14,7 @@ from ..repositories.context_items import ContextItemsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
+from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
 from . import runs as runs_handler
 from .rounds import find_round
@@ -100,17 +101,17 @@ def approve(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id:
     return ApproveOut(status=Status.DONE, commit_hint=commit_hint(task))
 
 
-def request_changes(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, task_id: int,
-                    body: ChangesBody) -> bool:
-    """§3.6: my CHANGES_REQUESTED → in_progress · rework (009 Q1: standalone too). 013 Q12: a factory task
-    is refused while any run is active, before any write. Returns whether it is a factory task, whose
-    rework run `rework` starts once this commits (035 Q1)."""
+def request_changes(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
+                    settings: SettingsRepo, task_id: int, body: ChangesBody) -> bool:
+    """§3.6: my CHANGES_REQUESTED → in_progress · rework (009 Q1: standalone too). 013 Q12, 096 Q4: a factory
+    task is refused, before any write, while its own run is running or the run cap is full, with start's
+    details. Returns whether it is a factory task, whose rework run `rework` starts once this commits (035 Q1)."""
     if not body.body_md.strip():
         raise Invalid("body_md must not be blank")
     now, task = locked_task(tasks, task_id)
     factory = bool(task["branch"] and task["worktree_path"])
-    if factory and (run := runs.any_running()):
-        raise Conflict(f"run #{run['id']} active")
+    if factory:
+        runs_handler.refuse_if_running(runs, settings, task_id)
     decide(tasks, rounds, reviews, task, now, "CHANGES_REQUESTED", body.body_md, Status.IN_PROGRESS, Stage.REWORK)
     return factory
 
@@ -120,7 +121,8 @@ def rework(tx, git: Git, claude: Claude, task_id: int, body: ChangesBody, base_u
     would wait on it), then for a factory task (013 Q11) the rework run: /factory <id> in its worktree,
     a fresh session (Q13). A refusal from the start leaves the decision and the move (Q12)."""
     with tx() as conn:
-        factory = request_changes(TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn), RunsRepo(conn), task_id, body)
+        factory = request_changes(TasksRepo(conn), RoundsRepo(conn), ReviewsRepo(conn), RunsRepo(conn),
+                                  SettingsRepo(conn), task_id, body)
     if not factory:
         return ChangesOut(status="in_progress", stage="rework", run_id=None)
     try:

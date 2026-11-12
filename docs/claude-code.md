@@ -142,6 +142,13 @@ quote, or copy secrets from `.env` into build notes, verdicts, comments, or deci
 The copied files never reach a round's diff: `fctl submit` sends only files git doesn't ignore
 (§7.4 step 2). Removing a worktree is `wt remove <branch>` (the Approve hint, Merge PR's cleanup).
 
+Several runs can go at once (096, MVP §4.4), so each run's environment holds two free loopback ports,
+`FCTL_BACKEND_PORT` and `FCTL_FRONTEND_PORT`. The builder, review-ux, and review-ui templates say:
+"Other runs may be going at the same time. If you start the app or any server to try the change, listen
+on `$FCTL_BACKEND_PORT` and `$FCTL_FRONTEND_PORT`, free ports this run got, never the repo's default
+ports, and stop it before you finish." The run allowlist limits reviewers' Bash to fctl and git, so this
+only matters where a repo's own settings allow starting a server.
+
 **Factory templates (088).** + New factory starts a design from one of five graph presets
 (`GET /api/factory-templates`; graphs in `docs/data-model-and-api.md §6.1`). Create factory in
 Settings still writes Standard's 8 files.
@@ -193,7 +200,8 @@ branch, then add a crontab line:
 ```
 0 6 * * 1 cd /path/to/repo && fctl task add "Security audit" --run
 ```
-It needs `fctl serve` running, `fctl` on cron's `PATH`, and no other run active (else 409). A
+It needs `fctl serve` running, `fctl` on cron's `PATH`, and a free slot under the run cap
+(`max_concurrent_runs` on Settings, else 409 `2 runs active (…); the limit is 2. …`). A
 scheduler in the app, and picking the factory per task, are follow-ups.
 
 **Compiling a design.** `GET /api/factories/{id}/files`, its zip, and Write to repo (`docs/data-model-and-api.md

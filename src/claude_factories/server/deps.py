@@ -18,6 +18,7 @@ from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
+from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
 from ..repositories.workspaces import WorkspacesRepo
@@ -65,6 +66,10 @@ def get_transcripts(conn: Conn) -> TranscriptsRepo:
     return TranscriptsRepo(conn)
 
 
+def get_settings(conn: Conn) -> SettingsRepo:
+    return SettingsRepo(conn)
+
+
 def get_factories(conn: Conn) -> FactoriesRepo:
     return FactoriesRepo(conn)
 
@@ -92,6 +97,7 @@ Rounds = Annotated[RoundsRepo, Depends(get_rounds)]
 Reviews = Annotated[ReviewsRepo, Depends(get_reviews)]
 Runs = Annotated[RunsRepo, Depends(get_runs)]
 Transcripts = Annotated[TranscriptsRepo, Depends(get_transcripts)]
+Settings = Annotated[SettingsRepo, Depends(get_settings)]
 Factories = Annotated[FactoriesRepo, Depends(get_factories)]
 ClaudeAccounts = Annotated[ClaudeAccountsRepo, Depends(get_claude_accounts)]
 ContextItems = Annotated[ContextItemsRepo, Depends(get_context_items)]

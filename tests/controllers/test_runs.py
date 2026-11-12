@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import socket
 import sys
 import time
 import uuid
@@ -319,6 +320,27 @@ def test_env_names_active_account(client, project, fake, monkeypatch, tmp_path):
         assert env["FCTL_URL"] == "http://127.0.0.1:4545"
 
 
+def test_run_keeps_its_account(client, project, fake, tmp_path):  # 096 AC11, Q5
+    two = str(tmp_path / "account-2")
+    sql("INSERT INTO claude_accounts (config_dir, created_at) VALUES (?, ?)", (two, OLD))
+    sql("UPDATE claude_accounts SET active = 0")
+    sql("UPDATE claude_accounts SET active = 1 WHERE config_dir = ?", (two,))
+    run_id = started(client, add_task(project))["run_id"]
+    [(account_id,)] = sql("SELECT account_id FROM runs WHERE id = ?", (run_id,))
+    assert sql("SELECT config_dir FROM claude_accounts WHERE id = ?", (account_id,)) == [(two,)]
+    assert fake.recorded("run")["env"]["CLAUDE_CONFIG_DIR"] == two
+
+
+def test_env_has_free_ports(client, project, fake):  # 096 AC12, Q6
+    started(client, add_task(project))
+    env = fake.recorded("run")["env"]
+    ports = int(env["FCTL_BACKEND_PORT"]), int(env["FCTL_FRONTEND_PORT"])
+    assert ports[0] != ports[1]
+    for port in ports:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", port))
+
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost:4545"])  # frontend/server.js sends the first
 @pytest.mark.parametrize("route", ["run", "run-next"])
 def test_fctl_url_ignores_host(client, project, fake, route, host):  # 028 AC4
@@ -428,13 +450,28 @@ def test_exit_leaves_task(client, project, fake, case):  # AC16
 # --- Refusals: none of these writes a runs row --------------------------------
 
 
-def test_refused_while_running(client, project, repo, fake, tmp_path):  # AC17
+def cap(n):
+    """096: max_concurrent_runs = n."""
+    sql("UPDATE settings SET max_concurrent_runs = ?", (n,))
+
+
+def cap_detail(*runs, limit=None):
+    """096 AC6's 409 detail for (run id, task id) pairs, by run id."""
+    n = len(runs)
+    listed = ", ".join(f"#{r} on #{t}" for r, t in runs)
+    return (f"{n} run{'' if n == 1 else 's'} active ({listed}); the limit is {limit or n}."
+            " Wait, stop one, or raise it in Settings")
+
+
+def test_refused_while_running(client, project, repo, fake, tmp_path):  # AC17; 096: the cap spans projects
     other = tmp_path / "other"
     git(tmp_path, "init", "-q", "-b", "main", str(other))
-    running = add_running_run(add_task(connect(client, other)))
+    other_task = add_task(connect(client, other))
+    running = add_running_run(other_task)
+    cap(1)
     task = add_task(project)
     r = run(client, task)
-    assert (r.status_code, r.json()) == (409, {"detail": f"run #{running} active"})
+    assert (r.status_code, r.json()) == (409, {"detail": cap_detail((running, other_task))})
     assert not (repo / ".claude" / "worktrees").exists()
     assert not fake.invoked()
     assert sql("SELECT COUNT(*) FROM runs")[0][0] == 1
@@ -584,11 +621,24 @@ def test_run_next_legacy(client, legacy, fake):  # 059 BE7
     assert task_row(top)["status"] == "backlog"
 
 
-def test_run_next_while_running(client, project, queue):  # AC27
-    running = add_running_run(add_task(project, status="in_progress"))
+def test_run_next_while_running(client, project, queue, fake):  # AC27; 096 AC17: at the cap
+    other = add_task(project, status="in_progress")
+    running = add_running_run(other)
+    cap(1)
     r = client.post(f"/api/projects/{project}/run-next", headers=H)
-    assert (r.status_code, r.json()) == (409, {"detail": f"run #{running} active"})
+    assert (r.status_code, r.json()) == (409, {"detail": cap_detail((running, other))})
     assert task_row(queue)["status"] == "backlog"
+    assert sql("SELECT COUNT(*) FROM runs")[0][0] == 1 and not fake.invoked()
+
+
+def test_run_next_skips_running_card(client, project, queue, fake):  # 096 AC16, Q10
+    running = add_running_run(queue)  # the top backlog card, as a sync or import could leave it
+    r = client.post(f"/api/projects/{project}/run-next", headers=H)
+    assert r.status_code == 202, r.text
+    second = sql("SELECT id FROM tasks WHERE title = 'C'")[0][0]
+    assert r.json()["task_id"] == second
+    wait(r.json()["run_id"])
+    assert run_row(running)["status"] == "running"
 
 
 # --- 094: blocked tasks don't run -------------------------------------------------------

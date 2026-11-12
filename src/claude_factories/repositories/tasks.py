@@ -15,7 +15,7 @@ def days_ago(n: int) -> str:
 TILE_TASKS = {status: f"t.status = '{status}'" for status in Status} | {
     "waiting": "t.stage = 'human_review'",
     "escalated": "t.stage = 'escalated'",
-    # one_active_run allows one running run, so tasks with one = running runs
+    # 096: one_run_per_task allows one running run per task, so tasks with one = running runs
     "running": "t.id IN (SELECT task_id FROM runs WHERE status = 'running')",
     "done_week": f"t.done_at >= {days_ago(7)}",
 }
@@ -199,11 +199,14 @@ class TasksRepo:
 
     def top_backlog(self, project_id: int) -> sqlite3.Row | None:
         """012 Q13, 094: the top ready backlog card (lowest position, then lowest id) as id and ready 1; with every
-        card blocked, the top card with ready 0 (Q5); None for an empty backlog."""
+        card blocked, the top card with ready 0 (Q5); None for an empty backlog. 096 Q10: a card that already has
+        a running run is skipped."""
         return self.conn.execute(
             "SELECT id, NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks b ON b.id = d.blocked_by_id"
             " WHERE d.task_id = t.id AND b.status != 'done') AS ready FROM tasks t"
-            " WHERE project_id = ? AND status = 'backlog' ORDER BY ready DESC, position, id LIMIT 1",
+            " WHERE project_id = ? AND status = 'backlog'"
+            " AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status = 'running')"
+            " ORDER BY ready DESC, position, id LIMIT 1",
             (project_id,),
         ).fetchone()
 

@@ -142,6 +142,17 @@ def test_templates_say_worktrunk_and_env(path):  # 099 AC12
     assert "`.venv/` isn't copied" in text
 
 
+PORTS = ("If you start the app or any server to try the change, listen on `$FCTL_BACKEND_PORT` and"
+         " `$FCTL_FRONTEND_PORT`, free ports this run got, never the repo's default ports, and stop it before you"
+         " finish.")
+
+
+@pytest.mark.parametrize("name", ["builder", "review-ux", "review-ui"])
+def test_templates_say_ports(name):  # 096 AC37, Q6
+    text = " ".join((TEMPLATES / "agents" / f"{name}.md").read_text(encoding="utf-8").split())
+    assert PORTS in text
+
+
 def test_builder_template_venv_and_ignored():  # 099 AC12, AC14
     text = " ".join((TEMPLATES / "agents" / "builder.md").read_text(encoding="utf-8").split())
     assert "`.venv/` isn't copied: run `uv sync` (or the repo's install step) first when the tests need it" in text

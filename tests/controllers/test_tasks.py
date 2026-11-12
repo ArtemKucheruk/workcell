@@ -557,6 +557,19 @@ def test_delete_refused_during_run(client, project):  # 048 BE9
     assert dump() == kept
 
 
+def test_delete_and_move_guard_own_run_only(client, project):  # 096 AC21
+    a, b, c = (add_task(project, "in_progress", stage="build") for _ in range(3))
+    add_run(b, "running")
+    add_run(c, "running")  # two other tasks running at once
+    assert patch(client, a, {"status": "backlog", "position": 1.0}).status_code == 200
+    assert delete(client, a).status_code == 204
+    run_b = sql("SELECT id FROM runs WHERE task_id = ?", (b,))[0][0]
+    r = patch(client, b, {"status": "backlog", "position": 1.0})
+    assert (r.status_code, r.json()) == (409, {"detail": f"run #{run_b} active"})
+    r = delete(client, b)
+    assert (r.status_code, r.json()) == (409, {"detail": f"run #{run_b} active"})
+
+
 def test_delete_unknown_task(client):  # 048 BE10
     r = delete(client, 999)
     assert r.status_code == 404
