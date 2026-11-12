@@ -14,6 +14,11 @@ and the repo's docs the spec relies on, with Read, Grep, and Glob. Use Bash only
 Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
 don't re-read docs for them. No such section → take them from the repo's docs and code.
 
+Your worktree comes from worktrunk (`wt`) and already holds the main checkout's gitignored
+files (`.env`, `node_modules`, caches), so the tests run as they do in the main checkout. `.venv/`
+isn't copied: run `uv sync` (or the repo's install step) first when the tests need it. Never
+print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions.
+
 ESCALATE if any of these hold:
 - A verdict on the latest round is still CHANGES (the round cap was hit).
 - Tests fail or didn't run (the build notes' test output, the code review).

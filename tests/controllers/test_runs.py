@@ -4,12 +4,14 @@ import shutil
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import pytest
-from conftest import commit, git, sql, write
+from conftest import ORIGINAL_PATH, commit, git, sql, write, wt_calls
 
+from claude_factories.adapters import git as git_adapter
 from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.adapters.git import SubprocessGit
+from claude_factories.adapters.git import WT_MISSING, SubprocessGit
 from claude_factories.lib.slug import slug
 from claude_factories.server.deps import get_claude, get_git
 
@@ -502,7 +504,7 @@ def test_refused_when_worktree_add_fails(client, project, repo, fake):  # AC21
     write(repo, {f".claude/worktrees/{task}-rate-limit-login/stray.txt": "x"})
     r = run(client, task)
     assert r.status_code == 409
-    assert r.json()["detail"].startswith("git worktree add failed: ")
+    assert r.json()["detail"].startswith("wt switch failed: ")  # 099 AC5: wt's stderr, here git's
     row = task_row(task)
     assert (row["status"], row["branch"], row["worktree_path"]) == ("backlog", None, None)
     assert not fake.invoked() and no_runs()
@@ -677,3 +679,187 @@ def test_factory_through_adapter(client, repo, fake):  # 036 AC10
     assert r.status_code == 202, r.text
     wait(r.json()["run_id"])
     assert os.path.isdir(f"{repo}/.claude/worktrees/{task}-rate-limit-login")
+
+
+# --- 099: worktrunk makes the worktree and copies the ignored files in ------------------------
+
+
+def steps() -> list[str]:
+    """The fake wt's calls by subcommand: `switch`, `step copy-ignored`."""
+    return [" ".join(c["argv"][2:4]) if c["argv"][2] == "step" else c["argv"][2] for c in wt_calls()]
+
+
+def project_path(project_id) -> str:
+    return sql("SELECT path FROM projects WHERE id = ?", (project_id,))[0][0]
+
+
+def test_wt_switch_creates(client, project):  # 099 AC1, AC7
+    task = add_task(project, "Rate-limit login endpoint")
+    body = started(client, task)
+    root, name = project_path(project), f"{task}-rate-limit-login"
+    expected = f"{root}/.claude/worktrees/{name}"
+    switch = wt_calls()[0]
+    assert switch["argv"] == ["-C", root, "switch", "--create", f"factory/{name}", "--base", "main", "--no-cd",
+                              "--no-hooks", "--format", "json"]
+    assert f'worktree-path = "{expected}"' in switch["config"].splitlines()  # Q1: through WORKTRUNK_CONFIG_PATH
+    row = task_row(task)
+    assert (row["branch"], row["worktree_path"]) == (f"factory/{name}", expected)
+    assert body["worktree"] == f".claude/worktrees/{name}"  # AC7
+    assert expected in worktrees(root)
+
+
+def test_wt_copy_after_switch_before_auth(client, project, fake, monkeypatch):  # 099 AC2, AC5
+    task = add_task(project)
+    monkeypatch.setenv("FAKE_WT_FAIL", "step copy-ignored")
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": "wt step copy-ignored failed: wt: step copy-ignored broke"})
+    assert not fake.invoked() and no_runs()  # the copy comes before the auth check and the spawn
+    wt = task_row(task)["worktree_path"]
+    assert wt and os.path.isdir(wt)  # AC5: kept for Retry
+    switch, copy = wt_calls()
+    assert switch["argv"][2] == "switch"
+    assert copy["argv"] == ["-C", wt, "step", "copy-ignored"]
+    assert ('exclude = [".venv/", ".claude/worktrees/", ".claude/settings.local.json", ".fctl/"]'
+            in copy["config"].splitlines())  # Q2
+    monkeypatch.delenv("FAKE_WT_FAIL")
+    started(client, task)
+    assert steps() == ["switch", "step copy-ignored", "step copy-ignored"]
+
+
+def test_wt_reuse_copies_again(client, project):  # 099 AC3
+    task = add_task(project)
+    first = started(client, task)
+    sql("UPDATE tasks SET stage = 'build' WHERE id = ?", (task,))
+    assert started(client, task)["worktree"] == first["worktree"]
+    assert steps() == ["switch", "step copy-ignored", "step copy-ignored"]
+    wt = task_row(task)["worktree_path"]
+    assert [c["argv"] for c in wt_calls()[1:]] == [["-C", wt, "step", "copy-ignored"]] * 2
+
+
+def test_wt_missing(client, project, repo, fake, tmp_path, monkeypatch):  # 099 AC4
+    (tmp_path / "bin" / "wt").unlink()
+    git_only = tmp_path / "git-only"  # git without whatever shares its directory (a real wt, say)
+    git_only.mkdir()
+    (git_only / "git").symlink_to(os.path.realpath(shutil.which("git")))
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{git_only}")
+    task = add_task(project)
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": WT_MISSING})
+    assert WT_MISSING == "wt (worktrunk) isn't installed: brew install worktrunk, then run again"
+    assert task_row(task)["worktree_path"] is None and not (repo / ".claude" / "worktrees").exists()
+    assert not fake.invoked() and no_runs()
+    old = tmp_path / "old-worktree"  # a reused worktree, made by git before 099
+    git(repo, "worktree", "add", "-q", "-b", "factory/old", str(old))
+    sql("UPDATE tasks SET branch = 'factory/old', worktree_path = ? WHERE id = ?", (str(old), task))
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": WT_MISSING})
+    assert not fake.invoked() and no_runs()
+
+
+def test_wt_switch_fails(client, project, fake, monkeypatch):  # 099 AC5
+    monkeypatch.setenv("FAKE_WT_FAIL", "switch")
+    task = add_task(project)
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": "wt switch failed: wt: switch broke"})
+    assert task_row(task)["worktree_path"] is None and steps() == ["switch"]
+    assert not fake.invoked() and no_runs()
+
+
+def test_wt_elsewhere(client, project, fake, monkeypatch, tmp_path):  # 099 Q1
+    elsewhere = tmp_path / "elsewhere"
+    monkeypatch.setenv("FAKE_WT_PATH", str(elsewhere))
+    task = add_task(project, "Rate-limit login endpoint")
+    r = run(client, task)
+    expected = f"{project_path(project)}/.claude/worktrees/{task}-rate-limit-login"
+    assert (r.status_code, r.json()) == (409, {"detail": f"wt put the worktree at {elsewhere}, expected {expected}"})
+    assert task_row(task)["worktree_path"] is None and not fake.invoked() and no_runs()
+
+
+@pytest.mark.parametrize("step, timeout", [("switch", "WT_SWITCH_TIMEOUT"), ("step copy-ignored", "WT_COPY_TIMEOUT")])
+def test_wt_hangs(client, project, fake, monkeypatch, step, timeout):  # 099 AC6
+    assert (git_adapter.WT_SWITCH_TIMEOUT, git_adapter.WT_COPY_TIMEOUT) == (60, 300)  # Q3
+    monkeypatch.setattr(git_adapter, timeout, 1)
+    monkeypatch.setenv("FAKE_WT_HANG", step)
+    r = run(client, add_task(project))
+    assert (r.status_code, r.json()) == (409, {"detail": f"wt {step} timed out"})
+    assert not fake.invoked() and no_runs()
+
+
+LEAK = ("conf/.env.local is ignored in the main checkout but not on main, so it was left out of the worktree: "
+        "commit its .gitignore line on main, then run again")
+
+
+def test_wt_copy_leak_removed_and_refused(client, project, fake, monkeypatch):  # 099 round 1 security finding 2
+    task = add_task(project)
+    started(client, task)
+    sql("UPDATE tasks SET stage = 'build' WHERE id = ?", (task,))
+    wt = task_row(task)["worktree_path"]
+    write(Path(wt), {"notes.py": "x = 1\n"})  # the builder's untracked file, there before the copy
+    fake.clear()
+    monkeypatch.setenv("FAKE_WT_COPY", "conf/.env.local")  # the copy adds a file main's .gitignore doesn't list
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": LEAK})
+    assert not os.path.exists(f"{wt}/conf/.env.local") and os.path.exists(f"{wt}/notes.py")
+    assert not fake.invoked() and sql("SELECT COUNT(*) FROM runs")[0][0] == 1
+    monkeypatch.setenv("FAKE_WT_FAIL", "step copy-ignored")  # a failed copy is cleaned up the same way
+    r = run(client, task)
+    assert r.json() == {"detail": "wt step copy-ignored failed: wt: step copy-ignored broke"}
+    assert not os.path.exists(f"{wt}/conf/.env.local") and not fake.invoked()
+
+
+def test_wt_copy_ignored_file_stays(client, repo, fake, monkeypatch):  # 099 round 1 security finding 2
+    commit(repo, {SKILL: READY, ".gitignore": "*.local\n"})
+    task = add_task(connect(client, repo))
+    monkeypatch.setenv("FAKE_WT_COPY", "conf/.env.local")
+    started(client, task)
+    wt = task_row(task)["worktree_path"]
+    assert os.path.exists(f"{wt}/conf/.env.local") and git(wt, "status", "--porcelain") == ""
+
+
+REAL_WT = shutil.which("wt", path=ORIGINAL_PATH)
+
+
+def real_wt(tmp_path):
+    (tmp_path / "bin" / "wt").unlink()
+    (tmp_path / "bin" / "wt").symlink_to(REAL_WT)
+
+
+@pytest.mark.skipif(REAL_WT is None, reason="worktrunk (wt) isn't installed")
+def test_real_wt(client, repo, fake, tmp_path):  # 099 AC10, Q6, round 1 security finding 1
+    real_wt(tmp_path)
+    commit(repo, {SKILL: READY, ".gitignore": ".env\nnode_modules/\n.venv/\n.claude/settings.local.json\n"})
+    write(repo, {".env": "API_TOKEN=not-a-real-secret\n", "node_modules/pkg/index.js": "module.exports = 1;\n",
+                 ".venv/pyvenv.cfg": "home = /usr/bin\n",
+                 ".claude/settings.local.json": '{"permissions": {"allow": ["Bash(curl:*)"]}}\n',
+                 ".fctl/build.md": "an old draft\n"})  # .fctl/ is ignored through info/exclude
+    project = connect(client, repo)
+    task = add_task(project, "Rate-limit login endpoint")
+    started(client, task)
+    row = task_row(task)
+    wt = row["worktree_path"]
+    assert wt == f"{project_path(project)}/.claude/worktrees/{task}-rate-limit-login"
+    assert open(os.path.join(wt, ".env")).read() == "API_TOKEN=not-a-real-secret\n"
+    assert open(os.path.join(wt, "node_modules", "pkg", "index.js")).read() == "module.exports = 1;\n"
+    assert not os.path.exists(os.path.join(wt, ".venv"))
+    assert not os.path.exists(os.path.join(wt, ".claude", "worktrees"))  # no worktree copied into itself
+    assert not os.path.exists(os.path.join(wt, ".claude", "settings.local.json"))  # the run's tools stay as set
+    assert not os.path.exists(os.path.join(wt, ".fctl"))
+    assert git(wt, "status", "--porcelain") == ""
+    # Q6: Merge PR's cleanup removes it through wt and leaves the branch to `git branch -d`
+    r = SubprocessGit().wt_remove(project_path(project), row["branch"])
+    assert r[0] == 0, r
+    assert not os.path.exists(wt)
+    assert git(repo, "branch", "--list", row["branch"]) != ""
+
+
+@pytest.mark.skipif(REAL_WT is None, reason="worktrunk (wt) isn't installed")
+def test_real_wt_ignored_only_in_main_checkout(client, repo, fake, tmp_path):  # 099 round 1 security finding 2
+    real_wt(tmp_path)
+    commit(repo, {SKILL: READY, ".gitignore": ".env\n"})
+    write(repo, {".gitignore": ".env\nconf/.env.local\n", ".env": "A=1\n", "conf/.env.local": "B=2\n"})  # uncommitted
+    task = add_task(connect(client, repo))
+    r = run(client, task)
+    assert (r.status_code, r.json()) == (409, {"detail": LEAK})
+    wt = task_row(task)["worktree_path"]
+    assert not os.path.exists(f"{wt}/conf/.env.local") and os.path.exists(f"{wt}/.env")
+    assert git(wt, "status", "--porcelain") == "" and not fake.invoked() and no_runs()

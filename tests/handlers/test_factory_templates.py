@@ -132,3 +132,18 @@ def test_fewer_reviewers_branch_on_any_changes(key):  # AC9
     if types.count("reviewer") < 4:
         assert "all_pass" not in types
         assert "any_changes" in types
+
+
+@pytest.mark.parametrize("path", sorted(TEMPLATES.rglob("*.md")), ids=lambda p: p.name)
+def test_templates_say_worktrunk_and_env(path):  # 099 AC12
+    text = " ".join(path.read_text(encoding="utf-8").split())  # the words, across line breaks
+    assert "worktrunk" in text and "`.env`" in text and "`node_modules`" in text
+    assert "Never print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions" in text
+    assert "`.venv/` isn't copied" in text
+
+
+def test_builder_template_venv_and_ignored():  # 099 AC12, AC14
+    text = " ".join((TEMPLATES / "agents" / "builder.md").read_text(encoding="utf-8").split())
+    assert "`.venv/` isn't copied: run `uv sync` (or the repo's install step) first when the tests need it" in text
+    assert "`fctl submit` sends every changed and untracked file that isn't ignored" in text
+    assert len(list(TEMPLATES.rglob("*.md"))) == 14  # the skill and all 13 agents, the 088 ones included

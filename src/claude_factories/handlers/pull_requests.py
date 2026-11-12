@@ -237,9 +237,12 @@ def cleanup(git: Git, root: str, wt: str | None, branch: str | None) -> list[str
     """AC34, AC35, Q8, Q9: worktree, local branch, then remote branch, never forced. A failed step is a note with
     git's line, and the rest still run."""
     notes = []
-    if wt and os.path.isdir(wt):
-        r = git.remove_worktree(root, wt)
-        notes.append(f"Removed the worktree {wt}." if not r[0] else f"Kept the worktree: {said(r, 'git')}")
+    if wt and os.path.isdir(wt) and branch:
+        try:  # 099 Q6: worktrunk removes it; no wt, or a hung one, is a note like any failed step
+            r = git.wt_remove(root, branch)
+        except DomainError as e:
+            r = (1, "", e.detail)
+        notes.append(f"Removed the worktree {wt}." if not r[0] else f"Kept the worktree: {said(r, 'wt')}")
     else:
         notes.append("Worktree already removed.")
     if branch:

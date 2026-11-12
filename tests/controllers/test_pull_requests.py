@@ -12,7 +12,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from conftest import commit, git, sql, write
+from conftest import commit, git, sql, write, wt_calls
 
 from claude_factories import config
 from claude_factories.adapters import git as adapter
@@ -232,7 +232,6 @@ def test_adapter_timeouts_and_argv(monkeypatch):  # AC3, AC4
     g.head_branch("/r")
     g.is_ancestor("/r", "HEAD", "origin/main")
     g.ff_merge("/r", "origin/main")
-    g.remove_worktree("/r", "/w")
     g.delete_branch("/r", "b")
     local = [t for _, t, _ in seen]
     assert set(local) == {60}
@@ -573,6 +572,24 @@ def test_cleanup_worktree_gone(client, opened, gh):  # AC35
     assert merge(client, opened.task).json()["notes"][1] == "Worktree already removed."
 
 
+def test_cleanup_through_wt(client, opened, gh, tmp_path, monkeypatch):  # 099 Q6
+    s = opened
+    assert merge(client, s.task).json()["notes"][1] == f"Removed the worktree {s.wt}."
+    [remove] = [c["argv"] for c in wt_calls() if "remove" in c["argv"]]
+    assert remove == ["-C", str(s.repo), "remove", "--foreground", "--no-delete-branch", "--no-hooks", BRANCH]
+
+
+def test_cleanup_without_wt(client, opened, gh, tmp_path, monkeypatch):  # 099 Q6: a note, the rest still run
+    (tmp_path / "bin" / "wt").unlink()
+    only = tmp_path / "git-only"  # gh stays (the fake), git without a real wt beside it
+    only.mkdir()
+    (only / "git").symlink_to(os.path.realpath(shutil.which("git")))
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{only}")
+    notes = merge(client, opened.task).json()["notes"]
+    assert notes[1] == "Kept the worktree: wt (worktrunk) isn't installed: brew install worktrunk, then run again"
+    assert opened.wt.exists() and notes[3] == f"Deleted the remote branch {BRANCH}."
+
+
 def test_merge_refusals(client, tmp_path, monkeypatch, setup, gh):  # AC27
     assert refused(merge(client, setup.task, headers={}), 403) == "X-Requested-By: fctl header required"
     assert refused(merge(client, setup.task)) == f"#{setup.task} has no PR; Create PR first"
@@ -603,8 +620,8 @@ def test_docs():  # AC46
     goals = between(mvp, "### Goals", "### Non-goals")
     assert "Agents never commit" in goals and "Create PR" in goals and "Merge PR" in goals
     flow = between(mvp, "### 3.7 ", "### 3.8 ")
-    for text in ("Create PR", "Merge PR", "gh pr create", "gh pr merge <n> --merge", "--ff-only", "git worktree remove",
-                 "git branch -d", "git push origin --delete"):
+    for text in ("Create PR", "Merge PR", "gh pr create", "gh pr merge <n> --merge", "--ff-only", "wt remove",
+                 "git branch -d", "git push origin --delete"):  # 099 Q6: wt remove, was git worktree remove
         assert text in flow, text
     assert "Create PR" in between(mvp, "### 4.3 ", "### 4.4 ")
     assert "no GitHub login" in between(mvp, "### 4.6 ", "### 4.7 ")

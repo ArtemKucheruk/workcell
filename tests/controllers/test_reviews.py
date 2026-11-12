@@ -617,18 +617,18 @@ def test_commit_hint_factory(client, factory_task):  # 009 AC5, moved by 026
         "cd /code/api/.claude/worktrees/12-rate-limit-login\n"
         "git add -A && git commit -m 'Rate-limit login endpoint'\n"
         "git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally\n"
-        "cd /code/api && git worktree remove .claude/worktrees/12-rate-limit-login"
+        "cd /code/api && wt remove factory/12-rate-limit-login"  # 099 AC9
     )
 
 
 def test_commit_hint_quoted(client, project):  # 009 AC6, moved by 026
     title = """it's $(touch x) "q\""""
-    task, _ = task_with_rounds(project, title=title, branch="factory/12-x", worktree="/code/api/.claude/worktrees/12 x")
+    task, _ = task_with_rounds(project, title=title, branch="factory/12 x", worktree="/code/api/.claude/worktrees/12 x")
     lines = approve(client, task).json()["commit_hint"].split("\n")
     assert lines[0] == "cd '/code/api/.claude/worktrees/12 x'"
     assert lines[1] == "git add -A && git commit -m " + shlex.quote(title)
     assert shlex.split(lines[1])[-1] == title
-    assert lines[3] == "cd /code/api && git worktree remove '.claude/worktrees/12 x'"
+    assert lines[3] == "cd /code/api && wt remove 'factory/12 x'"  # 099 AC9
 
 
 def test_commit_hint_standalone(client, standalone):  # 009 AC7, moved by 026

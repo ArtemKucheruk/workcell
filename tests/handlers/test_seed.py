@@ -2,13 +2,15 @@
 module shares one seeded FCTL_HOME, since seeding runs dozens of git commands."""
 
 import json
+import os
 import shlex
+import sys
 from datetime import UTC, datetime, timedelta
 from functools import cache
 from pathlib import Path
 
 import pytest
-from conftest import git, sql
+from conftest import FAKE_WT, git, sql
 
 from claude_factories.cli import git as cli_git
 from claude_factories.cli.main import main
@@ -22,7 +24,13 @@ def seeded(tmp_path_factory):
     """The seeded FCTL_HOME, made with conftest.isolated's git isolation (that fixture is per test)."""
     tmp = tmp_path_factory.mktemp("seed")
     (tmp / "gitconfig").write_text("")
+    (tmp / "bin").mkdir()
+    wt = tmp / "bin" / "wt"  # 099 AC8: conftest's fake wt, recording to tmp/wt-log
+    wt.write_text(FAKE_WT.replace("PYTHON", sys.executable))
+    wt.chmod(0o755)
     with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("PATH", f"{tmp / 'bin'}{os.pathsep}{os.environ['PATH']}")
+        mp.setenv("FAKE_WT_LOG", str(tmp / "wt-log"))
         mp.setenv("FCTL_HOME", str(tmp / "fctl-home"))
         mp.setenv("HOME", str(tmp))
         mp.setenv("CLAUDE_CONFIG_DIR", str(tmp / "claude-config"))  # 056: the seed's db.init() makes it account 1
@@ -311,6 +319,12 @@ def test_worktrees(client):  # AC28
         listed = git(t["path"], "worktree", "list", "--porcelain")
         assert f"worktree {t['task']['worktree_path']}\nHEAD " in listed
         assert git(t["task"]["worktree_path"], "branch", "--show-current") == t["task"]["branch"]
+
+
+def test_worktrees_through_wt_switch(seeded):  # 099 AC8, Q4
+    calls = [json.loads(line)["argv"] for line in (seeded.parent / "wt-log").read_text().splitlines()]
+    assert calls and all(argv[2:4] == ["switch", "--create"] for argv in calls)  # no copy-ignored step
+    assert all(argv[-6:] == ["--base", "main", "--no-cd", "--no-hooks", "--format", "json"] for argv in calls)
 
 
 def test_diffs_match_the_trees(client, monkeypatch):  # AC29

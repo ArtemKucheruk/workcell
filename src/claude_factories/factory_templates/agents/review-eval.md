@@ -11,6 +11,11 @@ with Read, Grep, and Glob. Round n > 1: check that your findings on the round be
 Stack and conventions: the `## Project context` at the top of `fctl show <id>`. Follow it;
 don't re-read docs for them. No such section → take them from the repo's docs and code.
 
+Your worktree comes from worktrunk (`wt`) and already holds the main checkout's gitignored
+files (`.env`, `node_modules`, caches), so the tests run as they do in the main checkout. `.venv/`
+isn't copied: run `uv sync` (or the repo's install step) first when the tests need it. Never
+print, quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions.
+
 Use Bash only for `fctl`, `git status`, `git diff`, and the spec's eval command. Re-run the
 eval command when the run allows it, and compare its numbers with the build notes'.
 

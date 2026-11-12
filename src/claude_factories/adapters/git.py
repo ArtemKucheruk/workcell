@@ -1,5 +1,6 @@
-"""git, run as a subprocess with an argument list (docs/MVP.md §4.1)."""
+"""git and worktrunk (`wt`), run as subprocesses with an argument list and a timeout (docs/MVP.md §4.1)."""
 
+import json
 import os
 import shlex
 import shutil
@@ -7,7 +8,7 @@ import subprocess
 import tempfile
 from typing import Protocol
 
-from ..domain.errors import Failed
+from ..domain.errors import Conflict, Failed
 
 # cli/git.py capture()'s pinned diff flags (§7.4, 038 Q10): adapters can't import cli/
 DIFF_FLAGS = ("-M", "--no-color", "--no-ext-diff", "--no-textconv", "--no-relative", "--src-prefix=a/",
@@ -17,6 +18,71 @@ LOCAL_TIMEOUT = 60  # 093 AC3: local git, as git_ok
 NETWORK_TIMEOUT = 120  # 093 AC3: push, fetch, and every gh call
 MERGE_METHOD = "--merge"  # 093 AC4: a merge commit, as this repo's history has
 Ran = tuple[int, str, str]  # 093: (exit code, stdout, stderr)
+WT_SWITCH_TIMEOUT = 60  # 099 Q3
+WT_COPY_TIMEOUT = 300  # 099 Q3: a big node_modules
+WT_MISSING = "wt (worktrunk) isn't installed: brew install worktrunk, then run again"  # 099 AC4
+# 099 Q2: never a venv (it holds absolute paths), the other task worktrees nested in the main checkout, or old
+# .fctl/ drafts. Never .claude/settings.local.json either: its permissions and hooks would widen the run's
+# --allowedTools (MVP §4.4) without anyone choosing to (round 1 security finding 1).
+COPY_EXCLUDE = (".venv/", ".claude/worktrees/", ".claude/settings.local.json", ".fctl/")
+
+
+def first_line(text: str) -> str:
+    return next(iter(text.strip().splitlines()), "")
+
+
+def toml(value) -> str:
+    """099: a str or list of str as TOML. JSON's strings are TOML basic strings once DEL is escaped, and with
+    raw UTF-8 rather than \\u surrogate pairs, which TOML rejects."""
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
+def wt_config(worktree_path: str | None) -> str:
+    """099 Q1, Q2: the user config wt gets for one call, through WORKTRUNK_CONFIG_PATH, so the user's own
+    config is never read or written: the worktree's path, and copy-ignored's excludes."""
+    lines = [f"worktree-path = {toml(worktree_path)}"] if worktree_path else []
+    return "\n".join([*lines, "", "[step.copy-ignored]", f"exclude = {toml(list(COPY_EXCLUDE))}", ""])
+
+
+def untracked(path: str) -> set[bytes]:
+    """099: the files git in `path` neither tracks nor ignores: what `fctl submit` and Create PR would send."""
+    return set(git_ok("-C", path, "ls-files", "-z", "--others", "--exclude-standard").split(b"\0")) - {b""}
+
+
+def wt(step: str, args: list[str], timeout: int, worktree_path: str | None = None) -> Ran:
+    """099 AC4, AC6: `wt <args>` as wt_config sets it up, prompts impossible (stdin closed). No wt is the
+    install hint, a hung one `wt <step> timed out`; both 409s, like the run's other refusals."""
+    with tempfile.TemporaryDirectory() as tmp:
+        config = os.path.join(tmp, "config.toml")
+        with open(config, "w") as f:
+            f.write(wt_config(worktree_path))
+        try:
+            r = subprocess.run(["wt", *args], capture_output=True, text=True, errors="replace", timeout=timeout,
+                               env=os.environ | {"WORKTRUNK_CONFIG_PATH": config}, stdin=subprocess.DEVNULL)
+        except FileNotFoundError:
+            raise Conflict(WT_MISSING) from None
+        except subprocess.TimeoutExpired:
+            raise Conflict(f"wt {step} timed out") from None
+        except (OSError, ValueError) as e:  # not executable, a NUL in an argument
+            raise Conflict(f"can't run wt: {e}") from None
+    return r.returncode, r.stdout, r.stderr
+
+
+def json_path(out: str) -> str | None:
+    """099 AC1: the worktree path in `wt switch --format json`'s output: the first `path` string, at any depth."""
+    try:
+        found = [json.loads(out)]
+    except ValueError:
+        return None
+    while found:
+        item = found.pop(0)
+        if isinstance(item, dict):
+            if isinstance(item.get("path"), str):
+                return item["path"]
+            found += item.values()
+        elif isinstance(item, list):
+            found += item
+    return None
 
 
 def ran(argv: list[str], timeout: int, env: dict | None = None) -> Ran:
@@ -64,7 +130,8 @@ def git_ok(*args: str, env: dict | None = None) -> bytes:
 
 class Git(Protocol):
     def exclude_path(self, repo: str) -> str: ...
-    def add_worktree(self, repo: str, branch: str, path: str, base: str) -> str | None: ...
+    def wt_create(self, repo: str, branch: str, path: str, base: str) -> str: ...
+    def wt_copy_ignored(self, path: str, base: str) -> None: ...
     def ls_files(self, root: str) -> tuple[bytes | None, str | None]: ...
     def current_branch(self, root: str) -> tuple[bytes | None, str | None]: ...
     def branch_refs(self, root: str) -> tuple[bytes | None, str | None]: ...
@@ -87,7 +154,7 @@ class Git(Protocol):
     def head_branch(self, root: str) -> Ran: ...
     def is_ancestor(self, root: str, ref: str, of: str) -> Ran: ...
     def ff_merge(self, root: str, ref: str) -> Ran: ...
-    def remove_worktree(self, root: str, path: str) -> Ran: ...
+    def wt_remove(self, root: str, branch: str) -> Ran: ...
     def delete_branch(self, root: str, branch: str) -> Ran: ...
     def delete_remote_branch(self, root: str, branch: str) -> Ran: ...
     def gh_installed(self) -> bool: ...
@@ -103,14 +170,42 @@ class SubprocessGit:
         """012 Q5: the absolute path of the repo's info/exclude. Raises if git fails."""
         return subprocess.run(
             ["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=LOCAL_TIMEOUT,
         ).stdout.strip()
 
-    def add_worktree(self, repo: str, branch: str, path: str, base: str) -> str | None:
-        """012 Q4: a new `branch` from `base`, checked out at `path`. git's stripped stderr if it fails."""
-        added = subprocess.run(["git", "-C", repo, "worktree", "add", "-b", branch, path, base],
-                               capture_output=True, text=True, errors="replace")
-        return added.stderr.strip() if added.returncode else None
+    def wt_create(self, repo: str, branch: str, path: str, base: str) -> str:
+        """012 Q4, 099 AC1: a new `branch` from `base`, checked out at `path` by worktrunk, with no hooks (the
+        app copies ignored files itself, AC2). Q1: the path goes in through wt_config's worktree-path, and
+        wt's JSON must name it (symlinks resolved), else a 409 saying where it went. Answers `path`."""
+        code, out, err = wt("switch", ["-C", repo, "switch", "--create", branch, "--base", base, "--no-cd",
+                                       "--no-hooks", "--format", "json"], WT_SWITCH_TIMEOUT, worktree_path=path)
+        if code:
+            raise Conflict(f"wt switch failed: {first_line(err) or first_line(out) or f'exit code {code}'}")
+        got = json_path(out)
+        if got is None or os.path.realpath(got) != os.path.realpath(path):
+            raise Conflict(f"wt put the worktree at {got}, expected {path}")
+        return path
+
+    def wt_copy_ignored(self, path: str, base: str) -> None:
+        """099 AC2: the main checkout's gitignored files into the worktree at `path` (COPY_EXCLUDE left out, a
+        repo's .worktreeinclude narrowing it as wt does). wt skips files already there, so a reuse is cheap.
+        Round 1 security finding 2: the copy follows the main checkout's ignore rules, but the worktree has
+        `base`'s. A file the copy adds that the worktree doesn't ignore would reach the round's diff and a PR,
+        so it's deleted (even after a failed or hung copy) and the run refused. Files untracked before the copy
+        (the builder's) stay. ponytail: emptied directories stay too; git never lists an empty one."""
+        before = untracked(path)
+        try:
+            code, out, err = wt("step copy-ignored", ["-C", path, "step", "copy-ignored"], WT_COPY_TIMEOUT)
+        finally:
+            leaked = sorted(untracked(path) - before)
+            for name in leaked:
+                os.remove(os.path.join(os.fsencode(path), name))
+        if code:
+            raise Conflict(f"wt step copy-ignored failed: {first_line(err) or first_line(out) or f'exit code {code}'}")
+        if leaked:
+            more = f" (and {len(leaked) - 1} more)" if len(leaked) > 1 else ""
+            raise Conflict(f"{os.fsdecode(leaked[0])}{more} is ignored in the main checkout but not on {base}, so "
+                           f"it was left out of the worktree: commit its .gitignore line on {base}, then run again")
 
     def ls_files(self, root: str) -> tuple[bytes | None, str | None]:
         """016: the tracked files, NUL-separated, as git_stdout answers."""
@@ -210,9 +305,11 @@ class SubprocessGit:
     def ff_merge(self, root: str, ref: str) -> Ran:
         return ran(["git", "-C", root, "merge", "--ff-only", ref], LOCAL_TIMEOUT)
 
-    def remove_worktree(self, root: str, path: str) -> Ran:
-        """AC34: no --force, so a dirty worktree stays."""
-        return ran(["git", "-C", root, "worktree", "remove", path], LOCAL_TIMEOUT)
+    def wt_remove(self, root: str, branch: str) -> Ran:
+        """093 AC34, 099 Q6: worktrunk removes `branch`'s worktree, in the foreground so the note is true, with
+        no hooks and no --force (a dirty worktree stays). The branch is left to delete_branch's `-d`."""
+        return wt("remove", ["-C", root, "remove", "--foreground", "--no-delete-branch", "--no-hooks", branch],
+                  LOCAL_TIMEOUT)
 
     def delete_branch(self, root: str, branch: str) -> Ran:
         """AC34: -d, so an unmerged branch stays."""

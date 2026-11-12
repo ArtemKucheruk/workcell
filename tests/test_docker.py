@@ -66,7 +66,7 @@ def items(block) -> list[str]:
 
 def test_dockerfile_base_uv_and_git():  # AC5
     steps = instructions("Dockerfile")
-    assert [args for kw, args in steps if kw == "FROM"][0] == "python:3.12-slim"
+    assert [args for kw, args in steps if kw == "FROM"][-1] == "python:3.12-slim"  # 099: after the wt stage
     uv = [args for kw, args in steps if kw == "COPY" and "astral-sh/uv" in args]
     assert len(uv) == 1
     assert re.match(r"--from=ghcr\.io/astral-sh/uv:\d+\.\d+\.\d+ ", uv[0])
@@ -200,7 +200,7 @@ def env(steps) -> dict[str, str]:
 
 def test_dockerfile_node():  # 028 AC7
     steps = instructions("Dockerfile")
-    assert [args for kw, args in steps if kw == "FROM"][0] == "python:3.12-slim"
+    assert [args for kw, args in steps if kw == "FROM"][-1] == "python:3.12-slim"  # 099: after the wt stage
     node = [args.split()[1] for kw, args in steps if kw == "COPY" and args.startswith("--from=node:22-slim ")]
     assert set(node) == {"/usr/local/bin/node", "/usr/local/lib/node_modules"}
 
@@ -212,6 +212,16 @@ def test_dockerfile_claude_pinned():  # 028 AC8
     assert len(installs) == 1 and installs[0] > last_node
     assert re.search(r"\bnpm install -g @anthropic-ai/claude-code@\d+\.\d+\.\d+(\s|$)", steps[installs[0]][1])
     assert env(steps)["DISABLE_AUTOUPDATER"] == "1"
+
+
+def test_dockerfile_wt_pinned():  # 099 AC11
+    build, app = stages("Dockerfile")
+    assert build[0] == ("FROM", "rust:1-slim AS worktrunk")
+    [install] = [args for kw, args in build if kw == "RUN"]
+    assert re.fullmatch(r"cargo install worktrunk --version \d+\.\d+\.\d+ --locked --root /opt/worktrunk", install)
+    assert ("COPY", "--from=worktrunk /opt/worktrunk/bin/wt /usr/local/bin/wt") in app
+    assert ("RUN", "wt --version") in app  # the build fails if wt can't run in the final image
+    assert "latest" not in read("Dockerfile")
 
 
 def test_dockerfile_home_and_in_docker():  # 028 AC9

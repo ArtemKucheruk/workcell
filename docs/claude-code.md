@@ -131,6 +131,17 @@ the project context:
 don't re-read docs for them. No such section → take them from the repo's docs and code."
 The spec-writer and approver still read the docs the request or spec relies on.
 
+The skill and all 13 agent templates also say where the worktree comes from (099). The app makes
+it with worktrunk (`wt switch --create … --no-hooks`) and, before every run, copies the main
+checkout's gitignored files into it with `wt step copy-ignored`, leaving out `.venv/`,
+`.claude/settings.local.json`, `.fctl/`, and any file the worktree doesn't ignore (MVP §4.4). So:
+"Your worktree comes from worktrunk (`wt`) and already holds the main checkout's gitignored files
+(`.env`, `node_modules`, caches), so the tests run as they do in the main checkout. `.venv/` isn't
+copied: run `uv sync` (or the repo's install step) first when the tests need it. Never print,
+quote, or copy secrets from `.env` into build notes, verdicts, comments, or decisions."
+The copied files never reach a round's diff: `fctl submit` sends only files git doesn't ignore
+(§7.4 step 2). Removing a worktree is `wt remove <branch>` (the Approve hint, Merge PR's cleanup).
+
 **Factory templates (088).** + New factory starts a design from one of five graph presets
 (`GET /api/factory-templates`; graphs in `docs/data-model-and-api.md §6.1`). Create factory in
 Settings still writes Standard's 8 files.
