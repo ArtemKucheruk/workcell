@@ -98,9 +98,9 @@ def test_new_agents_from_files(name):  # AC6
     [data] = [n["data"] for key in KEYS for n in agents(graph(key)) if n["id"] == name]
     assert data["name"] == meta["name"] == name
     assert (data["description"], data["model"]) == (meta["description"], meta["model"])
-    assert data["tools"] == [t.strip() for t in meta["tools"].split(",")] == ["Read", "Grep", "Glob", "Bash"]
+    assert data["tools"] == [t.strip() for t in meta["tools"].split(",")] == ["Read", "Write", "Grep", "Glob", "Bash"]
     assert data["prompt"] == prompt
-    assert prompt.endswith("Do not edit code. Write nothing else.\n")
+    assert re.fullmatch(r"Do not edit code\. Write nothing but `\.fctl/[a-z-]+\.md`\.", prompt.splitlines()[-1])
     assert "## Project context" in prompt
     assert ": " not in meta["description"]  # 011's unquoted frontmatter stays valid YAML
 

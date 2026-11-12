@@ -1,7 +1,7 @@
 ---
 name: bug-spec-writer
 description: Reproduces the bug in a factory task's description, names its root cause, and posts a spec whose first criterion is a failing regression test, with fctl spec. Used by /factory.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: opus
 ---
 Input: a task id. Your cwd is the task's worktree, fresh from the default branch (the builder
@@ -28,8 +28,7 @@ cause as the default.
 
 Post the spec with `fctl spec <id>`:
 
-```sh
-fctl spec <id> <<'EOF'
+```markdown
 # <short title>
 
 ## Goal
@@ -53,8 +52,11 @@ Anything not to build now.
 
 ## Open questions
 - Q1: <what the report and the docs don't decide>. Default: <what the builder should do>.
-EOF
 ```
+
+Write it with the Write tool to `.fctl/spec.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl spec <id> < .fctl/spec.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
 
 Rules:
 - The report and the repo's docs decide. Anything they don't decide goes under Open
@@ -62,4 +64,4 @@ Rules:
 - Fix the bug only: no refactors or features beside it, and no hooks for later tasks.
 - Keep the repo's stack. A new dependency needs its reason in the spec.
 
-Do not edit code. Write nothing else.
+Do not edit code. Write nothing but `.fctl/spec.md`.

@@ -317,7 +317,8 @@ interactive sessions.
 - Not MCP. It would need a server and its registration for every session, and tool
   permissions for headless runs. It is also harder to try out by hand.
 - `fctl` works from any subagent that has Bash. One allowlist covers it in headless runs.
-  Markdown goes in on stdin heredocs. I can run the exact same commands in a shell.
+  Markdown goes in on stdin: a heredoc by hand, a file under `.fctl/` in a run (§4.4). I can run the
+  exact same commands in a shell.
 
 **Spec, build, and review content lives in the DB only.**
 - It is a single source of truth, and the UI needs it in the DB anyway.
@@ -361,12 +362,18 @@ claude -p "/factory 12" \
   removes every `CLAUDE_CODE_USE_*` variable as well (§4.3).
 - `CLAUDE_CONFIG_DIR` is the active Claude account's config dir (§4.6), for the auth check and the
   run alike, so the run bills to that account's subscription.
+- After the auth check, the app sets `projects["<repo path>"].hasTrustDialogAccepted` in that
+  account's `.claude.json` when it's missing. Nobody can answer the trust dialog in a headless run,
+  and an untrusted repo's `.claude/settings.json` allow rules are ignored. Connecting the repo is the
+  consent.
 - Only one run is active at a time, across all projects. While a run is going, starting
   another is refused with `409 run #41 active`. Pro limits are shared with my own sessions,
   and parallel opus runs would use them up quickly.
 - The working directory is the worktree, so `acceptEdits` covers only that tree.
   `--permission-prompts none` denies anything not on the allowlist instead of hanging on a
-  prompt.
+  prompt. It also denies any Bash command over about 10,000 characters, which Claude Code can't
+  parse to match a rule. So agents write long markdown to `.fctl/<name>.md` and redirect it in
+  (`fctl spec 12 < .fctl/spec.md`), and the non-builder agents get Write for that.
 - The test command comes from `projects.test_cmd`. Each `&&`/`||`/`;`/`|` part (split outside
   quotes) gets its own `Bash(<words> *)` rule, deduplicated in order: the part's words before the
   first flag. When that is only the program and the flag is followed by a value and a subcommand
@@ -574,8 +581,8 @@ Rules:
    worktrees branch from it. The app shows the command; agents never commit, and the app
    commits only a task's worktree, and only when I click Create PR (§3.7).
 4. Worktrees live in `<repo>/.claude/worktrees/<id>-<slug>` (Claude Code's own convention).
-   The app adds `.claude/worktrees/` to `.git/info/exclude`, so the main checkout stays clean
-   and no tracked file changes.
+   The app adds `.claude/worktrees/` and `.fctl/` (agents' text for fctl's stdin, §4.4) to
+   `.git/info/exclude`, so the main checkout stays clean and no tracked file changes.
 5. Each round's snapshot is the full diff against `HEAD`, which is the base, because agents
    never commit.
 6. Rework starts a fresh session. The builder gets its context from the app, not from

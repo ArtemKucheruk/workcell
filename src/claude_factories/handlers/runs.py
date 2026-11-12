@@ -4,6 +4,7 @@
 036 Q1: a run commits before its spawn and records its exit after the request has ended, so these take
 `tx`, server/deps.py's transaction(), and open one transaction per step."""
 
+import json
 import os
 import sqlite3
 import threading
@@ -35,7 +36,8 @@ DISALLOWED_TOOLS = (
     "Bash(git commit *)", "Bash(git push *)", "Bash(git merge *)", "Bash(git rebase *)",
     "Bash(git reset *)", "Bash(git checkout *)",
 )
-EXCLUDE_LINE = b".claude/worktrees/"
+# .fctl/: the text agents write for fctl's stdin, since a run can't approve a Bash command over ~10,000 chars
+EXCLUDE_LINES = (b".claude/worktrees/", b".fctl/")
 
 
 def command_parts(cmd: str) -> list[list[str]]:
@@ -102,13 +104,36 @@ def refuse_if_running(runs: RunsRepo):
 
 
 def exclude_worktrees(git: Git, repo: str) -> None:
-    """Q5, MVP §10 assumption 4: `.claude/worktrees/` in the repo's info/exclude, added once."""
+    """Q5, MVP §10 assumption 4: `.claude/worktrees/` and `.fctl/` in the repo's info/exclude, each added once."""
     exclude = Path(git.exclude_path(repo))
     exclude.parent.mkdir(parents=True, exist_ok=True)
     old = exclude.read_bytes() if exclude.exists() else b""
-    if EXCLUDE_LINE not in old.splitlines():
+    if new := [line + b"\n" for line in EXCLUDE_LINES if line not in old.splitlines()]:
         with exclude.open("ab") as f:
-            f.write((b"\n" if old and not old.endswith(b"\n") else b"") + EXCLUDE_LINE + b"\n")
+            f.write((b"\n" if old and not old.endswith(b"\n") else b"") + b"".join(new))
+
+
+def trust_project(config_dir: str, repo: str) -> None:
+    """A run is headless, so nobody answers Claude Code's trust dialog, and an untrusted repo's
+    .claude/settings.json allow rules are ignored. Connecting the repo is the consent, so the run's account
+    trusts it. Written only when missing; an unreadable .claude.json is left alone. ponytail: a claude
+    process writing the same file between the read and the replace loses its write; a lock if that bites."""
+    path = Path(config_dir) / ".claude.json"
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        data = {}
+    except ValueError:
+        return
+    project = data.setdefault("projects", {}).setdefault(repo, {})
+    if project.get("hasTrustDialogAccepted") is True:
+        return
+    project["hasTrustDialogAccepted"] = True
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = path.with_name(".claude.json.fctl-tmp")
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
 
 
 def worktree(tx, git: Git, task) -> str:
@@ -161,6 +186,7 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
                             "CLAUDE_CONFIG_DIR": account["config_dir"]}
     if claude.auth_status(wt, env) is None:  # each run's own check, never cached (§4.3: before every run)
         raise Conflict("not on subscription auth")
+    trust_project(account["config_dir"], task["path"])
     session_id = str(uuid.uuid4())
     allowed = ALLOWED_TOOLS + test_rules(task["test_cmd"] or "")
     args = ["-p", PROMPT.format(task_id=task_id), "--session-id", session_id,

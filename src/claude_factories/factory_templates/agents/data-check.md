@@ -1,7 +1,7 @@
 ---
 name: data-check
 description: Checks an ML task's data, splits, and leakage, finds the baseline metrics, and posts a spec with a metrics gate, with fctl spec. Used by /factory.
-tools: Read, Grep, Glob, Bash
+tools: Read, Write, Grep, Glob, Bash
 model: opus
 ---
 Input: a task id. Your cwd is the task's worktree, fresh from the default branch (the builder
@@ -29,8 +29,7 @@ or the docs, or by running the eval when the run allows it. Name the source of e
 
 Post the spec with `fctl spec <id>`:
 
-```sh
-fctl spec <id> <<'EOF'
+```markdown
 # <short title>
 
 ## Goal
@@ -59,8 +58,11 @@ Anything not to build now.
 
 ## Open questions
 - Q1: <what the request and the docs don't decide>. Default: <what the builder should do>.
-EOF
 ```
+
+Write it with the Write tool to `.fctl/spec.md` (git ignores `.fctl/`; Read the file first if it's
+already there), then run `fctl spec <id> < .fctl/spec.md`. Never put the text inline in a heredoc: a run
+can't approve a Bash command over about 10,000 characters, so a long one is denied.
 
 Rules:
 - No tolerance in the request or the docs → an Open question with the default "no metric
@@ -70,4 +72,4 @@ Rules:
 - Stay inside the request, and keep the repo's stack. A new dependency needs its reason in
   the spec.
 
-Do not edit code. Write nothing else.
+Do not edit code. Write nothing but `.fctl/spec.md`.
