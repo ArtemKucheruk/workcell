@@ -222,6 +222,24 @@ Loading, failures, times, and motion are the same on every page:
      **Download** link to the task bundle (`GET /api/tasks/{id}/export`, a plain
      `<a download>`, with `?transcripts=1` while the box is ticked). Esc or a click outside
      closes it, and a download leaves it open.
+   - **Factory** (089), between the header and Description: the task's factory as a read-only
+     React Flow graph in a 20rem box, drawn with the designer's own node and edge types
+     (`GET /api/pages/tasks/{id}/flow`, §6.4). Nodes can't be dragged, connected, or deleted, and
+     edges have no `×`; panning and zooming stay on. Each node shows its state for the chosen
+     round as an icon plus a label: `○ not reached`, `● running`, `✓ PASS` / `✓ done` /
+     `✓ APPROVE`, `✗ CHANGES`, `! failed`, `▲ escalated`, and a condition's answer as `→ yes` or
+     `→ no`. Its accessible name is its title and state. Where the run is now (every running node,
+     else round C's failed or escalated one) has an accent ring and `aria-current="step"`; the
+     running dot pulses only without `prefers-reduced-motion`. A native **Round** `<select>`
+     lists the rounds and defaults to the latest; picking one refetches with `?round=`, and with
+     no pick it follows a new latest round. The flow refetches every 3 s while the run runs, and
+     once when it stops. Clicking a node, or Enter on it (each node is a tab stop), opens its
+     result in a side panel (a region named `<title> result`) beside the canvas from `md` up,
+     under it below: the spec; the build notes, `N files +A −D`, and a Diff link to Files
+     changed; a reviewer's verdict, body, and comments; every decision on the round; a
+     condition's answer and why; and each agent's transcripts for the round, linking to them with
+     their stats. Close or Esc closes it. A standalone task (no worktree, rounds posted by
+     `/factory-submit`) has no Factory section.
    - Description, then **Blocked by**: one row per task this one waits on, done ones included,
      by id: its `#id` link, title, status pill, and a **Remove** button; `No blockers.` with none.
      Under the rows, a native `<select>` of the project's other tasks, minus the current blockers,

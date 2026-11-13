@@ -169,6 +169,14 @@ class TasksRepo:
             (task_id,),
         ).fetchall()
 
+    def stage_entered(self, task_id: int, stage: str) -> str | None:
+        """089: the created_at of the task's newest event with this stage, None with none."""
+        found = self.conn.execute(
+            "SELECT created_at FROM events WHERE task_id = ? AND stage = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (task_id, stage),
+        ).fetchone()
+        return found and found[0]
+
     def replace_events(self, task_id: int, events: list[dict]) -> None:
         """031 Q3: the task's events become `events` (actor, from_status, to_status, stage, created_at)."""
         self.conn.execute("DELETE FROM events WHERE task_id = ?", (task_id,))

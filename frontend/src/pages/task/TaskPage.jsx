@@ -16,6 +16,7 @@ import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TitleSkeleton } from '../.
 import { button, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
+import { TaskFlow } from './TaskFlow.jsx'
 
 const blank = (md) => !md?.trim()
 
@@ -372,6 +373,8 @@ export function TaskPage() {
         <Takeover page={page} />
       </header>
       {error && <OfflineBanner />}
+      {/* 089: the factory graph; it renders nothing for a standalone task or until its first load */}
+      <TaskFlow key={task.id} taskId={task.id} running={page.run?.status === 'running'} />
       <section aria-labelledby="task-description">
         <h2 id="task-description">Description</h2>
         {blank(task.description_md) ? <p className={muted}>No description.</p> : <Markdown html={task.description_html} />}

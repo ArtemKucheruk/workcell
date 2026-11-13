@@ -105,16 +105,46 @@ export const tint = (type) => (type === 'start' ? 'text-success' : isAgent(type)
 const dot = 'size-2.5'
 
 /**
+ * 089 AC23: a node's state on the task page, as an icon and a color beside its label (never the color alone). A
+ * condition's answer gets an arrow, since `✓ no` would read as a pass.
+ */
+export const STATES = {
+  idle: { icon: '○', tone: 'text-muted' },
+  running: { icon: '●', tone: 'text-accent' },
+  done: { icon: '✓', tone: 'text-success' },
+  changes: { icon: '✗', tone: 'text-danger' },
+  failed: { icon: '!', tone: 'text-danger' },
+  escalated: { icon: '▲', tone: 'text-warning' },
+}
+export const stateIcon = (type, state) => (state === 'done' && CONDITIONS.includes(type) ? '→' : STATES[state].icon)
+
+/** 089 AC23, AC24: the state line; the running dot pulses only when motion is allowed. */
+function State({ type, state, label }) {
+  const { tone } = STATES[state]
+  return (
+    <span className={`flex items-center gap-1 text-xs font-medium ${tone}`}>
+      <span aria-hidden="true" className={state === 'running' ? 'motion-safe:animate-pulse' : ''}>
+        {stateIcon(type, state)}
+      </span>
+      {label}
+    </span>
+  )
+}
+
+/**
  * FE10: a card: its kind's icon in a tile, the title, and the one-line summary, each cut with an ellipsis and whole in
  * `title`. A condition's is dashed and keeps room on its right for the yes and no words.
+ * 089: on the task page `data.state` and `data.label` add a state line, and `data.current` a ring; the designer's
+ * nodes have neither, so it looks as before.
  */
 function Card({ type, data, selected, className = '', children }) {
   const name = title(type, data)
   const sub = summary(type, data)
+  const ring = data.current ? 'border-accent ring-2 ring-accent ring-offset-2 ring-offset-surface' : ''
   return (
     <div
       className={`relative flex items-center gap-2.5 rounded-lg border bg-raised py-2 pl-2 text-sm text-fg shadow-sm ${
-        selected ? 'border-accent ring-1 ring-accent' : 'border-line'
+        ring || (selected ? 'border-accent ring-1 ring-accent' : 'border-line')
       } ${className}`}
     >
       <span className={`grid size-7 shrink-0 place-items-center rounded-md border border-line bg-surface ${tint(type)}`}>
@@ -129,44 +159,46 @@ function Card({ type, data, selected, className = '', children }) {
             {sub}
           </span>
         )}
+        {data.state && <State type={type} state={data.state} label={data.label} />}
       </span>
       {children}
     </div>
   )
 }
 
-function StartNode({ type, data, selected }) {
+// 089 AC22: each handle takes the node's isConnectable, so the task page's read-only graph has none to drag from
+function StartNode({ type, data, selected, isConnectable }) {
   return (
     <Card type={type} data={data} selected={selected} className="pr-4">
-      <Handle type="source" position={Position.Right} className={dot} />
+      <Handle type="source" position={Position.Right} className={dot} isConnectable={isConnectable} />
     </Card>
   )
 }
 
-function AgentNode({ type, data, selected }) {
+function AgentNode({ type, data, selected, isConnectable }) {
   return (
     <Card type={type} data={data} selected={selected} className="w-56 pr-3">
-      <Handle type="target" position={Position.Left} className={dot} />
-      <Handle type="source" position={Position.Right} className={dot} />
+      <Handle type="target" position={Position.Left} className={dot} isConnectable={isConnectable} />
+      <Handle type="source" position={Position.Right} className={dot} isConnectable={isConnectable} />
     </Card>
   )
 }
 
 /** FE11: `yes` in success and `no` in danger, each a dot with its word beside it, inside the card. */
-function Branch({ id, className }) {
+function Branch({ id, className, isConnectable }) {
   return (
-    <Handle type="source" id={id} position={Position.Right} className={`${dot} ${className}`}>
+    <Handle type="source" id={id} position={Position.Right} className={`${dot} ${className}`} isConnectable={isConnectable}>
       <span className="absolute top-1/2 right-3 -translate-y-1/2 text-xs font-medium">{id}</span>
     </Handle>
   )
 }
 
-function ConditionNode({ type, data, selected }) {
+function ConditionNode({ type, data, selected, isConnectable }) {
   return (
     <Card type={type} data={data} selected={selected} className="w-60 border-dashed pr-11">
-      <Handle type="target" position={Position.Left} className={dot} />
-      <Branch id="yes" className="top-1/3 border-success bg-success text-success" />
-      <Branch id="no" className="top-2/3 border-danger bg-danger text-danger" />
+      <Handle type="target" position={Position.Left} className={dot} isConnectable={isConnectable} />
+      <Branch id="yes" className="top-1/3 border-success bg-success text-success" isConnectable={isConnectable} />
+      <Branch id="no" className="top-2/3 border-danger bg-danger text-danger" isConnectable={isConnectable} />
     </Card>
   )
 }
@@ -182,11 +214,13 @@ export const nodeTypes = {
  * FE15: every edge (React Flow's `default` type, overridden) has a `×` at its midpoint. The button deletes through React
  * Flow, so the removal reaches the page's onEdgesChange like a Backspace would. A forward edge is a curve; one that runs
  * back (the loop's `rounds yes → builder`) steps around in right angles, since a curve would cut across the cards.
+ * 089 Q4: an edge with `deletable: false` (the task page's read-only graph) draws only its line.
  */
-function DeletableEdge({ id, source, target, markerEnd, ...ends }) {
+function DeletableEdge({ id, source, target, markerEnd, deletable, ...ends }) {
   const { deleteElements } = useReactFlow()
   const [from, to] = useNodesData([source, target])
   const [path, x, y] = ends.targetX < ends.sourceX ? getSmoothStepPath({ ...ends, borderRadius: 8 }) : getBezierPath(ends)
+  if (deletable === false) return <BaseEdge id={id} path={path} markerEnd={markerEnd} />
   const label = `Delete edge ${from ? title(from.type, from.data) : source} → ${to ? title(to.type, to.data) : target}`
   return (
     <>

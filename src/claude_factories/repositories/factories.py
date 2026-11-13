@@ -17,6 +17,13 @@ class FactoriesRepo:
             (project_id,),
         ).fetchall()
 
+    def graphs(self, project_id: int) -> list[sqlite3.Row]:
+        """089 Q1: the project's designs with their stored graph JSON, newest updated_at first, then highest id."""
+        return self.conn.execute(
+            "SELECT id, name, graph FROM factories WHERE project_id = ? ORDER BY updated_at DESC, id DESC",
+            (project_id,),
+        ).fetchall()
+
     def get(self, factory_id: int) -> sqlite3.Row | None:
         """<Factory>'s columns, with the project's and workspace's names as they are now."""
         return self.conn.execute(

@@ -109,6 +109,12 @@ class RunsRepo:
             (task_id,),
         ).fetchone()
 
+    def latest_log(self, task_id: int) -> sqlite3.Row | None:
+        """089: the task's latest run's status and log path."""
+        return self.conn.execute(
+            "SELECT id, status, log_path FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1", (task_id,)
+        ).fetchone()
+
     def started_at(self, project_id: int) -> dict[int, str]:
         """014: run id → started_at for every run of the project's tasks."""
         return dict(self.conn.execute(
