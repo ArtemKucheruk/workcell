@@ -623,6 +623,31 @@ def test_activate(client, fake_login, monkeypatch):  # 056 BE11
     assert activate(client, 9, 404) == {"detail": "Claude account #9 not found"}
 
 
+def emails() -> dict:
+    return dict(sql("SELECT id, email FROM claude_accounts"))
+
+
+def test_status_checks_store_email(client, fake_login, monkeypatch):  # 095 AC11
+    monkeypatch.setattr(pages, "monotonic", lambda: 1000.0)
+    two, three = add_account(TWO), add_account()
+    fake_login(status=PRO_EMAIL)
+    api(client, "/api/auth")  # the badge's cache fill
+    assert emails() == {1: "artem@example.com", two: None, three: None}
+    sql("UPDATE claude_accounts SET email = NULL")
+    api(client, "/api/auth/accounts")
+    assert emails() == {1: "artem@example.com", two: "two@example.com", three: None}
+    put_status(account_dir(two), "not json")  # a failed check leaves the stored email
+    fake_login(status=CONSOLE)
+    api(client, "/api/auth/accounts")
+    assert emails() == {1: "artem@example.com", two: "two@example.com", three: None}
+    put_status(account_dir(two), TWO.replace("two@", "new@"))
+    activate(client, two)
+    assert emails()[two] == "new@example.com"
+    start(client, account=three)  # the login code, for an inactive account: the fake's sign-in writes PRO_EMAIL
+    send(client, "good#state", account=three)
+    assert emails()[three] == "artem@example.com"
+
+
 def test_accounts_refused_while_running(client, project, fake_login):  # 056 BE12, 055 BE4
     two = add_account(TWO)
     start(client, account=two)
@@ -795,6 +820,7 @@ def test_sidebar(client):  # 041 BE1
     zeta, alpha = bare(client, "work", "zeta"), bare(client, "work", "alpha")
     zero = {"review": 0, "running": 0, "escalated": 0}
     page = sidebar(client)
+    assert page.pop("usage") == api(client, "/api/usage")["accounts"]  # 095 AC19: the only new key
     assert page == {"workspaces": [  # dict equality: exactly these keys at every level
         {"id": r.json()["id"], "name": "aaa", "projects": []},
         {"id": ws_id("work"), "name": "work",

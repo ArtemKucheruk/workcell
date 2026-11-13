@@ -9,6 +9,7 @@ import { Actions, Item, menuItem } from '../components/Menu.jsx'
 import { useNewWorkspace, WorkspaceNameField } from '../components/NewWorkspace.jsx'
 import { Rename } from '../components/Rename.jsx'
 import { field, muted, smallButton } from '../components/styles.js'
+import { NO_DATA, percent, STATE, UsageWindow, WINDOWS, worst } from '../components/UsageWindow.jsx'
 
 // 041: a row of the sidebar, a link or a button; it hovers on `surface`, the column being `raised`
 const row = 'flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-left hover:bg-surface hover:no-underline'
@@ -31,6 +32,65 @@ function AuthBadge({ auth }) {
   return (
     <Link to="/settings" className="text-sm text-muted">
       {`Claude: ${planName(auth.plan)} ✓`}
+    </Link>
+  )
+}
+
+/** 095 AC22, AC23: a non-active account as one line: its worst window, or the no-data text. */
+function AccountLine({ account }) {
+  const found = worst(account)
+  const rest = found ? `${found[0]} ${percent(found[1])} · ${STATE[found[1].state]}` : NO_DATA
+  return <p className="truncate">{`${account.label} · ${rest}`}</p>
+}
+
+/**
+ * 095 AC20–AC23, Q4: under the badge, every account's limits as one link to /usage. The active account is expanded
+ * with its 5h and 7d rows; with up to 3 accounts each other one is a line, with 4 or more they collapse to one line.
+ * aria-describedby gives the link's text to assistive tech, since `Claude usage` is its name.
+ */
+function UsageBlock({ accounts }) {
+  const id = useId()
+  const active = accounts.find((a) => a.active)
+  const others = accounts.filter((a) => a !== active)
+  const worstOther = others
+    .map(worst)
+    .filter(Boolean)
+    .reduce((a, b) => (!a || b[1].utilization > a[1].utilization ? b : a), null)
+  return (
+    <Link
+      to="/usage"
+      aria-label="Claude usage"
+      aria-describedby={id}
+      className="block rounded-md px-2 py-1 text-xs text-fg hover:bg-surface hover:no-underline"
+    >
+      <div id={id} className="grid gap-1.5">
+        {active && (
+          <div className="grid gap-1">
+            <p className="flex items-baseline gap-1.5">
+              <span className="truncate font-medium">{active.label}</span>
+              <span className={muted}>active</span>
+            </p>
+            {active.five_hour ? (
+              WINDOWS.map(([key, name]) => active[key] && <UsageWindow key={key} name={name} window={active[key]} />)
+            ) : (
+              <p className={muted}>{NO_DATA}</p>
+            )}
+          </div>
+        )}
+        {others.length > 0 && (
+          <div className={`grid gap-0.5 ${muted}`}>
+            {accounts.length < 4 ? (
+              others.map((a) => <AccountLine key={a.id} account={a} />)
+            ) : (
+              <p className="truncate">
+                {`${others.length} other accounts · ${
+                  worstOther ? `worst ${worstOther[0]} ${percent(worstOther[1])}` : NO_DATA
+                }`}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </Link>
   )
 }
@@ -399,6 +459,12 @@ export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onR
             </NavLink>
           </li>
           <li>
+            {/* 095 AC24: after Dashboard */}
+            <NavLink to="/usage" end className={navLink}>
+              Usage
+            </NavLink>
+          </li>
+          <li>
             {/* 053 FE9, FE10, Q8: the running count over every workspace, refreshed with the sidebar on each navigation */}
             <NavLink to="/agents" end className={navLink}>
               Agents
@@ -421,6 +487,8 @@ export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onR
             <AuthBadge auth={auth} />
           </p>
         )}
+        {/* 095 AC23: no block with no accounts, or before the sidebar has loaded */}
+        {data?.usage?.length > 0 && <UsageBlock accounts={data.usage} />}
       </div>
     </nav>
   )

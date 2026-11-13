@@ -55,3 +55,6 @@ def init() -> None:
         if "account_id" not in {row[1] for row in conn.execute("PRAGMA table_info(runs)")}:
             conn.execute("ALTER TABLE runs ADD COLUMN account_id INTEGER"
                          " REFERENCES claude_accounts(id) ON DELETE SET NULL")
+        # 095 AC10: the account's label; usage_snapshots comes from IF NOT EXISTS
+        if "email" not in {row[1] for row in conn.execute("PRAGMA table_info(claude_accounts)")}:
+            conn.execute("ALTER TABLE claude_accounts ADD COLUMN email TEXT")

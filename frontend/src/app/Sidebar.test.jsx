@@ -629,7 +629,9 @@ test('053 FE9: Agents links to /agents, after Dashboard and before fctl referenc
   expect(agents.getAttribute('href')).toBe('/agents')
   expect(link('Dashboard').compareDocumentPosition(agents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(agents.compareDocumentPosition(link('fctl reference')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  expect(agents.closest('li').previousElementSibling).toBe(link('Dashboard').closest('li'))
+  // 095 AC24: Usage now sits between Dashboard and Agents
+  expect(agents.closest('li').previousElementSibling).toBe(link('Usage').closest('li'))
+  expect(link('Usage').closest('li').previousElementSibling).toBe(link('Dashboard').closest('li'))
   expect(agents.closest('li').nextElementSibling).toBe(link('fctl reference').closest('li'))
   expect(agents.getAttribute('aria-current')).toBe('page')
   expect(agents.className).toMatch(accent)
@@ -653,4 +655,95 @@ test('053 FE10 (Q8): the Agents pill sums running over every workspace, the unse
   const zero = sidebar().getByRole('link', { name: 'Agents' })
   expect(zero.textContent).toBe('Agents')
   expect(zero.querySelector('span')).toBeNull()
+})
+
+// --- 095: Claude usage ------------------------------------------------------------------
+
+const NOW = new Date(2026, 10, 13, 10, 0) // local time, so `reset at HH:MM` reads the same in any TZ
+const at = (minutes) => Math.floor(NOW.getTime() / 1000) + minutes * 60
+const win = (utilization, state = 'allowed', minutes = 130) => ({ utilization, resets_at: at(minutes), state, reset: false })
+const acct = (id, label, active, five = win(0.34), seven = win(0.12, 'allowed', 5 * 1440 + 60)) => ({
+  id, label, active, recorded_at: '2026-11-13T09:00:00Z', run_id: 41, overage: false, five_hour: five, seven_day: seven,
+})
+const noData = (id, label, active = false) => ({ ...acct(id, label, active, null, null), recorded_at: null, run_id: null, overage: null })
+const withUsage = (usage) => [200, { workspaces: [PERSONAL, WORK], current: null, usage }]
+const usageLink = () => sidebar().queryByRole('link', { name: 'Claude usage' })
+/** The block's text lines, as rendered. */
+const lines = () => [...usageLink().querySelectorAll('p')].map((p) => p.textContent)
+
+afterEach(() => vi.useRealTimers())
+
+test('095 AC20: one link named Claude usage to /usage; the active account expanded with 5h and 7d rows and their text', async () => {
+  vi.setSystemTime(NOW)
+  await open('/', withUsage([acct(1, 'me@x.io', true)]))
+  const link = usageLink()
+  expect(link.getAttribute('href')).toBe('/usage')
+  expect(lines()).toEqual(['me@x.ioactive', 'resets in 2h 10m · allowed', 'resets in 5d 1h · allowed'])
+  expect(link.textContent).toContain('5h34%')
+  expect(link.textContent).toContain('7d12%')
+  const bars = [...link.querySelectorAll('[data-fill]')]
+  expect(bars.map((b) => b.style.width)).toEqual(['34%', '12%'])
+  for (const bar of bars) expect(bar.parentElement.getAttribute('aria-hidden')).toBe('true')
+  // the details reach assistive tech as the link's description
+  expect(document.getElementById(link.getAttribute('aria-describedby')).textContent).toContain('resets in 2h 10m')
+})
+
+test('095 AC20: a passed window reads reset at HH:MM, at 0%', async () => {
+  vi.setSystemTime(NOW)
+  const reset = { utilization: 0, resets_at: at(-55), state: 'allowed', reset: true }
+  await open('/', withUsage([acct(1, 'me@x.io', true, reset)]))
+  expect(lines()[1]).toBe('reset at 09:05 · allowed')
+  expect(usageLink().querySelector('[data-fill]').style.width).toBe('0%')
+})
+
+test('095 AC21: allowed fills accent, near limit warning, limited danger, on a bg-line track, each with its word', async () => {
+  vi.setSystemTime(NOW)
+  const view = await open('/', withUsage([acct(1, 'me@x.io', true, win(0.85, 'near_limit'), win(1, 'limited'))]))
+  const fills = [...usageLink().querySelectorAll('[data-fill]')]
+  expect(fills[0].className).toMatch(/(^|\s)bg-warning(\s|$)/)
+  expect(fills[1].className).toMatch(/(^|\s)bg-danger(\s|$)/)
+  for (const fill of fills) expect(fill.parentElement.className).toMatch(/(^|\s)bg-line(\s|$)/)
+  expect(lines().slice(1)).toEqual(['resets in 2h 10m · near limit', 'resets in 2h 10m · limited'])
+  view.unmount()
+
+  await open('/', withUsage([acct(1, 'me@x.io', true)]))
+  expect(usageLink().querySelector('[data-fill]').className).toMatch(/(^|\s)bg-accent(\s|$)/)
+})
+
+test('095 AC22: with 2–3 accounts each other one is a line with its worst window; with 4+ they collapse to one', async () => {
+  vi.setSystemTime(NOW)
+  const two = acct(2, 'two@x.io', false, win(0.3), win(0.64))
+  const three = acct(3, 'three@x.io', false, win(0.9, 'near_limit'), win(0.2))
+  const view = await open('/', withUsage([acct(1, 'me@x.io', true), two, three]))
+  expect(lines().slice(3)).toEqual(['two@x.io · 7d 64% · allowed', 'three@x.io · 5h 90% · near limit'])
+  view.unmount()
+
+  await open('/', withUsage([two, acct(1, 'me@x.io', true), three, acct(4, 'four', false, win(0.1), win(0.95, 'limited'))]))
+  expect(lines()[0]).toBe('me@x.ioactive')
+  expect(lines().slice(3)).toEqual(['3 other accounts · worst 7d 95%'])
+})
+
+test('095 AC23: no snapshot shows the no-data text, expanded or as a line; no accounts, no block', async () => {
+  const view = await open('/', withUsage([noData(1, 'me@x.io', true), noData(2, 'two')]))
+  expect(lines()).toEqual(['me@x.ioactive', 'no usage data yet, run a task', 'two · no usage data yet, run a task'])
+  expect(usageLink().querySelector('[data-fill]')).toBeNull()
+  view.unmount()
+
+  const empty = await open('/', withUsage([]))
+  expect(usageLink()).toBeNull()
+  empty.unmount()
+
+  await open('/') // a sidebar body with no usage field at all
+  expect(usageLink()).toBeNull()
+})
+
+test('095 AC24: the bottom nav is Dashboard, Usage, Agents, fctl reference', async () => {
+  await open('/', withUsage([acct(1, 'me@x.io', true)]))
+  const nav = [...sidebar().getByRole('link', { name: 'Dashboard' }).closest('ul').querySelectorAll('a')]
+  expect(nav.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+    ['Dashboard', '/'],
+    ['Usage', '/usage'],
+    ['Agents', '/agents'],
+    ['fctl reference', '/docs/fctl'],
+  ])
 })

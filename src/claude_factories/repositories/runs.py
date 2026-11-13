@@ -91,10 +91,12 @@ class RunsRepo:
             (db.now(), run_id),
         ).fetchone()
 
-    def fail_running(self, error: str) -> list[int]:
-        """013 Q5: every running row failed with `error`; their ids (030: each one's transcripts get copied)."""
-        return [i for (i,) in self.conn.execute(
-            "UPDATE runs SET status = 'failed', error = ?, ended_at = ? WHERE status = 'running' RETURNING id",
+    def fail_running(self, error: str) -> list[tuple[int, str]]:
+        """013 Q5: every running row failed with `error`; their (id, log_path) (030: each one's transcripts get
+        copied; 095 AC8: its log read for the usage snapshot)."""
+        return [(i, path) for i, path in self.conn.execute(
+            "UPDATE runs SET status = 'failed', error = ?, ended_at = ? WHERE status = 'running'"
+            " RETURNING id, log_path",
             (error, db.now()),
         ).fetchall()]
 

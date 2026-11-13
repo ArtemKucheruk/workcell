@@ -13,6 +13,7 @@ import { ReviewsPage } from '../pages/reviews/ReviewsPage.jsx'
 import { SettingsPage } from '../pages/settings/SettingsPage.jsx'
 import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { TranscriptPage } from '../pages/transcript/TranscriptPage.jsx'
+import { UsagePage } from '../pages/usage/UsagePage.jsx'
 import { WorkspacePage } from '../pages/workspace/WorkspacePage.jsx'
 import { WorkspaceSettingsPage } from '../pages/workspace-settings/WorkspaceSettingsPage.jsx'
 import { Layout } from './Layout.jsx'
@@ -25,6 +26,7 @@ export const routes = [
     children: [
       { path: '/', element: <DashboardPage /> },
       { path: '/agents', element: <AgentsPage /> }, // 053: lists, not wide
+      { path: '/usage', element: <UsagePage /> }, // 095 AC25: not wide
       { path: '/workspaces/:id', element: <WorkspacePage /> },
       { path: '/workspaces/:id/settings', element: <WorkspaceSettingsPage /> }, // 049: a form page, not wide
       { path: '/projects/:id', element: <BoardPage />, handle: { wide: true } },

@@ -9,6 +9,7 @@ from .factories import Graph
 from .rounds import RoundSummary
 from .tasks import Dep, TaskItem
 from .transcripts import TranscriptOut
+from .usage import UsageAccount
 from .workspaces import WorkspaceOut
 
 Factory = Literal["ready", "legacy", "uncommitted", "none"]
@@ -90,6 +91,7 @@ class SidebarCurrent(BaseModel):
 class SidebarPage(BaseModel):
     workspaces: list[SidebarWorkspace]  # every workspace by name, the empty ones too
     current: SidebarCurrent | None  # ?task= or ?transcript='s project; null without one or for an unknown id
+    usage: list[UsageAccount]  # 095 AC19: GET /api/usage's accounts, for the usage block under the badge
 
 
 # --- GET /api/pages/dashboard (docs/ui.md §8 item 1) -----------------------------------

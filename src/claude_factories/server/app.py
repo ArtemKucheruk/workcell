@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from .. import db
 from ..controllers import (bundles, context_items, factories, factory, pages_api, projects, pull_requests, reviews,
-                           rounds, runs, tasks, transcripts, workspaces)
+                           rounds, runs, tasks, transcripts, usage, workspaces)
 from ..domain.errors import Conflict, DomainError, Failed, Invalid, NotFound, TooLarge
 
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -61,6 +61,6 @@ def create_app() -> FastAPI:
     app.add_exception_handler(UnicodeEncodeError, unencodable)
     app.add_exception_handler(DomainError, domain_error)
     for module in (workspaces, projects, context_items, factory, factories, tasks, rounds, reviews, pull_requests, runs,
-                   transcripts, bundles, pages_api):
+                   transcripts, bundles, usage, pages_api):
         app.include_router(module.router)
     return app

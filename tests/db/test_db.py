@@ -124,6 +124,31 @@ def test_old_db_gets_concurrent_runs():  # 096 AC2
     assert settings_value() == [(2,)]
 
 
+BEFORE_095 = f"""
+CREATE TABLE claude_accounts (id INTEGER PRIMARY KEY, config_dir TEXT NOT NULL UNIQUE,
+  active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)), created_at TEXT NOT NULL);
+INSERT INTO claude_accounts VALUES (1, '/old/claude', 1, '{NOW}');
+"""
+
+
+def test_old_db_gets_usage():  # 095 AC10
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + BEFORE_095)
+    db.init()
+    db.init()  # a second init skips the ALTER
+    with closing(db.connect()) as conn:
+        assert [c[1] for c in conn.execute("PRAGMA table_info(claude_accounts)")].count("email") == 1
+        assert conn.execute("SELECT id, config_dir, email FROM claude_accounts").fetchall() == [(1, "/old/claude", None)]
+        columns = [c[1] for c in conn.execute("PRAGMA table_info(usage_snapshots)")]
+        assert columns == ["run_id", "account_id", "five_hour_utilization", "five_hour_resets_at", "five_hour_status",
+                           "seven_day_utilization", "seven_day_resets_at", "seven_day_status", "status", "overage",
+                           "limited", "recorded_at"]
+        fks = {(fk[2], fk[3], fk[6]) for fk in conn.execute("PRAGMA foreign_key_list(usage_snapshots)")}
+        assert fks == {("runs", "run_id", "CASCADE"), ("claude_accounts", "account_id", "CASCADE")}
+
+
 def test_init_keeps_setting():  # 096 AC3
     db.init()
     with closing(db.connect()) as conn, conn:
