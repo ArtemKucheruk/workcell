@@ -18,6 +18,7 @@ from ..adapters.claude import Claude, stripped_env
 from ..adapters.git import Git
 from ..domain.errors import Conflict, DomainError, Failed, NotFound
 from ..dto.runs import LogOut, RunNextOut, RunStarted, StopOut
+from ..lib.rate_limits import latest
 from ..lib.run_log import last_result, log_items
 from ..lib.slug import slug
 from ..repositories.claude_accounts import ClaudeAccountsRepo
@@ -25,6 +26,7 @@ from ..repositories.projects import ProjectsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
+from ..repositories.usage import UsageRepo
 from .factory import factory_hint, factory_state
 from .transcripts import collect
 
@@ -269,7 +271,17 @@ def finish(tx, run_id: int, proc, log_path: Path):
     session = event.get("session_id") if event and isinstance(event.get("session_id"), str) else None
     with tx() as conn:
         RunsRepo(conn).finish(run_id, status, error, session)
+    record_usage(tx, run_id, str(log_path))
     collect(tx, run_id)  # 030 Q7: again after Stop's copy, now that the session has ended
+
+
+def record_usage(tx, run_id: int, log_path: str) -> None:
+    """095 AC6, AC7: the log's latest rate-limit snapshot, on the run's own account; nothing when the log has no
+    valid event or the run has no account. Q1 ponytail: read once the run has ended, so a long run's limits only
+    show after it; a log tailer if that bites."""
+    if snap := latest(log_lines(log_path)):
+        with tx() as conn:
+            UsageRepo(conn).record(run_id, snap)
 
 
 def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> RunNextOut:
@@ -331,7 +343,8 @@ def fail_leftovers(tx):
     """013 Q5: at startup, a crash left these running; no signal, since the pid may be reused."""
     with tx() as conn:
         failed = RunsRepo(conn).fail_running("app restarted")
-    for run_id in failed:  # 030: the copy their exit thread never made
+    for run_id, path in failed:  # 030: the copy their exit thread never made; 095 AC8: and the usage snapshot
+        record_usage(tx, run_id, path)
         collect(tx, run_id)
 
 

@@ -28,6 +28,7 @@ from ..repositories.runs import RunsRepo
 from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TILE_TASKS, TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
+from ..repositories.usage import UsageRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_files, factory_hint, factory_state
 from .factory_import import sync
@@ -37,6 +38,7 @@ from .rounds import find_round, round_summaries
 from .runs import log_lines
 from .tasks import list_tasks
 from .transcripts import for_task
+from .usage import accounts_usage
 
 COLUMNS = tuple(Status)
 REVIEWERS = tuple(Reviewer)
@@ -139,7 +141,7 @@ def login_code(claude: Claude, accounts: ClaudeAccountsRepo, code: str, account_
     code = code.strip()
     if len(code) > 2048 or not CODE.fullmatch(code):  # AC12: claude would only re-prompt; the login stays
         raise Invalid("code must be <code>#<state>, as the sign-in page shows it")
-    proc = found["proc"]
+    proc, login_account = found["proc"], found["account_id"]  # pending() below clears `found`
     with suppress(BrokenPipeError):  # it exited just now: its exit code still answers
         proc.stdin.write(code + "\n")
         proc.stdin.flush()
@@ -152,12 +154,29 @@ def login_code(claude: Claude, accounts: ClaudeAccountsRepo, code: str, account_
     pending()  # drops it and the auth cache
     if returncode:
         raise Invalid(last_line(out) or f"claude auth login exited with code {returncode}")
+    signed_in = accounts.get(login_account)
+    if signed_in and not signed_in["active"]:  # 095 AC11: the active one's email is stored by auth() below
+        checked(claude, accounts, signed_in)
     return auth(claude, accounts)
 
 
 def status(claude: Claude, config_dir: str) -> dict | None:
     """§4.3: `claude auth status`'s parsed claude.ai answer for the account in `config_dir`, or None."""
     return claude.auth_status(str(config.data_dir()), env(config_dir))
+
+
+def remember(accounts: ClaudeAccountsRepo, account_id: int, info: dict | None) -> None:
+    """095 AC11, Q3: a successful check's email, stored as the account's label. A failed check, or one with no
+    email, leaves the stored one. Called after claude has answered, so no write transaction waits on it."""
+    if info and isinstance(email := info.get("email"), str) and email:
+        accounts.set_email(account_id, email)
+
+
+def checked(claude: Claude, accounts: ClaudeAccountsRepo, row) -> dict | None:
+    """095 AC11: `status` for the account `row`, then `remember`."""
+    info = status(claude, row["config_dir"])
+    remember(accounts, row["id"], info)
+    return info
 
 
 def auth_status(claude: Claude, accounts: ClaudeAccountsRepo) -> dict | None:
@@ -171,7 +190,7 @@ def auth_status(claude: Claude, accounts: ClaudeAccountsRepo) -> dict | None:
         return None
     now = monotonic()
     if LOGIN.get("dir") != found["config_dir"] or now - LOGIN["at"] >= 60:
-        LOGIN.update(at=now, dir=found["config_dir"], value=status(claude, found["config_dir"]))
+        LOGIN.update(at=now, dir=found["config_dir"], value=checked(claude, accounts, found))
     return LOGIN["value"]
 
 
@@ -204,8 +223,10 @@ def accounts(claude: Claude, accounts: ClaudeAccountsRepo) -> list[dict]:
     ponytail: one sequential, uncached `claude auth status` per account per load, since Settings loads the list
     once and never polls; check them in parallel if accounts pile up."""
     found = []
-    for row in accounts.all():
-        info = described(status(claude, row["config_dir"]))
+    checks = [(row, status(claude, row["config_dir"])) for row in accounts.all()]
+    for row, raw in checks:  # 095 AC11: stored once every check is done, so no write waits on claude
+        remember(accounts, row["id"], raw)
+        info = described(raw)
         found.append({"id": row["id"], "config_dir": row["config_dir"], "active": bool(row["active"]),
                       "signed_in": info.pop("runs_enabled")} | info)
     return found
@@ -219,7 +240,7 @@ def activate(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo, accou
     found = account(accounts, account_id)
     if not found["active"] and runs.any_running():
         raise Conflict("a run is active")
-    info = status(claude, found["config_dir"])
+    info = checked(claude, accounts, found)
     if not found["active"]:  # no write when already active, so a stale read can't switch accounts mid-run
         accounts.activate(account_id)
     LOGIN.update(at=monotonic(), dir=found["config_dir"], value=info)
@@ -310,9 +331,10 @@ def agents(runs: RunsRepo) -> dict:
 
 
 def sidebar(projects: ProjectsRepo, tasks: TasksRepo, transcripts: TranscriptsRepo, task: int | None,
-            transcript: int | None) -> dict:
+            transcript: int | None, accounts: ClaudeAccountsRepo, usage: UsageRepo) -> dict:
     """041: every workspace with its projects, and `current`: the workspace and project of `task`, or of
-    `transcript`'s task. None without either, or for an unknown id (never a 404). No git, no claude."""
+    `transcript`'s task. None without either, or for an unknown id (never a 404). No git, no claude.
+    095 AC19: `usage`, GET /api/usage's accounts."""
     rows = projects.for_sidebar()
     workspaces = [{"id": ws_id, "name": name, "projects": [r for r in group if r["id"] is not None]}
                   for (ws_id, name), group in groupby(rows, lambda r: (r["workspace_id"], r["workspace"]))]
@@ -323,7 +345,7 @@ def sidebar(projects: ProjectsRepo, tasks: TasksRepo, transcripts: TranscriptsRe
     project_id = found["project_id"] if found else None
     owner = {r["id"]: r["workspace_id"] for r in rows if r["id"] is not None}
     current = {"workspace_id": owner[project_id], "project_id": project_id} if project_id in owner else None
-    return {"workspaces": workspaces, "current": current}
+    return {"workspaces": workspaces, "current": current, "usage": accounts_usage(accounts, usage)}
 
 
 def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, workspace_id: int) -> dict:

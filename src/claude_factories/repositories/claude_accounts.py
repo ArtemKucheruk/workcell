@@ -4,7 +4,7 @@ import sqlite3
 
 from .. import db
 
-COLUMNS = "id, config_dir, active"
+COLUMNS = "id, config_dir, active, email"
 
 
 class ClaudeAccountsRepo:
@@ -32,6 +32,11 @@ class ClaudeAccountsRepo:
         """The old active row is cleared first, so one_active_account holds at every step."""
         self.conn.execute("UPDATE claude_accounts SET active = 0 WHERE active = 1 AND id != ?", (account_id,))
         self.conn.execute("UPDATE claude_accounts SET active = 1 WHERE id = ?", (account_id,))
+
+    def set_email(self, account_id: int, email: str) -> None:
+        """095 AC11: a successful status check's email; no write when it's already stored."""
+        self.conn.execute("UPDATE claude_accounts SET email = ? WHERE id = ? AND email IS NOT ?",
+                          (email, account_id, email))
 
     def delete(self, account_id: int) -> None:
         self.conn.execute("DELETE FROM claude_accounts WHERE id = ?", (account_id,))

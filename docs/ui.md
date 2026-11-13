@@ -66,13 +66,24 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   `danger` with `surface` text. It is never disabled ahead of time: the server decides, and its
   409 detail shows inside the dialog, which stays open. A deleted project's app goes to
   `/workspaces/{id}`, a deleted workspace's to `/`.
-- Bottom: **Dashboard**, **Agents** (item 15), the fctl reference (item 7), and the login runs
+- Bottom: **Dashboard**, **Usage** (item 16), **Agents** (item 15), the fctl reference (item 7),
+  and the login runs
   will use, from `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓`
   when it is a subscription, or a red `Not signed in — runs disabled` otherwise. The badge links
   to `/settings` (item 9). **Agents** carries the count of running runs as a filled `accent` pill
   with `surface` text when above 0: the sidebar view-model's `running` counts summed over every
   workspace's projects, the unselected ones too. It updates when the sidebar loads, so it can
   lag until the next navigation.
+- Under the badge, the **usage block**: one link to `/usage` named `Claude usage`, from the
+  sidebar view-model's `usage` (no claude call, so it is as fresh as each account's last run).
+  The active account is expanded: its label (email, else the config dir's name) with an `active`
+  marker, then a `5h` and a `7d` row, each a bar on a `line` track filled `accent` (allowed),
+  `warning` (near limit: `allowed_warning` or ≥ 80%), or `danger` (limited), then `34%`,
+  `resets in 2h 10m` (`reset at HH:MM` once passed, at 0%), and the state as a word, so color is
+  never the only signal. With 2–3 accounts each other one is a line,
+  `<label> · <window> <worst %> · <state>`; with 4 or more they collapse to
+  `<N> other accounts · worst <window> <%>`. An account with no snapshot reads
+  `no usage data yet, run a task`. With no accounts there is no block.
 
 The sidebar's data comes from `GET /api/pages/sidebar` (§6.4) on load and after each
 navigation, and is not polled. A rename or move, from the sidebar or a Settings page, also
@@ -497,6 +508,25 @@ Loading, failures, times, and motion are the same on every page:
       `succeeded`, or `stopped`), its duration from start to end (`—` with no end), and
       `2 transcripts` (`1 transcript`) linking to `/tasks/11`, where the task page lists them,
       left out at 0. Ended runs carry no agents list. With none, `No runs yet.`
+16. **Usage** (`/usage`; wireframe §8.10)
+    - Loads `GET /api/usage?days=7` (`docs/data-model-and-api.md §6.4`) once, never polled, with
+      the skeleton and the red alert for a failed load. The title reads `Usage · Claude Factories`.
+      Not a wide page. `h1` `Usage`.
+    - **Accounts**: a card per account with its label, the `active` pill on the active one, the 5h
+      and 7d rows as in the sidebar's usage block but larger, `as of <relative time> · run #N`,
+      and `Overage: in use` / `Overage: not in use`. No snapshot: `no usage data yet, run a task`.
+      No accounts: `No Claude accounts yet. Sign in from Settings.`, linking to `/settings`.
+      The limits are only as fresh as each account's last run; there is no Refresh, since claude
+      has no documented way to read current usage without a session.
+    - **Last 7 days / Last 30 days**, a native radio group, refetches with `?days=`.
+    - **By day**: a stacked bar per UTC day (input `accent`, cache read `muted`, output `warning`,
+      with a legend), scaled to the busiest day, plain divs with no chart library, and its totals
+      and run count as text under it. Then the **By account**, **By model**, and **By agent**
+      tables (Input, Cache read, Output, Runs, with thousands separators), and **Most expensive
+      tasks**, `#id title` linking to `/tasks/{id}` with its tokens.
+    - **Limited runs**: `run #N` · `#id title` link · account label · ended time, latest first, or
+      `No limited runs.`
+    - A section with nothing in the period says `No usage in this period.`
 
 ### 8.1 Board
 ```
@@ -613,9 +643,16 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │ ▸ web                  ⋯ │
 │                          │
 │ Dashboard                │
+│ Usage                    │
 │ Agents               (1) │  ← running runs, when above 0: an accent pill
 │ fctl reference           │
 │ Claude: Pro ✓            │
+│ me@example.com active    │  ← the usage block: one link to /usage, named "Claude usage"
+│ 5h ▓▓▓░░░░░░░        34% │  ← bar: accent / warning / danger on a line track
+│    resets in 2h 10m · allowed
+│ 7d ▓▓▓▓▓▓▓▓▓░        85% │
+│    resets in 3d 4h · near limit
+│ work · 7d 64% · allowed  │  ← 2–3 accounts: one line each; 4+: "3 other accounts · worst 7d 64%"
 └──────────────────────────┘
 below md: [☰ Menu] opens the same sidebar as a drawer (<dialog>)
 ⋯: from md up, opacity 0 until its row is hovered or holds focus, or its menu is open; below md always shown
@@ -814,4 +851,32 @@ API conventions → the card dialog, a <dialog>
 + New card: "New card", empty, no Preview yet · + New group: "New group", Title and Description only
 the pinned card: "Stack and conventions" with 033's editor · over 16384 bytes: "over the limit" in danger, Save disabled
 a refusal (413 card over 16 KB): inside the dialog, which stays open with what was typed
+```
+
+### 8.10 Usage
+```
+Usage
+Accounts
+┌ me@example.com (active) ────────────────────┐ ┌ work ───────────────────────────────────────┐
+│ 5h ▓▓▓▓▓░░░░░░░░░░░░░░░░░░░            34%  │ │ 5h ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓    100%  │
+│    resets in 2h 10m · allowed               │ │    resets in 40m · limited                  │
+│ 7d ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░            85%  │ │ 7d ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░      0%  │
+│    resets in 3d 4h · near limit             │ │    reset at 09:05 · allowed                 │
+│ as of 12m ago · run #41 · Overage: not in use │ │ as of 2h ago · run #40 · Overage: in use   │
+└─────────────────────────────────────────────┘ └─────────────────────────────────────────────┘
+(•) Last 7 days  ( ) Last 30 days
+By day                                     ■ input  ■ cache read  ■ output
+2026-11-07 ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+           input 0 · cache read 0 · output 0 · 0 runs
+2026-11-12 ▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒█
+           input 1,200 · cache read 34,000 · output 560 · 1 run
+By account     Account          Input   Cache read   Output   Runs
+               me@example.com   1,500       34,000      600      3
+By model / By agent: the same table, keyed by model ("unknown" for none) or agent type ("agent" for none)
+Most expensive tasks
+#12 Rate-limit login endpoint   input 1,500 · cache read 34,000 · output 600
+Limited runs
+run #40 · #12 Rate-limit login endpoint · work · 2026-11-12 23:00
+no snapshot: "no usage data yet, run a task" in the card · nothing in the period: "No usage in this period."
+no limited runs: "No limited runs." · bars: plain divs, aria-hidden; every number is also text
 ```

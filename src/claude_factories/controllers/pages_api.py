@@ -23,6 +23,7 @@ from ..server.deps import (
     Settings,
     Tasks,
     Transcripts,
+    Usage,
     Workspaces,
     get_claude,
 )
@@ -122,10 +123,11 @@ def fctl_doc() -> dto.FctlDoc:
 
 
 @router.get("/api/pages/sidebar")
-def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, task: int | None = None,
-            transcript: int | None = None) -> dto.SidebarPage:
-    """041: fetched on load and after each navigation, never polled. A non-integer id is FastAPI's 422 (Q3)."""
-    page = handler.sidebar(projects, tasks, transcripts, task, transcript)
+def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, accounts: ClaudeAccounts, usage: Usage,
+            task: int | None = None, transcript: int | None = None) -> dto.SidebarPage:
+    """041: fetched on load and after each navigation, never polled. A non-integer id is FastAPI's 422 (Q3).
+    095 AC19: with each account's usage, from the database only."""
+    page = handler.sidebar(projects, tasks, transcripts, task, transcript, accounts, usage)
     return page | {"workspaces": [w | {"projects": objs(w["projects"])} for w in page["workspaces"]]}
 
 

@@ -131,8 +131,20 @@ CREATE TABLE claude_accounts (            -- Claude logins (MVP §4.6), each in 
   id INTEGER PRIMARY KEY,
   config_dir TEXT NOT NULL UNIQUE,        -- absolute: ~/.claude for the first, FCTL_HOME/claude-accounts/… if added
   active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
-  created_at TEXT NOT NULL);
+  created_at TEXT NOT NULL,
+  email TEXT);                            -- the last successful `claude auth status` email: the account's label
 CREATE UNIQUE INDEX one_active_account ON claude_accounts(active) WHERE active = 1;  -- the one runs use, or none
+
+CREATE TABLE usage_snapshots (            -- a run's last rate_limit_event (§6.4 GET /api/usage), read at its end
+  run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+  account_id INTEGER NOT NULL REFERENCES claude_accounts(id) ON DELETE CASCADE,  -- the run's runs.account_id
+  five_hour_utilization REAL NOT NULL, five_hour_resets_at INTEGER NOT NULL, five_hour_status TEXT NOT NULL,
+  seven_day_utilization REAL NOT NULL, seven_day_resets_at INTEGER NOT NULL, seven_day_status TEXT NOT NULL,
+  status TEXT,                            -- the event's top-level status, NULL when it had none
+  overage INTEGER NOT NULL CHECK (overage IN (0, 1)),  -- isUsingOverage
+  limited INTEGER NOT NULL CHECK (limited IN (0, 1)),  -- any event of the run had a status other than allowed(_warning)
+  recorded_at TEXT NOT NULL);             -- an account's latest is the greatest, then the highest run_id
+CREATE INDEX usage_snapshots_account ON usage_snapshots(account_id, recorded_at);
 
 CREATE TABLE context_items (              -- a project's context cards and groups (§6.1), after context_md in fctl show
   id INTEGER PRIMARY KEY,
@@ -152,7 +164,11 @@ CREATE TABLE settings (                   -- the app's one settings row (Setting
 INSERT OR IGNORE INTO settings (id) VALUES (1);  -- seeded on every startup, never overwritten
 ```
 `db.init()` brings an old database up to date: it drops `one_active_run`, adds `runs.account_id` (NULL on old
-rows), and seeds the settings row.
+rows) and `claude_accounts.email` (NULL until the next status check), and seeds the settings row.
+
+A run's `finish()` (succeeded, failed, or stopped), and the startup sweep that fails leftover running runs, read
+its stream-json log for `rate_limit_event`s and upsert one `usage_snapshots` row: the last valid event, on the
+run's own account. No valid event, or a run with no `account_id`, writes no row.
 
 Relations: workspace 1–n project 1–n task. A project has 0–n factories and 0–n context items, removed with it
 (ON DELETE CASCADE). A task waits on 0–n tasks of its own project (`task_deps`, no self links, no cycles); it is
@@ -724,9 +740,9 @@ The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces
 `/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=&branch=` ·
 `/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
 `/projects/{id}/factories/{fid}` · `/projects/{id}/settings` ·
-`/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` ·
+`/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` · `/usage` ·
 `/docs/fctl` · `/settings`. Any other path outside `/api` gets the SPA's not-found page.
-`/agents` loads `GET /api/pages/agents`. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
+`/agents` loads `GET /api/pages/agents`. `/usage` loads `GET /api/usage?days=7`, then `?days=30` when picked. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
 `GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does. `/projects/{id}/factories` loads
 `GET /api/projects/{id}/factories` and `GET /api/factory-templates` (§6.1), plus `GET /api/pages/projects/{id}` for
 its header, and the designer at
@@ -854,8 +870,10 @@ GET  /api/pages/sidebar?transcript=5                              (/transcripts/
           {"id":3,"name":"api-server","review":2,"running":1,"escalated":1},
           {"id":7,"name":"web","review":0,"running":0,"escalated":0}]},
         {"id":4,"name":"work","projects":[]}],
-       "current":{"workspace_id":2,"project_id":3}}
+       "current":{"workspace_id":2,"project_id":3},
+       "usage":[{"id":1,"label":"artem@example.com","active":true,…}]}
   # loaded on every page load and navigation, never polled
+  # usage: GET /api/usage's accounts, from the database only (no claude call), for the block under the badge
   # every workspace by name, the empty ones too; projects by name, then id
   # review: tasks at stage human_review or escalated · escalated: at escalated ·
   #   running: tasks with a running run (§5.2)
@@ -892,6 +910,37 @@ GET  /api/pages/agents                                            (/agents, poll
   #   orchestrator), as the run log writes it without the "<who> · " prefix; null with none
   # recent: the last 20 runs that aren't running, ended_at newest first with nulls last, then id
   #   descending; error is null unless failed · transcripts: this run's rows in `transcripts`
+
+GET  /api/usage?days=7                                            (/usage, loaded once per period)
+← 200 {"accounts":[{"id":1,"label":"artem@example.com","active":true,"recorded_at":"2026-11-13T09:12:00Z",
+         "run_id":41,"overage":false,
+         "five_hour":{"utilization":0.34,"resets_at":1794414000,"state":"allowed","reset":false},
+         "seven_day":{"utilization":0,"resets_at":1794877200,"state":"allowed","reset":true}},
+        {"id":3,"label":"k3j2h1x9","active":false,"recorded_at":null,"run_id":null,"overage":null,
+         "five_hour":null,"seven_day":null}],
+       "stats":{"days":7,
+         "by_day":[{"day":"2026-11-07","input_tokens":0,"cache_read_tokens":0,"output_tokens":0,"runs":0},…],
+         "by_account":[{"key":"artem@example.com","input_tokens":1500,"cache_read_tokens":34000,
+                        "output_tokens":600,"runs":3}],
+         "by_model":[…], "by_agent":[…],
+         "top_tasks":[{"task_id":12,"title":"Rate-limit login endpoint","project_id":3,"input_tokens":1500,
+                       "cache_read_tokens":34000,"output_tokens":600}]},
+       "limited_runs":[{"run_id":40,"task_id":12,"title":"Rate-limit login endpoint",
+                        "label":"artem@example.com","ended_at":"2026-11-12T23:00:00Z"}]}
+  # read-only; claude is never called, so the limits are as fresh as each account's last run
+  # days: 7 (the default) or 30, anything else 422
+  # accounts: every account by id; label is its stored email, else its config dir's last path component.
+  #   The windows are its latest usage_snapshots row (greatest recorded_at, then run_id) read now:
+  #   resets_at passed → utilization 0, state "allowed", reset true; otherwise state is "limited" for a
+  #   status other than allowed / allowed_warning, "near_limit" for allowed_warning or utilization ≥ 0.8,
+  #   else "allowed". All null with no snapshot. No config_dir, tokens, or credentials
+  # stats, over the last `days` UTC days, today included; a transcript's day is
+  #   COALESCE(transcripts.started_at, runs.started_at):
+  #   by_day: every day oldest first, empty days as zeros; runs counts runs started that day
+  #   by_account (key: the run's account label, "unknown" for none or a deleted one), by_model ("unknown"
+  #   for NULL), by_agent (agent_type, "agent" for NULL): the largest input + cache_read + output first
+  #   top_tasks: the 10 tasks with the most input + cache_read + output tokens
+  # limited_runs: up to 20 runs whose snapshot has limited set, ended_at newest first
 
 GET  /api/docs/fctl                                               (/docs/fctl)
 ← 200 {"body_html":"<h2 id=\"fctl-serve\">fctl serve</h2>…",

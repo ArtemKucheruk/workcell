@@ -21,6 +21,7 @@ from ..repositories.runs import RunsRepo
 from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
 from ..repositories.transcripts import TranscriptsRepo
+from ..repositories.usage import UsageRepo
 from ..repositories.workspaces import WorkspacesRepo
 
 
@@ -82,6 +83,10 @@ def get_context_items(conn: Conn) -> ContextItemsRepo:
     return ContextItemsRepo(conn)
 
 
+def get_usage(conn: Conn) -> UsageRepo:
+    return UsageRepo(conn)
+
+
 def get_git() -> Git:
     return SubprocessGit()
 
@@ -101,5 +106,6 @@ Settings = Annotated[SettingsRepo, Depends(get_settings)]
 Factories = Annotated[FactoriesRepo, Depends(get_factories)]
 ClaudeAccounts = Annotated[ClaudeAccountsRepo, Depends(get_claude_accounts)]
 ContextItems = Annotated[ContextItemsRepo, Depends(get_context_items)]
+Usage = Annotated[UsageRepo, Depends(get_usage)]
 GitAdapter = Annotated[Git, Depends(get_git)]
 ClaudeAdapter = Annotated[Claude, Depends(get_claude)]

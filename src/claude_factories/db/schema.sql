@@ -121,8 +121,20 @@ CREATE TABLE IF NOT EXISTS claude_accounts (  -- 056: Claude logins, each its ow
   id INTEGER PRIMARY KEY,
   config_dir TEXT NOT NULL UNIQUE,        -- absolute
   active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
-  created_at TEXT NOT NULL);
+  created_at TEXT NOT NULL,
+  email TEXT);                            -- 095 Q3: the last successful `claude auth status` email; db.init() adds it
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_account ON claude_accounts(active) WHERE active = 1;  -- at most one
+
+CREATE TABLE IF NOT EXISTS usage_snapshots (  -- 095: a run's last rate_limit_event; IF NOT EXISTS covers old DBs
+  run_id INTEGER PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+  account_id INTEGER NOT NULL REFERENCES claude_accounts(id) ON DELETE CASCADE,  -- the run's runs.account_id
+  five_hour_utilization REAL NOT NULL, five_hour_resets_at INTEGER NOT NULL, five_hour_status TEXT NOT NULL,
+  seven_day_utilization REAL NOT NULL, seven_day_resets_at INTEGER NOT NULL, seven_day_status TEXT NOT NULL,
+  status TEXT,                            -- the event's top-level status; NULL when it had none
+  overage INTEGER NOT NULL CHECK (overage IN (0, 1)),  -- isUsingOverage
+  limited INTEGER NOT NULL CHECK (limited IN (0, 1)),  -- Q6: any event of the run was limited
+  recorded_at TEXT NOT NULL);             -- Q7: an account's latest is the greatest, then the highest run_id
+CREATE INDEX IF NOT EXISTS usage_snapshots_account ON usage_snapshots(account_id, recorded_at);
 
 CREATE TABLE IF NOT EXISTS context_items (  -- 057: a project's context cards and groups; IF NOT EXISTS covers old DBs
   id INTEGER PRIMARY KEY,
