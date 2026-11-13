@@ -49,13 +49,32 @@ If `fctl` isn't found, run `uv tool update-shell` and open a new terminal.
 
 ## Run the app
 
+Install the backend and the frontend once as background services (launchd on macOS,
+`systemd --user` on Linux). They start at login, restart if they crash, and keep running
+when you close the terminal:
+
+```sh
+fctl service install      # builds the frontend if needed, then starts both
+fctl service reload       # after a git pull or merge: npm ci if the lockfile changed, build, restart
+fctl service status       # running or not, pid, uptime, URL, served commit vs main, active runs
+fctl service logs -f      # tail ~/.claude-factories/logs/{backend,frontend}.log
+```
+
+The app opens at http://127.0.0.1:3000. `stop`, `restart`, `reload`, and `uninstall` refuse
+while a run is active, since restarting the backend stops every run; `--force` goes on anyway.
+`fctl service install` needs the editable install above. Every subcommand is in
+[fctl.md](src/claude_factories/fctl.md).
+
+Or run the backend in the foreground:
+
 ```sh
 fctl serve                # http://127.0.0.1:4545
 fctl serve --port 5000    # another port
 ```
 
-Open http://127.0.0.1:4545 in your browser and press Ctrl-C to stop. The first start
-creates the data dir and `factory.db` in it.
+Press Ctrl-C to stop it. The frontend server runs next to it:
+`npm --prefix frontend ci && npm --prefix frontend run build && node frontend/server.js`
+(http://127.0.0.1:3000). The first start creates the data dir and `factory.db` in it.
 
 | env var | default | used for |
 |---|---|---|
@@ -94,7 +113,8 @@ That file is gitignored, and it publishes both servers on 127.0.0.1 only.
 The app opens at http://127.0.0.1:3000. The backend is on `127.0.0.1:4545` as before, so
 `fctl` on the host needs no change. Its data lives in the `fctl-home` Docker volume, not in
 `~/.claude-factories`. `docker compose down` stops it, and `docker compose down -v` also
-deletes the data.
+deletes the data. `fctl service` doesn't apply here: run `docker compose up -d` to keep the app in
+the background, and `docker compose restart` after a pull.
 
 Runs happen inside the backend container, on a Claude login of its own: your host login stays
 in the macOS Keychain, which the container can't read. Log in once, with the app up, in a

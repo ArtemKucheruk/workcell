@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+from .commands import service
 from .commands.agent import DECISIONS, REVIEWERS, STAGES, comment, decide, round_status, show, spec, stage, verdict
 from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
@@ -54,6 +55,40 @@ def seed(args):
           f" {made['tasks']} tasks, {made['runs']} runs")
 
 
+def add_service(commands):
+    """098 AC1, AC2: `fctl service <sub>`; the group itself has no func, so fctl.md has one section per sub."""
+    p = commands.add_parser("service", help="run the backend and frontend as user services (launchd / systemd)")
+    subs = p.add_subparsers(dest="service_command", required=True)
+    which = {"nargs": "?", "choices": ("backend", "frontend"), "help": "only this service (default: both)"}
+    force = {"action": "store_true", "help": "go on even if runs are active; the backend's restart stops them"}
+    p = subs.add_parser("install", help="write and load both services: start at login, restart on crash")
+    p.add_argument("--backend-port", type=int, default=4545, help="the backend's port (default: 4545)")
+    p.add_argument("--frontend-port", type=int, default=3000, help="the frontend's port (default: 3000)")
+    p.set_defaults(func=service.install)
+    p = subs.add_parser("uninstall", help="stop and remove both services; the logs stay")
+    p.add_argument("--force", **force)
+    p.set_defaults(func=service.uninstall)
+    p = subs.add_parser("start", help="start both services, or one")
+    p.add_argument("which", **which)
+    p.set_defaults(func=service.start)
+    for name, func, help_text in (("stop", service.stop, "stop both services, or one"),
+                                  ("restart", service.restart, "restart both services, or one")):
+        p = subs.add_parser(name, help=help_text)
+        p.add_argument("which", **which)
+        p.add_argument("--force", **force)
+        p.set_defaults(func=func)
+    p = subs.add_parser("reload", help="after a pull or merge: npm ci if the lockfile changed, build, restart both")
+    p.add_argument("--force", **force)
+    p.set_defaults(func=service.reload)
+    p = subs.add_parser("status", help="each service's pid, port, uptime, URL, and code version, and active runs")
+    p.set_defaults(func=service.status)
+    p = subs.add_parser("logs", help="print the end of the services' logs")
+    p.add_argument("which", **which)
+    p.add_argument("-f", "--follow", action="store_true", help="keep printing new lines (tail -f)")
+    p.add_argument("-n", type=int, default=50, metavar="N", help="how many lines (default: 50)")
+    p.set_defaults(func=service.logs)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Every command and its flags. 029 Q11: tests/test_fctl_md.py walks it against fctl.md."""
     parser = argparse.ArgumentParser(prog="fctl", description="Claude Factories CLI.")
@@ -62,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1", help="address to bind (default: 127.0.0.1; 0.0.0.0 is for the container)")
     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
     p.set_defaults(func=serve)
+    add_service(commands)
     p = commands.add_parser("setup", help="write the /factory-connect and /factory-submit skills to ~/.claude")
     p.set_defaults(func=setup)
     p = commands.add_parser("seed", help="fill an empty FCTL_HOME with demo workspaces, projects, and tasks")

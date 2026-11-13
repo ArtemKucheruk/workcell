@@ -80,9 +80,17 @@ fctl setup     # writes ~/.claude/skills/factory-connect and ~/.claude/skills/fa
 The `/factory-connect` and `/factory-submit` skills run `fctl` on the host against the
 backend on `127.0.0.1:4545`.
 
-Without Docker, run `fctl serve` (backend on 127.0.0.1:4545, data in `~/.claude-factories/`)
-plus the frontend server: `npm --prefix frontend ci && npm --prefix frontend run build &&
-node frontend/server.js` (127.0.0.1:3000). Tests and the factory's reviewers run it this way.
+With Docker, `docker compose up -d` keeps it in the background and `docker compose restart` picks
+up new code.
+
+Without Docker, the one-time install is `fctl service install` (098), after
+`uv tool install --editable <checkout>`: the backend (127.0.0.1:4545, data in
+`~/.claude-factories/`) and the frontend server (127.0.0.1:3000) become launchd agents (macOS) or
+`systemd --user` units (Linux) that start at login and restart on a crash. After a merge,
+`fctl service reload` rebuilds the frontend and restarts both; `fctl service status` and
+`fctl service logs` show them. In the foreground instead, run `fctl serve` plus the frontend server:
+`npm --prefix frontend ci && npm --prefix frontend run build && node frontend/server.js`. Tests and
+the factory's reviewers run it this way.
 
 ### 3.1 Connect a project
 1. In the repo, in my Claude Code session: `/factory-connect personal`

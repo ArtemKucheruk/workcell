@@ -23,6 +23,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | Command | Used by | Calls |
 |---|---|---|
 | `fctl serve [--host 127.0.0.1] [--port 4545]` | me | starts the app |
+| `fctl service install\|uninstall\|start\|stop\|restart\|reload\|status\|logs` | me | none but `GET /api/pages/agents` (the active runs check and `status`): runs the backend and frontend as launchd / `systemd --user` services |
 | `fctl setup` | me, once | writes the 2 global skills |
 | `fctl seed` | me | none: writes demo data straight into an empty `FCTL_HOME` |
 | `fctl connect --workspace W [--test-cmd C]` | `/factory-connect` | `POST /api/projects/connect`, then `POST /api/projects/{id}/import-factory` `{}` when `factory/board.json` or `factory/backlog.md` is a file |
