@@ -1129,10 +1129,10 @@ ignored.
 Added #12 to api-server → http://127.0.0.1:4545/projects/3
 ```
 
-With `--run`, a second line:
+With `--run`, a second line, naming the Claude account Auto picked:
 
 ```
-Run #41 on #12 → http://127.0.0.1:4545/tasks/12
+Run #41 on #12 as b@y → http://127.0.0.1:4545/tasks/12
 ```
 
 **Exit codes and errors**
@@ -1269,7 +1269,7 @@ for `next` `POST /api/projects/{id}/run-next`.
 **Synopsis**
 
 ```
-fctl run <id>
+fctl run <id> [--account <id|email>]
 fctl run next
 ```
 
@@ -1277,6 +1277,12 @@ fctl run next
 
 - `<id>`: the task to run. It works from any directory.
 - `next`: the top ready task of the current repo's Backlog, skipping blocked ones. It needs the repo.
+- `--account <id|email>`: the Claude account to run in, by its id or its email (matched exactly,
+  ignoring case, against `GET /api/auth/accounts`), sent as `{"account_id": 2}`. The run uses it even
+  when it is near or at its limits. Without the flag, no body is sent and the app picks with **Auto**:
+  the preferred (active) account unless its latest usage says it is low (5h at 80% or more, 7d at 90%
+  or more, or limited), then the logged-in account with the most headroom. Not with `next`, which
+  always uses Auto.
 
 **Stdin**
 
@@ -1284,8 +1290,10 @@ none
 
 **Output**
 
+The account the run uses, by its email (or its config dir's name):
+
 ```
-Run #41 on #12 → http://127.0.0.1:4545/tasks/12
+Run #41 on #12 as b@y → http://127.0.0.1:4545/tasks/12
 ```
 
 The first run on a task creates its worktree, `.claude/worktrees/12-rate-limit-login`, on a new
@@ -1324,8 +1332,15 @@ worktrunk`.
   With several, the first is named, followed by `(and 2 more)`. Exit `1`.
 - `fctl: 409 not on subscription auth`, then a second line,
   `Sign in to a Claude account, or make one active, under Settings → Claude accounts, then run again.`:
-  no Claude account is active, the active one isn't signed in, or it is logged in with an API key,
-  exit `1`.
+  no Claude account is signed in to claude.ai (an API-key login doesn't count), exit `1`.
+- `fctl: 409 all accounts near their limits: a@x 5h 92% (resets 14:10), b@y limited (resets Nov 15
+  16:00)`: Auto found no logged-in account with headroom. Wait for a reset, or pick one with
+  `--account`, exit `1`.
+- `fctl: 409 Claude account b@y isn't logged in to claude.ai; log it in under Settings → Claude
+  accounts, or pick another`: the `--account` one is signed out, exit `1`.
+- `fctl: 422 no Claude account #99`: no account has that id, exit `1`.
+- `fctl: no Claude account b@y`: no account has that email; no run is started, exit `1`.
+- `--account` with `next`: argparse's usage error, exit `2`.
 - `fctl: 500 can't start claude: <reason>`, exit `1`.
 - `next` only: `fctl: 404 backlog is empty` and
   `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
@@ -1346,6 +1361,7 @@ approve its own work or start other runs.
 
 ```sh
 fctl run next
+fctl run 12 --account b@y
 ```
 
 ## fctl rework
@@ -1387,7 +1403,8 @@ none
   second line,
   `Sign in to a Claude account, or make one active, under Settings → Claude accounts, then run again.`,
   exit `1`. The note and the move stay; fix the cause, then start the run again with
-  `fctl run <id>`.
+  `fctl run <id>`. The rework run always uses Auto; to pick its account, start it with
+  `fctl run <id> --account <id|email>` after the refusal.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 

@@ -212,6 +212,15 @@ Loading, failures, times, and motion are the same on every page:
      `run #41 running · started 5m ago`), and beside Run or Retry the hint for why runs are
      off. The row wraps on narrow screens. Under it, the status line: the status pill and
      stage, branch, Review, and an **Export** button.
+   - 097: the run status names the run's Claude account after its status, `run #41 failed · b@y:
+     limited on b@y, resets at 16:00` (nothing for a run with no account). Run and Retry use Auto
+     (MVP §4.3). Beside them, when there are accounts, a small `▾` button named **Choose account**
+     opens the Run menu, a native popover: first `Auto (→ b@y)`, the account Auto would pick from
+     the stored usage (`Auto (all near limits)` when it would pick none), then each account as
+     `<label> · 5h 34% · 7d 12%` (`—` for a window with no snapshot yet), the preferred one ending
+     in ` · preferred`. Choosing an entry starts the run with that account (Auto sends none); a
+     refusal shows in the header alert. The menu is disabled when Run is. The board's Retry and
+     Run next have no menu: they use Auto.
    - On a factory task (one with a branch and worktree), the title row also holds the PR
      controls, after the run controls (093, shared with item 5). With no PR: **Create PR**,
      enabled only for a done task whose worktree has changes or commits beyond the default
@@ -271,7 +280,7 @@ Loading, failures, times, and motion are the same on every page:
      (`5m ago created · backlog`), ending in the event's note when it has one
      (`2m ago done · PR #71 opened`).
    - Run log tail (collapsed; `/tasks/{id}#run-log` opens it and scrolls to it).
-   - "Take over in terminal" command.
+   - "Take over in terminal" command, in the run's own account's config dir.
    - A link to Review.
 5. **Code review** (`/tasks/{id}/review`): GitHub-style (wireframes below).
    - Round selector, defaulting to latest. The diff is a table built from the backend's diff
@@ -333,11 +342,13 @@ Loading, failures, times, and motion are the same on every page:
 9. **Settings** (`/settings`)
    - A `Claude accounts` section, from `GET /api/auth/accounts`, loaded once and not polled. One
      item per account, in the order received: its email as the title (`Not signed in` without
-     one), an outlined `accent` `active` pill on the active one, and Auth method, Plan (`—` when
-     signed out), and Folder (its `config_dir`, mono, muted). With none, `No Claude accounts yet.`
-   - Each item has **Make active** (inactive items only), **Log in again** (**Log in** when signed
+     one), an outlined `accent` `preferred` pill on the active one (097: Auto starts from it, MVP
+     §4.3; the API field stays `active` and the sidebar keeps `active`), and Auth method, Plan (`—`
+     when signed out), and Folder (its `config_dir`, mono, muted). With none, `No Claude accounts
+     yet.`
+   - Each item has **Make preferred** (the others only), **Log in again** (**Log in** when signed
      out), and **Disconnect**. **+ Add account** sits below the list, and below that whether runs
-     are enabled: `Runs enabled`, else in `text-danger` `No active account — runs disabled`, or
+     are enabled: `Runs enabled`, else in `text-danger` `No preferred account — runs disabled`, or
      `Not signed in with a Claude subscription — runs disabled` when the active one is signed out.
    - **+ Add account**, **Log in**, and **Log in again** post `POST /api/auth/login`, with the
      item's `account_id` (none for a new account), and show **Open the Claude sign-in page**,
@@ -345,12 +356,12 @@ Loading, failures, times, and motion are the same on every page:
      `<code>#<state>` with that `account_id` to `POST /api/auth/login/code`, and on success the
      list reloads and shows `Logged in as <email>`. While a login is pending, its button reads
      **Start over**, which begins a fresh login for the same account.
-   - **Make active** posts `POST /api/auth/accounts/{id}/activate` and reloads the list, and focus
+   - **Make preferred** posts `POST /api/auth/accounts/{id}/activate` and reloads the list, and focus
      goes to that item's login button. A refusal (a run is active) shows its detail in an alert.
    - **Disconnect** opens a modal `<dialog>` like Delete's (§8.4), titled `Disconnect <email>?`
      (`Disconnect this account?` without an email): `This signs the account out with claude auth
      logout and removes it from the app, with its config folder if the app created it.`, plus
-     ` Runs stay disabled until you make another account active.` for the active one. **Cancel**
+     ` Runs stay disabled until you make another account preferred.` for the preferred one. **Cancel**
      comes first and has focus, then **Disconnect** filled `danger`, which sends
      `DELETE /api/auth/accounts/{id}`. A refusal (a run is active, or claude failed) shows its
      detail inside the dialog, which stays open. On success the list reloads, focus goes to

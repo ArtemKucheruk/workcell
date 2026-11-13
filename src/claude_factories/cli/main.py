@@ -140,6 +140,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.set_defaults(func=task_block, method=method)
     p = commands.add_parser("run", help="start a factory run on a task, or on the top of this repo's Backlog")
     p.add_argument("target", help='a task id, or "next"')
+    p.add_argument("--account", metavar="ID|EMAIL",
+                   help="the Claude account to run in, by id or email (default: Auto; not with next)")
     p.set_defaults(func=run, usage_error=p.error)
     p = commands.add_parser("submit", help="send this tree's changes for review, as a new task or a round")
     p.add_argument("id", nargs="?", type=int, help="the task to add a round to (stdin: build notes)")

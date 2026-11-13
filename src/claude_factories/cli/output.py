@@ -6,11 +6,12 @@ def fail(message: str):
     raise SystemExit(1)
 
 
-def print_run(task_id: int, run_id: int):
-    """Q9: the task page, where the run log shows."""
+def print_run(task_id: int, started: dict):
+    """Q9: the task page, where the run log shows. 097 AC32: and the account the run reply names."""
     from .client import base_url  # ponytail: lazy, since client imports fail() from here; no cycle at import time
 
-    print(f"Run #{run_id} on #{task_id} → {base_url()}/tasks/{task_id}")
+    account = f" as {started['account']}" if started.get("account") else ""
+    print(f"Run #{started['run_id']} on #{task_id}{account} → {base_url()}/tasks/{task_id}")
 
 
 def stdin_text() -> str:

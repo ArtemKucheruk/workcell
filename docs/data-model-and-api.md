@@ -52,7 +52,7 @@ CREATE TABLE runs (
   exit_code INTEGER, error TEXT,
   log_path TEXT NOT NULL,
   started_at TEXT NOT NULL, ended_at TEXT,
-  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);  -- the account it ran in; NULL = the active one
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);  -- the account it ran in, chosen at start (Auto or my pick, 097); NULL = the active one
 -- one running run per task; settings.max_concurrent_runs caps them all (Pro limits). Replaced the global one_active_run
 CREATE UNIQUE INDEX one_run_per_task ON runs(task_id) WHERE status = 'running';
 
@@ -176,9 +176,9 @@ Relations: workspace 1–n project 1–n task. A project has 0–n factories and
 a blocker moving to done readies its dependents without writing them. Deleting a task, or its project, drops its
 links on both sides. A context item of kind group holds 0–n items one level deep, removed with it.
 A task has 1–n runs, at most one of them running, and 1–n rounds. At most `settings.max_concurrent_runs` runs
-are running at once, across all projects. A run records the Claude account it started in (`account_id`), whose
-config dir its transcripts come from; NULL (a run from before the column, or a disconnected account) means the
-active one. A run has 0–n
+are running at once, across all projects. A run records the Claude account it started in (`account_id`, picked at
+start by Auto or by me, MVP §4.3), whose config dir its env, takeover command, and transcripts use; NULL (a run
+from before the column, or a disconnected account) means the active one. A run has 0–n
 transcripts. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
@@ -604,7 +604,21 @@ DELETE /api/tasks/12                                              (board Delete)
   # 409 {"detail":"run #41 active"} while the task's own run is running · 404 {"detail":"Task #99 not found"}
 
 POST /api/tasks/12/run                                            (Run, Retry, fctl run 12)
-← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login"}
+→ no body, {}, or {"account_id":null}   Auto (097, MVP §4.3)
+→ {"account_id":2}                      run in account 2, even when it is low or limited (Run menu, fctl run --account)
+← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login",
+       "account_id":2,"account":"b@y"}
+  # account: the account's label, its stored email, else its config dir's last component
+  # the account check takes the auth check's place (after the worktree, before the run row; the earlier
+  #   checks below keep their order). Auto walks its non-low candidates (lib/account_choice: preferred first,
+  #   then lower 5h, lower 7d, lower id, then no snapshot yet) with `claude auth status` in each one's dir and
+  #   runs on the first logged in to claude.ai. With none, and some low:
+  #   409 {"detail":"all accounts near their limits: a@x 5h 92% (resets 14:10), b@y limited (resets Nov 15
+  #   16:00)"}, every low account by id; with none low: 409 {"detail":"not on subscription auth"}
+  # an explicit account_id: 422 {"detail":"no Claude account #99"} for an unknown id (a non-integer is
+  #   FastAPI's 422); 409 {"detail":"Claude account b@y isn't logged in to claude.ai; log it in under
+  #   Settings → Claude accounts, or pick another"}; no run row in either
+  # a run that fails with a limited snapshot gets runs.error "limited on b@y, resets at 16:00"
   # 409, checked right after the 404, while the task's own run is running:
   #   {"detail":"run #41 is already running on #12; wait for it or stop it"}; then at the run cap (runs by id):
   #   {"detail":"2 runs active (#41 on #12, #42 on #14); the limit is 2. Wait, stop one, or raise it in Settings"}
@@ -625,7 +639,8 @@ POST /api/tasks/12/run                                            (Run, Retry, f
   #   refusal stays stored
 
 POST /api/projects/3/run-next                                     (Run next, fctl run next)
-← 202 {"task_id":14,"run_id":42}                                  # 404 if backlog empty; 409 as run
+← 202 {"task_id":14,"run_id":42,"account_id":1,"account":"a@x"}  # 404 if backlog empty; 409 as run
+  # always Auto, no body read (097); Retry (run with no body) and rework's run are Auto too
   # the top ready backlog card (lowest position, then id) that has no running run, skipping blocked ones; at the
   #   run cap, run's cap 409 and no run row; with every card blocked,
   #   409 {"detail":"all backlog tasks are blocked: #15 waits on #12, #14"}: the top card and its open blockers
@@ -791,7 +806,7 @@ GET  /api/auth/accounts                                           (Settings: the
   #   config dir, uncached; signed_in, auth_method, plan, and email follow GET /api/auth's rules for
   #   runs_enabled, auth_method, plan, and email
 
-POST /api/auth/accounts/{id}/activate                             (Settings: Make active)
+POST /api/auth/accounts/{id}/activate                             (Settings: Make preferred)
 ← 200 {"auth_method":"claude.ai","plan":"max","runs_enabled":true,"email":"me@work.example"}
   # the account runs use from now on; the 200 is GET /api/auth's body, now for it, checked afresh
   # already active: 200, nothing changes · a signed-out account may be made active
@@ -842,7 +857,13 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
                                                 094: blocked_by and blocks, each [{id, title, status}] by id, and
                                                 project_tasks, the project's other tasks as {id, title, status} by
-                                                id (the Blocked by section's Add choices); 093: pr (below)
+                                                id (the Blocked by section's Add choices); 093: pr (below).
+                                                097: run.account, the run's account label (null for none or a
+                                                deleted one); the takeover uses the run's own account's dir;
+                                                accounts, every account by id as {id, label, active, five_hour,
+                                                seven_day} (windows as GET /api/usage reads them, DB only, no
+                                                claude call); auto, {account_id, label} of Auto's first candidate
+                                                from the DB alone, or null when all are low or there are none
 GET  /api/pages/tasks/{id}/flow?round=          089: the task page's Factory section. round is a number or latest
                                                 (the default). No git, no claude
 ← 200 {"graph":<Graph>|null,"source":{"factory_id":4,"name":"Factory"}|null,"rounds":[1,2],"round":2,

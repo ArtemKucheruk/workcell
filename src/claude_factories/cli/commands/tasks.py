@@ -29,7 +29,7 @@ def task_add(args):
     # flush: a refused run's stderr line must come after this one, also when stdout is a pipe
     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}", flush=True)
     if args.run:  # Q11: a refused run leaves the task in Backlog, its Added line already printed
-        print_run(task["id"], api("POST", f"/api/tasks/{task['id']}/run")["run_id"])
+        print_run(task["id"], api("POST", f"/api/tasks/{task['id']}/run"))
 
 
 def task_block(args):

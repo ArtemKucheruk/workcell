@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { activateAccount, deleteAccount, getAccounts, planName, sendLoginCode, startLogin } from '../../api/auth.js'
 import { getSettings, putSettings } from '../../api/settings.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
-import { ActivePill } from '../../components/Badge.jsx'
+import { PreferredPill } from '../../components/Badge.jsx'
 import { DeleteDialog } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { Block, ButtonBlock, Rows, Skeleton } from '../../components/Skeleton.jsx'
@@ -13,25 +13,28 @@ import { usePoll } from '../../hooks/usePoll.js'
 const disconnectText = (account) => (
   <>
     This signs the account out with <code>claude auth logout</code> and removes it from the app, with its config folder
-    if the app created it.{account.active && ' Runs stay disabled until you make another account active.'}
+    if the app created it.{account.active && ' Runs stay disabled until you make another account preferred.'}
   </>
 )
 
-/** FE3: whether runs can start, from the active account; the run's own auth check is what decides (Q14). */
+/**
+ * FE3: whether runs can start, from the active account; the run's own auth check is what decides (Q14). 097 Q8: the
+ * active account reads "preferred" here, since Auto starts from it and may pick another; the API keeps `active`.
+ */
 function RunsLine({ accounts }) {
   const active = accounts.find((a) => a.active)
   if (active?.signed_in) return <p>Runs enabled</p>
   return (
     <p className="font-semibold text-danger">
-      {active ? 'Not signed in with a Claude subscription — runs disabled' : 'No active account — runs disabled'}
+      {active ? 'Not signed in with a Claude subscription — runs disabled' : 'No preferred account — runs disabled'}
     </p>
   )
 }
 
 /**
- * FE1, FE2, Q10, Q11: one account as a card: its email (or that it isn't signed in) and the active pill, its rows, then
- * Make active (inactive only), its login, and Disconnect. `children` is its pending login's form. After Make active,
- * focus goes to this item's login button, which stays mounted as Make active goes.
+ * FE1, FE2, Q10, Q11: one account as a card: its email (or that it isn't signed in) and the preferred pill (097 Q8),
+ * its rows, then Make preferred (others only), its login, and Disconnect. `children` is its pending login's form. After
+ * Make preferred, focus goes to this item's login button, which stays mounted as Make preferred goes.
  */
 function AccountItem({ account, loginLabel, onActivate, onLogin, onDisconnect, children }) {
   const login = useRef(null)
@@ -44,7 +47,7 @@ function AccountItem({ account, loginLabel, onActivate, onLogin, onDisconnect, c
     <li className="grid gap-3 rounded-md border border-line px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="m-0 font-semibold wrap-anywhere">{account.email ?? 'Not signed in'}</h3>
-        {account.active && <ActivePill />}
+        {account.active && <PreferredPill />}
       </div>
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-6 gap-y-1">
         {rows.map(([name, value, className]) => (
@@ -56,7 +59,7 @@ function AccountItem({ account, loginLabel, onActivate, onLogin, onDisconnect, c
       </dl>
       <div className="flex flex-wrap gap-2">
         {!account.active && (
-          <ActionButton action={async () => (await onActivate()) && login.current?.focus()}>Make active</ActionButton>
+          <ActionButton action={async () => (await onActivate()) && login.current?.focus()}>Make preferred</ActionButton>
         )}
         <ActionButton ref={login} action={onLogin}>
           {loginLabel}
@@ -142,8 +145,8 @@ function RunsSection() {
 }
 
 /**
- * docs/ui.md §8 item 9: the Claude accounts the app holds, the one runs use marked active (056). The page loads
- * /api/auth/accounts once; after a good code, a Make active, or a Disconnect, the shown list is a fresh load. One login
+ * docs/ui.md §8 item 9: the Claude accounts the app holds, the one Auto prefers marked preferred (056, 097 Q8). The page
+ * loads /api/auth/accounts once; after a good code, a Make preferred, or a Disconnect, the shown list is a fresh load. One login
  * is pending at a time (039): its form sits in its account's item, or under + Add account for a new account the list
  * doesn't show yet, and that item's button, or + Add account, reads Start over and resends its account_id (Q3).
  * Subscription only (MVP §4.3): no API key field.

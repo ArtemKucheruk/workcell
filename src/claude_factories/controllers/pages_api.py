@@ -171,8 +171,8 @@ def board(project_id: int, projects: Projects, tasks: Tasks, rounds: Rounds, rev
 
 @router.get("/api/pages/tasks/{task_id}")
 def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs, transcripts: Transcripts,
-         git: GitAdapter, claude: ClaudeAdapter, accounts: ClaudeAccounts) -> dto.TaskPage:
-    page = handler.task(tasks, rounds, reviews, runs, transcripts, git, claude, accounts, task_id)
+         git: GitAdapter, claude: ClaudeAdapter, accounts: ClaudeAccounts, usage: Usage) -> dto.TaskPage:
+    page = handler.task(tasks, rounds, reviews, runs, transcripts, git, claude, accounts, usage, task_id)
     return page | {
         "task": obj(page["task"], "description", "spec"), "run": obj(page["run"]),
         "rounds": [r | obj({"build_md": page["build"].get(r["n"])}, "build") | {"posted": posted(page, r["n"])}
