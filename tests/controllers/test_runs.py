@@ -193,7 +193,8 @@ def test_run_response(client, project, fake):  # AC1
     body = r.json()
     wait(body["run_id"])
     assert body == {"run_id": sql("SELECT id FROM runs WHERE task_id = ?", (task,))[0][0],
-                    "session_id": body["session_id"], "worktree": f".claude/worktrees/{task}-rate-limit-login"}
+                    "session_id": body["session_id"], "worktree": f".claude/worktrees/{task}-rate-limit-login",
+                    "account_id": 1, "account": "claude-config"}  # 097 AC18: no email stored, the dir's name
     uuid.UUID(body["session_id"])
     assert fake.recorded("run")["argv"][3] == body["session_id"]
 
@@ -598,7 +599,7 @@ def test_run_next_takes_top(client, project, queue, fake):  # AC25
     r = client.post(f"/api/projects/{project}/run-next", headers=H)
     assert r.status_code == 202, r.text
     run_id = sql("SELECT id FROM runs")[0][0]
-    assert r.json() == {"task_id": queue, "run_id": run_id}
+    assert r.json() == {"task_id": queue, "run_id": run_id, "account_id": 1, "account": "claude-config"}  # 097 AC19
     wait(run_id)
     assert task_row(queue)["status"] == "in_progress"
     assert fake.recorded("run")["argv"][1] == f"/factory {queue}"
@@ -680,7 +681,8 @@ def test_run_next_skips_blocked(client, project, fake):  # 094 AC13
     waits(top, working)
     r = client.post(f"/api/projects/{project}/run-next", headers=H)
     assert r.status_code == 202, r.text
-    assert r.json() == {"task_id": tie, "run_id": sql("SELECT id FROM runs")[0][0]}
+    assert r.json() == {"task_id": tie, "run_id": sql("SELECT id FROM runs")[0][0], "account_id": 1,
+                        "account": "claude-config"}
     wait(r.json()["run_id"])
     assert (task_row(top)["status"], task_row(tie)["status"]) == ("backlog", "in_progress")
 

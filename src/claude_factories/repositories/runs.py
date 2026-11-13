@@ -83,6 +83,10 @@ class RunsRepo:
             (status, error, session_id, now or db.now(), run_id),
         )
 
+    def set_failed_error(self, run_id: int, error: str) -> None:
+        """097 AC25: a failed run's error replaced; any other status is left alone."""
+        self.conn.execute("UPDATE runs SET error = ? WHERE id = ? AND status = 'failed'", (error, run_id))
+
     def stop(self, run_id: int) -> sqlite3.Row | None:
         """013 Q1: mark a running row stopped; its (pid, exit_code), or None if it isn't running."""
         return self.conn.execute(
@@ -105,9 +109,12 @@ class RunsRepo:
         return found[0] if found else None
 
     def latest_detail(self, task_id: int) -> sqlite3.Row | None:
-        """014: the task page's latest run."""
+        """014: the task page's latest run; 097 AC22, AC24: with its account's id, config_dir, and email (NULL for
+        none or a deleted one)."""
         return self.conn.execute(
-            "SELECT id, status, error, session_id, started_at FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1",
+            "SELECT r.id, r.status, r.error, r.session_id, r.started_at, a.id AS account_id, a.config_dir, a.email"
+            " FROM runs r LEFT JOIN claude_accounts a ON a.id = r.account_id"
+            " WHERE r.task_id = ? ORDER BY r.id DESC LIMIT 1",
             (task_id,),
         ).fetchone()
 

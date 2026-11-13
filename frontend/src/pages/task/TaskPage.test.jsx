@@ -413,6 +413,79 @@ test('AC20: a refused Run, Retry, or Stop shows its detail in the header alert; 
   }
 })
 
+// --- 097: the Run menu and the run's account -------------------------------------------
+
+const ACCOUNTS = [
+  {
+    id: 1, label: 'a@x', active: true,
+    five_hour: { utilization: 0.853, resets_at: 1, state: 'near_limit', reset: false },
+    seven_day: { utilization: 0.12, resets_at: 2, state: 'allowed', reset: false },
+  },
+  { id: 2, label: 'b@y', active: false, five_hour: null, seven_day: null },
+]
+const withAccounts = (task, extra = {}) =>
+  taskPage(task, { accounts: ACCOUNTS, auto: { account_id: 2, label: 'b@y' }, ...extra })
+const menu = () => document.getElementById('run-menu')
+// the popover is closed, so its entries are hidden until the ▾ opens it (jsdom doesn't open popovers)
+const menuItem = (name) => within(menu()).getByRole('button', { name, hidden: true })
+const menuItems = () => within(menu()).getAllByRole('button', { hidden: true }).map((b) => b.textContent)
+const bodies = (fetch, url) => sends(fetch, 'POST', url).map(([, init]) => init.body)
+
+test("097 AC27: a Choose account popover button beside Run lists Auto's pick, then each account's 5h and 7d, preferred in text", async () => {
+  await open(withAccounts({ status: 'backlog', stage: null, branch: null }))
+  const button = within(titleRow()).getByRole('button', { name: 'Choose account' })
+  expect(button.getAttribute('popovertarget')).toBe('run-menu')
+  expect(button.disabled).toBe(false)
+  expect(menu().getAttribute('popover')).toBe('auto')
+  expect(menuItems()).toEqual(['Auto (→ b@y)', 'a@x · 5h 85% · 7d 12% · preferred', 'b@y · 5h — · 7d —'])
+  for (const item of within(menu()).getAllByRole('button', { hidden: true })) expect(item.tagName).toBe('BUTTON') // keyboard reachable
+})
+
+test('097 AC27, AC29: an account entry runs with its account_id; Auto and the plain Run send no body', async () => {
+  const { fetch } = await open(withAccounts({ status: 'backlog', stage: null, branch: null }), {
+    'POST /api/tasks/12/run': [202, { run_id: 41, session_id: 's', worktree: WORKTREE, account_id: 2, account: 'b@y' }],
+  })
+  fireEvent.click(menuItem(/^b@y/))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(bodies(fetch, '/api/tasks/12/run')).toEqual([JSON.stringify({ account_id: 2 })])
+  fireEvent.click(menuItem('Auto (→ b@y)'))
+  await waitFor(() => expect(loads(fetch)).toBe(3))
+  fireEvent.click(within(titleRow()).getByRole('button', { name: 'Run' }))
+  await waitFor(() => expect(loads(fetch)).toBe(4))
+  expect(bodies(fetch, '/api/tasks/12/run')).toEqual([JSON.stringify({ account_id: 2 }), undefined, undefined])
+  expect(sends(fetch, 'POST', '/api/tasks/12/run').every(([, init]) => init.headers['X-Requested-By'] === 'fctl')).toBe(true)
+})
+
+test('097 AC28: with auto null the first entry reads Auto (all near limits); choosing it still posts and shows the 409', async () => {
+  const detail = 'all accounts near their limits: a@x 5h 92% (resets 14:10), b@y limited (resets 16:00)'
+  const { fetch } = await open(withAccounts({}, { auto: null, run: run(41, 'failed') }), {
+    'POST /api/tasks/12/run': [409, { detail }],
+  })
+  expect(menuItems()[0]).toBe('Auto (all near limits)')
+  fireEvent.click(menuItem('Auto (all near limits)'))
+  expect((await within(header()).findByRole('alert')).textContent).toBe(detail)
+  expect(bodies(fetch, '/api/tasks/12/run')).toEqual([undefined])
+})
+
+test('097: no accounts, no Run menu; a running run or a review task has none either; can_run disables it', async () => {
+  const none = await open(taskPage({ status: 'backlog', stage: null }))
+  expect(runButtons()).toEqual(['Run'])
+  none.unmount()
+  const running = await open(withAccounts({}, { run: run(41, 'running') }), { [`GET ${LOG(41, 0)}`]: log(0) })
+  expect(within(titleRow()).queryByRole('button', { name: 'Choose account' })).toBeNull()
+  running.unmount()
+  await open(withAccounts({}, { run: run(41, 'failed'), can_run: false }))
+  expect(within(titleRow()).getByRole('button', { name: 'Choose account' }).disabled).toBe(true)
+})
+
+test("097 AC24: the run line names the run's account", async () => {
+  const failed = await open(taskPage({}, { run: run(41, 'failed', { account: 'b@y', error: 'limited on b@y, resets at 16:00' }) }))
+  expect(runStatus().textContent).toBe('run #41 failed · b@y: limited on b@y, resets at 16:00')
+  failed.unmount()
+  await open(taskPage({}, { run: run(41, 'stopped', { account: null }) }))
+  expect(runStatus().textContent).toBe('run #41 stopped')
+})
+
 // --- Takeover --------------------------------------------------------------------------
 
 test('AC21: the takeover command shows in a <code>; a running run says to stop it first; otherwise neither', async () => {

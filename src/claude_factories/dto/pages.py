@@ -9,7 +9,7 @@ from .factories import Graph
 from .rounds import RoundSummary
 from .tasks import Dep, TaskItem
 from .transcripts import TranscriptOut
-from .usage import UsageAccount
+from .usage import UsageAccount, UsageWindow
 from .workspaces import WorkspaceOut
 
 Factory = Literal["ready", "legacy", "uncommitted", "none"]
@@ -327,6 +327,21 @@ class RunDetail(BaseModel):
     error: str | None
     session_id: str
     started_at: str
+    account: str | None  # 097 AC24: the label of the account it ran in; null for none or a deleted one
+
+
+class RunAccount(BaseModel):
+    """097 AC26: a Run menu entry, the windows as GET /api/usage reads them (DB only)."""
+    id: int
+    label: str
+    active: bool  # the preferred account (Settings, Q8)
+    five_hour: UsageWindow | None
+    seven_day: UsageWindow | None
+
+
+class AutoPick(BaseModel):
+    account_id: int
+    label: str
 
 
 class PagePr(BaseModel):
@@ -344,6 +359,8 @@ class TaskPage(BaseModel):
     hint: str | None
     run: RunDetail | None  # Q9: the latest run, whatever its status
     takeover: str | None
+    accounts: list[RunAccount]  # 097 AC26: every account by id
+    auto: AutoPick | None  # Auto's first candidate from the DB alone; null when all are low or there are none
     rounds: list[TaskRound]
     approver: Approver | None
     history: list[HistoryEntry]

@@ -22,7 +22,8 @@ export const WaitingPill = () => <span className={`${pill} border-warning bg-war
 export const EscalatedPill = () => <span className={`${pill} border-danger bg-danger text-surface`}>escalated</span>
 
 /** 056 Q11: the Claude account runs use, on Settings; outlined accent like the other state pills. */
-export const ActivePill = () => <span className={`${pill} border-accent text-accent`}>active</span>
+// 097 Q8: the Settings page's marker for the active account, which Auto prefers
+export const PreferredPill = () => <span className={`${pill} border-accent text-accent`}>preferred</span>
 
 /** 057: the Context page's first card, which can't be moved or deleted; a fact, not a state, so muted. */
 export const PinnedPill = () => <span className={`${pill} border-muted text-muted`}>Pinned</span>

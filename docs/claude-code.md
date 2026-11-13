@@ -34,7 +34,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]` (stdin: description, with `--description -`) | me | `POST /api/projects/{id}/tasks` with `description_md` and `blocked_by` (+ `/run`) |
 | `fctl task block <id> --by <id>` | me | `PUT /api/tasks/{id}/blocked-by/{blocker}` → prints every blocker with its status |
 | `fctl task unblock <id> --by <id>` | me | `DELETE /api/tasks/{id}/blocked-by/{blocker}` → prints the blockers left |
-| `fctl run <id>` / `fctl run next` | me | `POST /api/tasks/{id}/run`, `/api/projects/{id}/run-next` |
+| `fctl run <id> [--account <id\|email>]` / `fctl run next` | me | `POST /api/tasks/{id}/run` (`{"account_id"}` with `--account`, else Auto), `/api/projects/{id}/run-next` (always Auto) |
 | `fctl rework <id> "note"` | me | `POST /api/tasks/{id}/request-changes` |
 | `fctl approve <id>` | me | `POST /api/tasks/{id}/approve` |
 | `fctl submit --new --title T` (stdin: description) | `/factory-submit` | `POST /api/projects/{id}/tasks` with `submit` |

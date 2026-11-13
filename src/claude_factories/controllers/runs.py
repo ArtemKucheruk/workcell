@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Query, Request
 
-from ..dto.runs import LogOut, RunNextOut, RunStarted, StopOut
+from ..dto.runs import LogOut, RunBody, RunNextOut, RunStarted, StopOut
 from ..handlers import runs as handler
 from ..server.deps import ClaudeAdapter, GitAdapter, get_claude, transaction
 
@@ -28,8 +28,10 @@ def agent_url(request: Request) -> str:
 
 
 @router.post("/api/tasks/{task_id}/run", status_code=202)
-def run_task(task_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunStarted:
-    return handler.start(transaction, git, claude, task_id, agent_url(request))
+def run_task(task_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter,
+             body: RunBody | None = None) -> RunStarted:
+    """097 AC9: no body, {}, or a null account_id is Auto."""
+    return handler.start(transaction, git, claude, task_id, agent_url(request), body and body.account_id)
 
 
 @router.post("/api/projects/{project_id}/run-next", status_code=202)

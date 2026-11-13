@@ -103,7 +103,7 @@ def test_task_add_run(server, repo, monkeypatch, capsys):  # 015 AC15
         ("POST", "/api/tasks/12/run", None),
     ]
     url = os.environ["FCTL_URL"]
-    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 → {url}/tasks/12\n"
+    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 as b@y → {url}/tasks/12\n"
 
 
 def test_task_add_run_refused(server, repo, monkeypatch, capsys):  # 015 AC16
@@ -170,7 +170,7 @@ def test_task_add_description_run(server, repo, monkeypatch, capsys):  # 060 BE5
         ("POST", "/api/tasks/12/run", None),
     ]
     url = os.environ["FCTL_URL"]
-    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 → {url}/tasks/12\n"
+    assert capsys.readouterr().out == f"Added #12 to api → {url}/projects/3\nRun #41 on #12 as b@y → {url}/tasks/12\n"
 
 
 def test_task_add_help(capsys):  # 060 BE6

@@ -7,6 +7,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import suppress
 from itertools import groupby
 from pathlib import Path
@@ -17,6 +18,7 @@ from ..adapters.claude import Claude, last_line, read, stripped_env
 from ..adapters.git import Git
 from ..domain.enums import Reviewer, Status
 from ..domain.errors import Conflict, Failed, Invalid, NotFound
+from ..lib.account_choice import rank
 from ..lib.diff import diff_rows, file_tree
 from ..lib.markdown import render_with_headings
 from ..lib.run_log import run_agents
@@ -38,7 +40,7 @@ from .rounds import find_round, round_summaries
 from .runs import log_lines
 from .tasks import list_tasks
 from .transcripts import for_task
-from .usage import accounts_usage
+from .usage import accounts_usage, label
 
 COLUMNS = tuple(Status)
 REVIEWERS = tuple(Reviewer)
@@ -416,25 +418,36 @@ def page_task(tasks: TasksRepo, task_id: int):
 
 
 def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, transcripts: TranscriptsRepo,
-         git: Git, claude: Claude, accounts: ClaudeAccountsRepo, task_id: int) -> dict:
+         git: Git, claude: Claude, accounts: ClaudeAccountsRepo, usage: UsageRepo, task_id: int,
+         now: float | None = None) -> dict:
     """docs/ui.md §8 item 4: header with the run controls and the latest run (014), description, 094's Blocked by
     and Blocks, spec, rounds with build notes, verdict popovers, and agents (030), the approver's latest decision,
     the status history, the takeover command (Q9), and the run log. 094 Q8: `project_tasks`, the project's other
-    tasks by id, are Add's candidates. 093 AC36: `pr`, Create PR's state from local git."""
+    tasks by id, are Add's candidates. 093 AC36: `pr`, Create PR's state from local git. 097 AC26: `accounts` for
+    the Run menu and `auto`, Auto's pick from the DB alone (Q9: no claude call on the poll); AC24: `run.account`."""
     found = page_task(tasks, task_id)
     run = runs.latest_detail(task_id)
     factory = factory_state(git, found["path"], found["default_branch"])  # ponytail: a git call per 3 s poll, as the board's
     takeover = None  # Q9: only for a run that isn't running, in the task's stored worktree
     if run and found["worktree_path"] and run["status"] != "running":
         wt, session = shlex.quote(found["worktree_path"]), shlex.quote(run["session_id"])
-        # 056: the active account's dir, or nothing with none active (Q7).
-        # ponytail (Q8): the account active now is the run's own unless one was made active since; runs.account_id
-        active = accounts.active()
-        named = f"CLAUDE_CONFIG_DIR={shlex.quote(active['config_dir'])} " if active else ""
+        # 097 AC22: the run's own account's dir; a run with none (pre-096, or deleted) the active one's (056),
+        # or nothing with none active (Q7)
+        own = run if run["config_dir"] else accounts.active()
+        named = f"CLAUDE_CONFIG_DIR={shlex.quote(own['config_dir'])} " if own else ""
         takeover = (f"docker compose exec -w {wt} {named and f'-e {named}'}backend claude --resume {session}"
                     if config.in_docker() else f"cd {wt} && {named}claude --resume {session}")  # 028 Q7
+    now = time.time() if now is None else now
+    rows, listed = accounts.all(), accounts_usage(accounts, usage, now)
+    candidates = rank(rows, usage.latest(), now)[0]
+    auto = {"account_id": candidates[0]["id"], "label": label(candidates[0]["email"], candidates[0]["config_dir"])
+            } if candidates else None
+    run_out = run and {k: run[k] for k in ("id", "status", "error", "session_id", "started_at")} | {
+        "account": label(run["email"], run["config_dir"]) if run["config_dir"] else None}
     return {
-        "run": run, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
+        "run": run_out, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
+        "accounts": [{k: a[k] for k in ("id", "label", "active", "five_hour", "seven_day")} for a in listed],
+        "auto": auto,
         "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4
         "task": found, "pr": page_pr(git, found),
         "rounds": summaries(rounds, reviews, task_id), "posted": posted_verdicts(reviews, task_id),

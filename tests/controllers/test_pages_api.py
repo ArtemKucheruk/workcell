@@ -783,7 +783,7 @@ def test_accounts_docs():  # 056 BE22, after 055 BE7
     assert "POST /api/auth/logout" not in auth
     ui = section("ui.md", "## 8.")
     settings = ui[ui.index("9. **Settings** (`/settings`)"):ui.index("10. **Reviews**")]
-    for button in ("**+ Add account**", "**Make active**", "**Disconnect**"):
+    for button in ("**+ Add account**", "**Make preferred**", "**Disconnect**"):  # 097 Q8: was Make active
         assert button in settings, button
     assert "CLAUDE_CONFIG_DIR=<account dir> claude --resume <session-id>" in section("MVP.md", "### 4.4")
     containers = section("MVP.md", "### 4.6")
@@ -1505,8 +1505,8 @@ def test_task_run_and_takeover(client, project):  # AC15
     run = add_run(tid, "stopped", session=session)
     page = api(client, f"/api/pages/tasks/{tid}")
     assert page["run"] == {"id": run, "status": "stopped", "error": None, "session_id": session,
-                           "started_at": STARTED}
-    one = shlex.quote(os.environ["CLAUDE_CONFIG_DIR"])  # 056: account 1, active
+                           "started_at": STARTED, "account": None}  # 097 AC24: no account_id
+    one = shlex.quote(os.environ["CLAUDE_CONFIG_DIR"])  # 056: account 1, active (097 AC22: the NULL fallback)
     assert page["takeover"] == (f"cd {shlex.quote(worktree)} && CLAUDE_CONFIG_DIR={one} claude"
                                 f" --resume {shlex.quote(session)}")
     sql("UPDATE runs SET status = 'running' WHERE id = ?", (run,))

@@ -44,6 +44,12 @@ class UsageRepo:
         ).fetchall()
         return {r["account_id"]: r for r in rows}
 
+    def of_run(self, run_id: int) -> sqlite3.Row | None:
+        """097 AC25: the run's snapshot with its account's email and config_dir, or None."""
+        return self.conn.execute(
+            "SELECT s.*, a.email, a.config_dir FROM usage_snapshots s JOIN claude_accounts a ON a.id = s.account_id"
+            " WHERE s.run_id = ?", (run_id,)).fetchone()
+
     def by_day(self, since: str) -> list[sqlite3.Row]:
         """AC15: tokens per UTC day (YYYY-MM-DD) from `since`; days without transcripts are left out."""
         return self.conn.execute(

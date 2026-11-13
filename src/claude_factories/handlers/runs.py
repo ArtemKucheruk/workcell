@@ -9,6 +9,7 @@ import os
 import socket
 import sqlite3
 import threading
+import time
 import uuid
 from itertools import takewhile
 from pathlib import Path
@@ -16,8 +17,9 @@ from pathlib import Path
 from .. import config
 from ..adapters.claude import Claude, stripped_env
 from ..adapters.git import Git
-from ..domain.errors import Conflict, DomainError, Failed, NotFound
+from ..domain.errors import Conflict, DomainError, Failed, Invalid, NotFound
 from ..dto.runs import LogOut, RunNextOut, RunStarted, StopOut
+from ..lib.account_choice import is_low, rank, refusal, when
 from ..lib.rate_limits import latest
 from ..lib.run_log import last_result, log_items
 from ..lib.slug import slug
@@ -29,6 +31,7 @@ from ..repositories.tasks import TasksRepo
 from ..repositories.usage import UsageRepo
 from .factory import factory_hint, factory_state
 from .transcripts import collect
+from .usage import label
 
 PROMPT = "/factory {task_id}"  # MVP §10 OQ1: the one place the prompt lives
 ALLOWED_TOOLS = (  # §4.4; the test command's entry is added per project (Q7)
@@ -184,13 +187,13 @@ def worktree(tx, git: Git, task) -> str:
     return wt
 
 
-def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStarted:
+def start(tx, git: Git, claude: Claude, task_id: int, base_url: str, account_id: int | None = None) -> RunStarted:
     """Q2's order: 404, the task's own run and the cap (096 Q1), status (Q1), blockers (094), factory (Q12),
     worktree (Q4), auth; then the run row, the move, and the event in one transaction, then the spawn (§4.4).
-    `base_url` becomes FCTL_URL: the controller's loopback URL on the server's own port (028 Q5). 056: the auth
-    check and the spawn run in the active account's CLAUDE_CONFIG_DIR; with none active, the run is refused
-    without calling claude (Q7). 096: the row keeps that account's id (Q5), and the env two free ports (Q6).
-    094 Q1, Q4: a blocked task is refused outright, for Run, Retry, Run next, and rework's run alike."""
+    `base_url` becomes FCTL_URL: the controller's loopback URL on the server's own port (028 Q5). 097: the auth
+    check (AC16: where 056's was) picks the account, `account_id` or Auto (choose_account); its check and the spawn
+    run in that account's CLAUDE_CONFIG_DIR. 096: the row keeps that account's id (Q5), and the env two free ports
+    (Q6). 094 Q1, Q4: a blocked task is refused outright, for Run, Retry, Run next, and rework's run alike."""
     with tx() as conn:
         task = TasksRepo(conn).for_run(task_id)
     if task is None:
@@ -207,17 +210,11 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
     if hint := factory_hint(factory_state(git, task["path"], branch), branch):
         raise Conflict(hint)
     wt = worktree(tx, git, task)
-    # 096 Q5: the run keeps this account (runs.account_id), whichever is made active later
-    with tx() as conn:
-        account = ClaudeAccountsRepo(conn).active()
-    if account is None:
-        raise Conflict("not on subscription auth")
     backend_port, frontend_port = free_ports()
-    env = stripped_env() | {"FCTL_URL": base_url.rstrip("/"),  # §4.3, passed to both exactly as built
-                            "CLAUDE_CONFIG_DIR": account["config_dir"],
-                            "FCTL_BACKEND_PORT": str(backend_port), "FCTL_FRONTEND_PORT": str(frontend_port)}
-    if claude.auth_status(wt, env) is None:  # each run's own check, never cached (§4.3: before every run)
-        raise Conflict("not on subscription auth")
+    base = stripped_env() | {"FCTL_URL": base_url.rstrip("/"),  # §4.3, passed to both exactly as built
+                             "FCTL_BACKEND_PORT": str(backend_port), "FCTL_FRONTEND_PORT": str(frontend_port)}
+    # 096 Q5: the run keeps this account (runs.account_id), whichever is made active later
+    account, info, env = choose_account(tx, claude, wt, base, account_id)
     with CHECKOUT_LOCK:
         trust_project(account["config_dir"], task["path"])
     session_id = str(uuid.uuid4())
@@ -237,6 +234,9 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
         except sqlite3.IntegrityError:  # one_run_per_task
             refuse_if_running(runs, settings, task_id)
             raise
+        if isinstance(email := info.get("email"), str) and email:  # 095 AC11: the check's email is the label
+            ClaudeAccountsRepo(conn).set_email(account["id"], email)
+            account = dict(account) | {"email": email}
         log_path = runs_dir / f"{run_id}.jsonl"
         runs.set_log_path(run_id, str(log_path))
         if tasks.start(task_id, now):  # Q9: an in_progress task keeps its status and stage
@@ -251,7 +251,35 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str) -> RunStart
     with tx() as conn:
         RunsRepo(conn).set_pid(run_id, proc.pid)
     threading.Thread(target=finish, args=(tx, run_id, proc, log_path), daemon=True).start()
-    return RunStarted(run_id=run_id, session_id=session_id, worktree=os.path.relpath(wt, task["path"]))
+    return RunStarted(run_id=run_id, session_id=session_id, worktree=os.path.relpath(wt, task["path"]),
+                      account_id=account["id"], account=label(account["email"], account["config_dir"]))
+
+
+def choose_account(tx, claude: Claude, wt: str, base: dict, account_id: int | None) -> tuple:
+    """097 AC9–AC17, MVP §4.3: the run's account as (row, its `claude auth status` answer, the run env with its
+    CLAUDE_CONFIG_DIR). Each check is the run's own, never cached. An explicit `account_id` runs even when low or
+    limited (Q4); unknown is a 422 (Q5), logged out a 409. Auto (None) walks lib/account_choice's non-low
+    candidates until one is logged in to claude.ai; none → the low accounts listed (AC11), else today's detail."""
+    with tx() as conn:
+        rows, latest = ClaudeAccountsRepo(conn).all(), UsageRepo(conn).latest()
+    if account_id is not None:
+        found = next((a for a in rows if a["id"] == account_id), None)
+        if found is None:
+            raise Invalid(f"no Claude account #{account_id}")
+        env = base | {"CLAUDE_CONFIG_DIR": found["config_dir"]}
+        if (info := claude.auth_status(wt, env)) is None:
+            raise Conflict(f"Claude account {label(found['email'], found['config_dir'])} isn't logged in to"
+                           " claude.ai; log it in under Settings → Claude accounts, or pick another")
+        return found, info, env
+    now = time.time()
+    candidates, low = rank(rows, latest, now)
+    for found in candidates:
+        env = base | {"CLAUDE_CONFIG_DIR": found["config_dir"]}
+        if (info := claude.auth_status(wt, env)) is not None:
+            return found, info, env
+    if low:
+        raise Conflict(refusal(low, {a["id"]: label(a["email"], a["config_dir"]) for a in rows}, now))
+    raise Conflict("not on subscription auth")
 
 
 def finish(tx, run_id: int, proc, log_path: Path):
@@ -272,7 +300,24 @@ def finish(tx, run_id: int, proc, log_path: Path):
     with tx() as conn:
         RunsRepo(conn).finish(run_id, status, error, session)
     record_usage(tx, run_id, str(log_path))
+    if status == "failed":
+        limited_error(tx, run_id)
     collect(tx, run_id)  # 030 Q7: again after Stop's copy, now that the session has ended
+
+
+def limited_error(tx, run_id: int, now: float | None = None) -> None:
+    """097 AC25, Q7: a failed run whose recorded snapshot is limited gets `limited on <label>, resets at <time>` as
+    its error, so Retry's reason (Auto picks another account) is clear. The time is lib/account_choice's (Q1, Q3);
+    with the flag's 5h window already reset, that window's reset still names it."""
+    now = time.time() if now is None else now
+    with tx() as conn:
+        snap = UsageRepo(conn).of_run(run_id)
+        if snap is None or not snap["limited"]:
+            return
+        low = is_low(snap, now)
+        resets = low["resets_at"] if low else snap["five_hour_resets_at"]
+        RunsRepo(conn).set_failed_error(
+            run_id, f"limited on {label(snap['email'], snap['config_dir'])}, resets at {when(resets, now)}")
 
 
 def record_usage(tx, run_id: int, log_path: str) -> None:
@@ -287,7 +332,7 @@ def record_usage(tx, run_id: int, log_path: str) -> None:
 def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> RunNextOut:
     """Q13: the top backlog card, lowest position then lowest id, through all of start's checks. 094: the top
     ready one; with every card blocked, a 409 naming the top card's open blockers (Q5). 096 Q10: a card with a
-    running run is skipped; start's checks refuse it at the cap (AC17)."""
+    running run is skipped; start's checks refuse it at the cap (AC17). 097 AC19: always Auto."""
     with tx() as conn:
         if not ProjectsRepo(conn).exists(project_id):
             raise NotFound()
@@ -297,7 +342,9 @@ def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> Ru
             raise Conflict(f"all backlog tasks are blocked: #{top['id']} waits on {open_blockers(tasks, top['id'])}")
     if top is None:
         raise NotFound("backlog is empty")
-    return RunNextOut(task_id=top["id"], run_id=start(tx, git, claude, top["id"], base_url).run_id)
+    started = start(tx, git, claude, top["id"], base_url)
+    return RunNextOut(task_id=top["id"], run_id=started.run_id, account_id=started.account_id,
+                      account=started.account)
 
 
 def stop(tx, claude: Claude, run_id: int) -> StopOut:

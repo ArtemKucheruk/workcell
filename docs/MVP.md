@@ -303,10 +303,31 @@ interactive sessions.
   provider variable from the run's environment. With any of them set, `claude -p` would
   quietly bill per token or route to Bedrock or Vertex.
 - Before every run, the app runs `claude auth status` with the same environment and working
-  directory, which carries the active Claude account's `CLAUDE_CONFIG_DIR` (§4.6). If the result
-  is not `"authMethod": "claude.ai"`, or no account is active, the run is refused with
-  `409 not on subscription auth`. With no active account, claude isn't called at all. The app
-  header shows the reported plan, `subscriptionType: "pro"`.
+  directory, which carries the chosen Claude account's `CLAUDE_CONFIG_DIR` (§4.6). Only a result of
+  `"authMethod": "claude.ai"` counts as logged in. The app header shows the active account's
+  plan, `subscriptionType: "pro"`.
+- **Every logged-in account is usable; the run picks one at start.** By default, **Auto**: the
+  active account, shown as **preferred** on Settings, unless its latest usage snapshot (from its
+  last run's `rate_limit_event`) says it is low, then the account with the most headroom. Low
+  means limited (a window's status isn't allowed, or the snapshot's `limited` flag before its 5h
+  window resets), 5h utilization at or above `FIVE_HOUR_LOW` (80%), or 7d at or above
+  `SEVEN_DAY_LOW` (90%); both constants live in `lib/account_choice.py`. A window whose reset time
+  has passed counts as 0%. Order: the preferred one when not low (with no snapshot it isn't low),
+  then accounts with a snapshot by lower 5h, lower 7d, lower id, then accounts with no snapshot
+  yet, by id. Auto checks each in turn with `claude auth status` and runs on the first that is
+  logged in. When none is and some are low, the run is refused with `409 all accounts near their
+  limits: a@x 5h 92% (resets 14:10), b@y limited (resets Nov 15 16:00)`, one entry per low account
+  (reset times in the server's local time, the date added past 24 h). With no account logged in
+  and none low, it is `409 not on subscription auth`; with no accounts at all, claude isn't called.
+- **Or I pick the account** for one run: the task page's Run menu, or `fctl run <id> --account
+  <id|email>` (body `{"account_id": 2}`). It runs even when low or limited; a logged-out one is
+  refused with `409 Claude account b@y isn't logged in to claude.ai; …`, an unknown id with `422
+  no Claude account #99`. Run next, Retry, and rework's run always use Auto, so a retry after a
+  limit moves to another account.
+- **Everything about a run uses its own account** (`runs.account_id`): its env and trust write,
+  the takeover command, and the transcript copy, whichever account is preferred later. A run that
+  fails with a limited snapshot gets the error `limited on b@y, resets at 16:00`. Switching
+  accounts mid-run is out of scope: the limited run fails, and Retry picks another via Auto.
 - Runs never use `--bare`, which accepts only API keys, or the Agent SDK, which needs an API
   key. Headless `claude -p` is the only way a run starts.
 - There is no dollar budget, because the Pro usage limits are the budget. That is why a global
@@ -411,8 +432,9 @@ claude -p "/factory 12" \
   #14); the limit is 2. Wait, stop one, or raise it in Settings`. Lowering the cap stops nothing;
   new starts wait until the count drops under it. Pro limits are shared with my own sessions,
   and many parallel opus runs would use them up quickly.
-- Each run remembers the account it started in (`runs.account_id`), so its transcripts come from
-  that account's config dir whichever account is active later.
+- Each run remembers the account it started in (`runs.account_id`, chosen at start by Auto or
+  my pick, §4.3), so its takeover command and transcripts use that account's config dir whichever
+  account is active later.
 - Each run's environment holds `FCTL_BACKEND_PORT` and `FCTL_FRONTEND_PORT`, two free loopback
   ports picked at start, so agents that start the app in parallel runs don't clash on 4545/3000.
 - Parallel starts take turns on the main checkout: the `info/exclude` write, `wt switch
@@ -436,14 +458,15 @@ claude -p "/factory 12" \
   `fctl serve` stops every run, and at startup any run still marked `running` becomes
   `failed: app restarted`.
 - The task page shows a takeover command:
-  `cd <worktree> && CLAUDE_CONFIG_DIR=<account dir> claude --resume <session-id>`, with the active
-  account's dir, or without it when no account is active.
+  `cd <worktree> && CLAUDE_CONFIG_DIR=<account dir> claude --resume <session-id>`, with the run's
+  own account's dir; a run with no account (from before `runs.account_id`, or a deleted account)
+  uses the active account's, or none when no account is active.
 - When a run ends, on exit, on **Stop**, and in the startup cleanup (`failed: app restarted`),
   the app copies the run's Claude Code transcripts into `FCTL_HOME/transcripts/<run-id>/` and
   indexes each in `transcripts`. Claude Code prunes old transcripts and the worktree gets
   removed, so the copy is the record. They come from the worktree's folder under the run's own
   account's `<config dir>/projects/` (`runs.account_id`; a run from before that column uses the
-  active account): the run's own session, its teammates, and their subagents. Make active and
+  active account): the run's own session, its teammates, and their subagents. Make preferred and
   Disconnect stay refused while any run is active. A failed copy leaves that file out and never
   fails the run.
 
@@ -516,9 +539,10 @@ Single user and no auth still need these, because the API can start processes th
   That `~/.claude` is the first Claude account, the one this command signs in. The Settings page
   (`/settings`) lists the accounts and does the same login from the browser: it shows claude's
   sign-in link and passes the pasted code to claude. **+ Add account** logs in to a fresh config
-  dir under `FCTL_HOME/claude-accounts/`. Runs use the one active account's `CLAUDE_CONFIG_DIR`,
-  and **Make active** picks it. **Disconnect** runs `claude auth logout` in the account's dir and
-  removes the account, deleting its dir only if it is under `claude-accounts/`. Make active and
+  dir under `FCTL_HOME/claude-accounts/`. Each run uses its own account's `CLAUDE_CONFIG_DIR`,
+  picked by Auto from the preferred (active) account or chosen per run (§4.3), and **Make
+  preferred** sets the preferred one. **Disconnect** runs `claude auth logout` in the account's dir and
+  removes the account, deleting its dir only if it is under `claude-accounts/`. Make preferred and
   Disconnect are refused while a run is active. §4.3's env stripping and auth check are unchanged.
 - **Image.** The backend image has git, uv, node, a pinned worktrunk (`wt`, built from a fixed
   crates.io version with `cargo install --locked`, so every crate is sha256-checked), and the

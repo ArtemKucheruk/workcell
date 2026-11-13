@@ -149,6 +149,15 @@ def test_task_block_sections():  # 094 AC21: the new commands' rows, and fctl ru
     assert "409 all backlog tasks are blocked: #15 waits on #12, #14" in run
 
 
+def test_run_account_section():  # 097 AC33
+    run = section("run")
+    for text in ("fctl run <id> [--account <id|email>]", "Run #41 on #12 as b@y →",
+                 "409 all accounts near their limits: a@x 5h 92% (resets 14:10)",
+                 "409 Claude account b@y isn't logged in to claude.ai", "422 no Claude account #99",
+                 "fctl: no Claude account b@y", "--account` with `next`"):
+        assert text in run, text
+
+
 def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example
     assert "seed" in COMMANDS
     assert "fctl seed" in section("seed")

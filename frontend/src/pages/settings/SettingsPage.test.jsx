@@ -43,7 +43,7 @@ const PUT_SETTINGS = 'PUT /api/settings'
 const DISCONNECT_TEXT =
   'This signs the account out with claude auth logout and removes it from the app, with its config folder if the app ' +
   'created it.'
-const ACTIVE_TEXT = ' Runs stay disabled until you make another account active.'
+const ACTIVE_TEXT = ' Runs stay disabled until you make another account preferred.' // 097 Q8
 
 /**
  * Renders /settings with the accounts list answering `accounts`, and waits for the Claude accounts region. `responses`
@@ -70,7 +70,7 @@ const items = (section) => within(section).getAllByRole('listitem')
 const dd = (item, name) => within(item).getByText(name, { selector: 'dt' }).nextElementSibling
 const row = (item, name) => dd(item, name).textContent
 const buttons = (item) => within(item).getAllByRole('button').map((b) => b.textContent)
-const pill = (item) => within(item).queryByText('active', { exact: true })
+const pill = (item) => within(item).queryByText('preferred', { exact: true }) // 097 Q8: the active account's marker
 const codeInput = () => screen.getByRole('textbox', { name: 'Code' })
 const submitButton = () => screen.getByRole('button', { name: 'Submit code' })
 const signInLink = () => screen.queryByRole('link', { name: 'Open the Claude sign-in page' })
@@ -119,8 +119,8 @@ test('FE2: Make active only on inactive items, Log in again or Log in by sign-in
   const { section } = await open([ONE, TWO, THREE])
   const [one, two, three] = items(section)
   expect(buttons(one)).toEqual(['Log in again', 'Disconnect'])
-  expect(buttons(two)).toEqual(['Make active', 'Log in', 'Disconnect'])
-  expect(buttons(three)).toEqual(['Make active', 'Log in again', 'Disconnect'])
+  expect(buttons(two)).toEqual(['Make preferred','Log in', 'Disconnect'])
+  expect(buttons(three)).toEqual(['Make preferred','Log in again', 'Disconnect'])
   const add = within(section).getByRole('button', { name: '+ Add account' })
   expect(follows(within(section).getByRole('list'), add)).toBe(true)
 })
@@ -128,7 +128,7 @@ test('FE2: Make active only on inactive items, Log in again or Log in by sign-in
 test('FE3, round 2 review-ui: below the list and + Add account, whether runs are enabled, from the active account', async () => {
   for (const [accounts, text, red] of [
     [[ONE, TWO], 'Runs enabled', false],
-    [[{ ...ONE, active: false }, TWO], 'No active account — runs disabled', true],
+    [[{ ...ONE, active: false }, TWO], 'No preferred account — runs disabled', true],
     [[{ ...ONE, active: false }, { ...TWO, active: true }], 'Not signed in with a Claude subscription — runs disabled', true],
   ]) {
     const { section, unmount } = await open(accounts)
@@ -144,7 +144,7 @@ test('FE4, round 2 review-ui: an empty list says so, then + Add account, then no
   const { section } = await open([])
   const empty = within(section).getByText('No Claude accounts yet.')
   const add = within(section).getByRole('button', { name: '+ Add account' })
-  const line = within(section).getByText('No active account — runs disabled')
+  const line = within(section).getByText('No preferred account — runs disabled')
   expect(within(section).queryAllByRole('listitem')).toEqual([])
   expect(follows(empty, add)).toBe(true)
   expect(follows(add, line)).toBe(true)
@@ -154,7 +154,7 @@ test('FE4, round 2 review-ui: an empty list says so, then + Add account, then no
 test('FE5: Make active posts once, reloads the list, and moves the pill; focus goes to its login button', async () => {
   const { fetch, responses, section } = await open([ONE, TWO], { [ACTIVATE_2]: [200, { ...AUTH, plan: null, email: null }] })
   responses[ACCOUNTS] = [200, [{ ...ONE, active: false }, { ...TWO, active: true }]]
-  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Make active' }))
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Make preferred' }))
   await waitFor(() => expect(pill(items(section)[1])).toBeTruthy())
   const posts = calls(fetch, ACTIVATE_2)
   expect(posts).toHaveLength(1)
@@ -162,7 +162,7 @@ test('FE5: Make active posts once, reloads the list, and moves the pill; focus g
   expect(calls(fetch, ACCOUNTS)).toHaveLength(2)
   const [one, two] = items(section)
   expect(pill(one)).toBeNull()
-  expect(buttons(one)).toEqual(['Make active', 'Log in again', 'Disconnect'])
+  expect(buttons(one)).toEqual(['Make preferred','Log in again', 'Disconnect'])
   expect(buttons(two)).toEqual(['Log in', 'Disconnect'])
   await waitFor(() => expect(document.activeElement).toBe(within(two).getByRole('button', { name: 'Log in' })))
 })
@@ -175,14 +175,14 @@ test('FE5, round 1 review-ui, review-ux: Make active clears a Logged in as statu
   fireEvent.click(submitButton())
   expect((await within(section).findByRole('status')).textContent).toBe('Logged in as second@example.com')
   responses[ACCOUNTS] = [200, [ONE, THREE]]
-  fireEvent.click(within(items(section)[0]).getByRole('button', { name: 'Make active' }))
+  fireEvent.click(within(items(section)[0]).getByRole('button', { name: 'Make preferred' }))
   await waitFor(() => expect(pill(items(section)[0])).toBeTruthy())
   expect(within(section).queryByRole('status')).toBeNull()
 })
 
 test('FE5: a refused Make active shows its detail in the region, reloads nothing, and leaves the pill', async () => {
   const { fetch, section } = await open([ONE, TWO], { [ACTIVATE_2]: [409, { detail: 'a run is active' }] })
-  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Make active' }))
+  fireEvent.click(within(items(section)[1]).getByRole('button', { name: 'Make preferred' }))
   expect((await within(section).findByRole('alert')).textContent).toBe('a run is active')
   expect(calls(fetch, ACCOUNTS)).toHaveLength(1)
   expect(pill(items(section)[0])).toBeTruthy()
