@@ -1,7 +1,7 @@
 `fctl` is the Claude Factories command line. It starts the app's backend, installs the global
 skills, and is how you, the `/factory-connect` and `/factory-submit` skills, and the factory's
-agents read and write the app. Every command but `fctl serve`, `fctl setup`, and `fctl seed` is a
-small HTTP client of the backend at `FCTL_URL`. `fctl --help` lists the commands, and
+agents read and write the app. Every command but `fctl serve`, `fctl setup`, `fctl seed`, and
+`fctl service` is a small HTTP client of the backend at `FCTL_URL`. `fctl --help` lists the commands, and
 `fctl <command> --help` prints one command's arguments.
 
 ## Install
@@ -30,16 +30,18 @@ The factory itself, the `/factory` skill and its 7 agents, is written into each 
 **Create factory** on the project's Settings page, not by `fctl`.
 
 The app runs in Docker (see [Using fctl with Docker](#using-fctl-with-docker)). Without Docker,
-`fctl serve` runs the backend on `127.0.0.1:4545`, and the frontend server runs next to it:
-`npm --prefix frontend ci && npm --prefix frontend run build && node frontend/server.js`, on
-`127.0.0.1:3000`.
+[fctl service install](#fctl-service-install) runs the backend on `127.0.0.1:4545` and the
+frontend server on `127.0.0.1:3000` as user services that start at login, and
+[fctl service reload](#fctl-service-reload) picks up new code after a merge. In the foreground
+instead, `fctl serve` runs the backend, and the frontend server runs next to it:
+`npm --prefix frontend ci && npm --prefix frontend run build && node frontend/server.js`.
 
 ## FCTL_URL and FCTL_HOME
 
 | Variable | Default | Read by | What it is |
 |---|---|---|---|
 | `FCTL_URL` | `http://127.0.0.1:4545` | every command that calls the app | the backend's address; a trailing `/` is dropped |
-| `FCTL_HOME` | `~/.claude-factories` | `fctl serve`, `fctl seed` | the data dir: `factory.db`, and `runs/<id>.jsonl` for each run's log |
+| `FCTL_HOME` | `~/.claude-factories` | `fctl serve`, `fctl seed`, `fctl service` | the data dir: `factory.db`, `runs/<id>.jsonl` for each run's log, and for `fctl service` its `logs/` (`backend.log`, `frontend.log`) and `service.json` |
 
 Set `FCTL_URL` when the backend isn't on port 4545, for example after `fctl serve --port 5000`:
 
@@ -51,8 +53,11 @@ The backend refuses any `Host` but `127.0.0.1` or `localhost`, so `FCTL_URL` nam
 Runs get their own `FCTL_URL`: the app starts every agent with `FCTL_URL=http://127.0.0.1:<port>`,
 the port the backend listens on.
 
-`FCTL_HOME` matters only to `fctl serve` and `fctl seed`. Either creates the folder and `factory.db`
-when they're missing. Every other command works through the API and never opens the data dir.
+`FCTL_HOME` matters only to `fctl serve`, `fctl seed`, and `fctl service`. The first two create the
+folder and `factory.db` when they're missing. `fctl service` keeps the services' output in
+`logs/backend.log` and `logs/frontend.log`, and what it installed (ports, binary paths, env, file
+hashes, the commit each service serves) in `service.json`. Every other command works through the API
+and never opens the data dir.
 
 The links `fctl` prints (`fctl connect`, `fctl task add`, `fctl run`, `fctl submit`) start with
 `FCTL_URL`, the backend, which answers only `/api/` calls. The pages are on the frontend server:
@@ -76,6 +81,8 @@ With `docker compose up`, the backend runs `fctl serve --host 0.0.0.0` in its co
   read them.
 - Agents in a run use the image's `fctl`, inside the container, with
   `FCTL_URL=http://127.0.0.1:4545`.
+- `fctl service` doesn't apply: compose already runs the app in the background and restarts it.
+  Use `docker compose up -d` to start it and `docker compose restart` after a pull.
 
 To run a command inside the container, from the checkout next to `compose.yaml`:
 
@@ -286,6 +293,470 @@ docker compose down                          # your own app; its data stays in i
 docker compose -p claude-factories-demo up --build -d
 docker compose -p claude-factories-demo exec backend fctl seed
 docker compose -p claude-factories-demo down -v   # later: deletes the demo
+```
+
+## fctl service install
+
+Installs the backend (`fctl serve`) and the frontend server (`node frontend/server.js`) as user
+services and starts them: launchd agents on macOS, `systemd --user` units on Linux. They start at
+login and restart when they crash, and closing the terminal doesn't stop them. No API call.
+
+**Synopsis**
+
+```
+fctl service install [--backend-port PORT] [--frontend-port PORT]
+```
+
+It serves the checkout of the editable install (`uv tool install --editable <checkout>`), found
+from the installed package, so it works from any directory. It:
+
+1. Looks up the absolute paths of `fctl`, `node`, `npm`, and `git` (required) and `claude`, `uv`,
+   `gh`, and `wt` (only warned about), and builds the services' `PATH`: each found binary's folder,
+   then the current `PATH`. `FCTL_HOME` and `CLAUDE_CONFIG_DIR` go into the backend's env when set.
+   It all goes into `FCTL_HOME/service.json`.
+2. Builds the frontend when `frontend/dist/index.html` is missing: `npm --prefix <repo>/frontend ci`
+   (only without `frontend/node_modules`), then `npm --prefix <repo>/frontend run build`.
+3. Writes `~/Library/LaunchAgents/com.claude-factories.backend.plist` and `…frontend.plist`, then
+   for each runs `launchctl bootout gui/<uid>/<label>` and `launchctl bootstrap gui/<uid> <plist>`.
+   On Linux it writes `~/.config/systemd/user/claude-factories-backend.service` and
+   `…-frontend.service`, then runs `systemctl --user daemon-reload` and
+   `systemctl --user enable --now <unit>`. Both bind `127.0.0.1` only; `KeepAlive` and
+   `Restart=on-failure` restart a crash, not a clean exit.
+
+Running it again rewrites the files and restarts both, for example after the checkout moved or a
+binary did. On Linux the services start at login; `loginctl enable-linger` (not done here) starts
+them at boot.
+
+**Arguments and flags**
+
+- `--backend-port PORT`: the backend's port. Default `4545`. Set `FCTL_URL` to match.
+- `--frontend-port PORT`: the frontend's port. Default `3000`.
+
+**Stdin**
+
+none
+
+**Output**
+
+A warning line on stderr for each optional binary it didn't find, then:
+
+```
+Wrote /Users/me/Library/LaunchAgents/com.claude-factories.backend.plist
+Wrote /Users/me/Library/LaunchAgents/com.claude-factories.frontend.plist
+Started backend → http://127.0.0.1:4545 (log: /Users/me/.claude-factories/logs/backend.log)
+Started frontend → http://127.0.0.1:3000 (log: /Users/me/.claude-factories/logs/frontend.log)
+```
+
+With a `--backend-port` other than 4545, a last line: `export FCTL_URL=http://127.0.0.1:<port>`.
+
+**Exit codes and errors**
+
+- `fctl: fctl service runs on macOS (launchd) or Linux (systemd --user); in Docker use docker compose up -d / docker compose restart`,
+  exit `1`, on any other platform or with `FCTL_IN_DOCKER=1`. Every `fctl service` command says it.
+- `fctl: fctl service needs an editable install: uv tool install --editable <your checkout>`,
+  exit `1`.
+- `fctl: node not found on PATH` (or `fctl`, `npm`, `git`), exit `1`. Nothing is written.
+- `warning: gh not found on PATH; runs and reviewers need it` (or `claude`, `uv`, `wt`): it goes on.
+- `fctl: npm ci failed; see the output above` and `fctl: npm run build failed; see the output above`,
+  exit `1`, before any service is loaded.
+- `fctl: launchctl bootstrap gui/<uid> failed: <its error>` or
+  `fctl: systemctl --user enable failed: <its error>`, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me, once per machine, and again after the checkout or a binary moves.
+
+**Example**
+
+```sh
+fctl service install
+fctl service install --backend-port 5000 --frontend-port 5001
+```
+
+## fctl service uninstall
+
+Stops both services and removes them. The logs stay. No API call but the active runs check.
+
+**Synopsis**
+
+```
+fctl service uninstall [--force]
+```
+
+On macOS it runs `launchctl bootout gui/<uid>/<label>` and deletes each plist. On Linux it runs
+`systemctl --user disable --now <unit>`, deletes each unit, then `systemctl --user daemon-reload`.
+Then it deletes `FCTL_HOME/service.json`.
+
+Stopping the backend stops every run, so first it asks the backend for active runs
+(`GET http://127.0.0.1:<backend port>/api/pages/agents`) and refuses while there are any. A backend
+that doesn't answer has none.
+
+**Arguments and flags**
+
+- `--force`: go on even with active runs. The backend's shutdown stops them.
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+Uninstalled backend and frontend; logs kept in /Users/me/.claude-factories/logs
+```
+
+With `--force` and active runs, first `Stopping active runs: run #68 on #92`.
+
+**Exit codes and errors**
+
+- `fctl: run #68 on #92 is active; wait, stop it in the app, or pass --force`, exit `1`. With
+  several: `fctl: run #68 on #92, run #70 on #95 are active; wait, stop them in the app, or pass --force`.
+- `fctl: not installed; run fctl service install`, exit `1`: there is no `service.json`. Every
+  `fctl service` command but `install` says it.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl service uninstall
+```
+
+## fctl service start
+
+Starts both services, or one. A service that is already running is left alone.
+
+**Synopsis**
+
+```
+fctl service start [backend|frontend]
+```
+
+On macOS it runs `launchctl kickstart gui/<uid>/<label>` for a loaded agent and
+`launchctl bootstrap gui/<uid> <plist>` for one that isn't (after `fctl service stop`). On Linux,
+`systemctl --user start <unit…>`. Before starting a service that isn't running, it checks that
+nothing else listens on its port, such as a `fctl serve` started by hand. With the frontend among
+them, it builds the frontend first when `frontend/dist/index.html` is missing, as `install` does.
+A log over 10 MB is renamed to `<name>.log.1` first, replacing the older one.
+
+**Arguments and flags**
+
+- `backend` or `frontend`: only that service. Default: both.
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+Started backend → http://127.0.0.1:4545
+frontend is already running (pid 4322)
+```
+
+**Exit codes and errors**
+
+- `fctl: port 4545 is taken by pid 1234 (python3); stop it, or reinstall with --backend-port`
+  (`--frontend-port` for the frontend), exit `1`, and nothing starts. The pid and command come from
+  `lsof` and `ps`; without `lsof`, the message says `taken by another process`.
+- `fctl: npm run build failed; see the output above`, exit `1`.
+- `fctl: not installed; run fctl service install`, exit `1`.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl service start backend
+```
+
+## fctl service stop
+
+Stops both services, or one, until the next `start`, `restart`, or login.
+
+**Synopsis**
+
+```
+fctl service stop [backend|frontend] [--force]
+```
+
+On macOS it runs `launchctl bootout gui/<uid>/<label>`; the plist stays, so the next login loads it
+again. On Linux, `systemctl --user stop <unit…>`. When the backend is among them, it refuses while
+runs are active, as [fctl service uninstall](#fctl-service-uninstall) does. Stopping only the
+frontend doesn't touch runs, so it doesn't check.
+
+**Arguments and flags**
+
+- `backend` or `frontend`: only that service. Default: both.
+- `--force`: go on even with active runs. The backend's shutdown stops them.
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+Stopped backend
+Stopped frontend
+```
+
+With `--force` and active runs, first `Stopping active runs: run #68 on #92`.
+
+**Exit codes and errors**
+
+- `fctl: run #68 on #92 is active; wait, stop it in the app, or pass --force`, exit `1`.
+- `fctl: not installed; run fctl service install`, exit `1`.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl service stop frontend
+```
+
+## fctl service restart
+
+Restarts both services, or one.
+
+**Synopsis**
+
+```
+fctl service restart [backend|frontend] [--force]
+```
+
+On macOS it runs `launchctl kickstart -k gui/<uid>/<label>`, or bootstraps an agent that isn't
+loaded. On Linux, `systemctl --user restart <unit…>`. When the backend is among them, it refuses
+while runs are active, as [fctl service uninstall](#fctl-service-uninstall) does. A log over 10 MB
+is renamed to `<name>.log.1` first. It records the checkout's `HEAD` as the code each restarted
+service serves, for [fctl service status](#fctl-service-status).
+
+**Arguments and flags**
+
+- `backend` or `frontend`: only that service. Default: both.
+- `--force`: go on even with active runs. The backend's shutdown stops them.
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+Restarted backend → http://127.0.0.1:4545
+Restarted frontend → http://127.0.0.1:3000
+```
+
+**Exit codes and errors**
+
+- `fctl: run #68 on #92 is active; wait, stop it in the app, or pass --force`, exit `1`.
+- `fctl: not installed; run fctl service install`, exit `1`.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl service restart backend --force
+```
+
+## fctl service reload
+
+Picks up new code after a `git pull` or a merge: rebuilds the frontend and restarts both services.
+
+**Synopsis**
+
+```
+fctl service reload [--force]
+```
+
+In order:
+
+1. Refuses while runs are active, as [fctl service uninstall](#fctl-service-uninstall) does.
+2. `npm --prefix <repo>/frontend ci`, only when `frontend/package-lock.json` changed since the last
+   `ci` (its sha256 is kept in `service.json`), or `frontend/node_modules` is missing.
+3. `npm --prefix <repo>/frontend run build`.
+4. Restarts both, as [fctl service restart](#fctl-service-restart) does.
+
+When `pyproject.toml` or `uv.lock` changed since the last `install` or `reload`, it prints the
+command that installs the new Python dependencies. It doesn't run it: an editable install needs it
+only when the dependencies change.
+
+**Arguments and flags**
+
+- `--force`: go on even with active runs. The backend's shutdown stops them.
+
+**Stdin**
+
+none
+
+**Output**
+
+npm's own output, then:
+
+```
+Python dependencies changed; run: uv tool install --editable --reinstall /Users/me/code/claude-factories
+Restarted backend → http://127.0.0.1:4545
+Restarted frontend → http://127.0.0.1:3000
+```
+
+The first line only when they changed.
+
+**Exit codes and errors**
+
+- `fctl: run #68 on #92 is active; wait, stop it in the app, or pass --force`, exit `1`.
+- `fctl: npm ci failed; see the output above` and `fctl: npm run build failed; see the output above`,
+  exit `1`. Nothing is restarted, so the old code keeps running.
+- `fctl: not installed; run fctl service install`, exit `1`.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me, after each merge or pull.
+
+**Example**
+
+```sh
+git pull && fctl service reload
+```
+
+## fctl service status
+
+Prints each service's state, the code it serves, and the active runs.
+
+**Synopsis**
+
+```
+fctl service status
+```
+
+The pid comes from `launchctl print` (macOS) or `systemctl --user show` (Linux), the uptime from
+`ps`, and the active runs from `GET /api/pages/agents`. `main` is the checkout's default branch
+(`origin/HEAD`, else its current branch), with no fetch. `stale` means the service runs another
+commit than `main`: run [fctl service reload](#fctl-service-reload).
+
+**Arguments and flags**
+
+none
+
+**Stdin**
+
+none
+
+**Output**
+
+```
+backend: running
+  pid: 4321
+  port: 4545
+  uptime: 01:02:03
+  url: http://127.0.0.1:4545
+  code: 3f2a1bc, main 9e8d7f6, stale
+
+frontend: stopped
+  pid: -
+  port: 3000
+  uptime: -
+  url: http://127.0.0.1:3000
+  code: 9e8d7f6, main 9e8d7f6, current
+
+active runs: run #68 on #92 (Rate-limit login endpoint)
+```
+
+`active runs:` is `none` with none, and `unknown (backend not answering)` when the backend is down.
+
+**Exit codes and errors**
+
+- `warning: node moved: /opt/homebrew/bin/node no longer exists; run fctl service install`, on
+  stderr, for each saved binary path that is gone. The exit code stays `0`.
+- `fctl: not installed; run fctl service install`, exit `1`.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl service status
+```
+
+## fctl service logs
+
+Prints the end of the services' logs, `FCTL_HOME/logs/backend.log` and `frontend.log`. They hold
+each process's stdout and stderr.
+
+**Synopsis**
+
+```
+fctl service logs [backend|frontend] [-f] [-n N]
+```
+
+**Arguments and flags**
+
+- `backend` or `frontend`: only that log. Default: both.
+- `-f`, `--follow`: keep printing new lines: it runs `tail -n N -f <logs…>` until Ctrl-C.
+- `-n N`: how many lines from the end. Default `50`.
+
+**Stdin**
+
+none
+
+**Output**
+
+Each log under a header, as `tail` prints them:
+
+```
+==> /Users/me/.claude-factories/logs/backend.log <==
+Claude Factories → http://127.0.0.1:4545 (data: /Users/me/.claude-factories)
+no log yet: /Users/me/.claude-factories/logs/frontend.log
+```
+
+`no log yet: <path>` for a log that doesn't exist.
+
+**Exit codes and errors**
+
+- `fctl: not installed; run fctl service install`, exit `1`.
+
+See [fctl service install](#fctl-service-install) for the platform error, and
+[Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl service logs backend -f -n 100
 ```
 
 ## fctl connect
