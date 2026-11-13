@@ -11,10 +11,12 @@ from ..domain.enums import Reviewer
 from ..dto import pages as dto
 from ..handlers import code as code_handler
 from ..handlers import pages as handler
+from ..handlers import task_flow as flow_handler
 from ..lib.markdown import render
 from ..server.deps import (
     ClaudeAccounts,
     ClaudeAdapter,
+    Factories,
     GitAdapter,
     Projects,
     Reviews,
@@ -177,6 +179,13 @@ def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Run
         "blocked_by": objs(page["blocked_by"]), "blocks": objs(page["blocks"]),
         "project_tasks": objs(page["project_tasks"]),
     }
+
+
+@router.get("/api/pages/tasks/{task_id}/flow")
+def task_flow(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs, transcripts: Transcripts,
+              factories: Factories, n: str = Query("latest", alias="round")) -> dto.TaskFlow:
+    """089: the task page's Factory section, polled every 3 s while the run runs. No git, no claude."""
+    return flow_handler.task_flow(tasks, rounds, reviews, runs, transcripts, factories, task_id, n)
 
 
 @router.get("/api/pages/tasks/{task_id}/review")

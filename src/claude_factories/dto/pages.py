@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
 
+from .factories import Graph
 from .rounds import RoundSummary
 from .tasks import Dep, TaskItem
 from .transcripts import TranscriptOut
@@ -348,6 +349,68 @@ class TaskPage(BaseModel):
     blocked_by: list[Dep]  # 094: every link, done blockers too, by id
     blocks: list[Dep]  # 094: the tasks waiting on this one, by id
     project_tasks: list[Dep]  # 094 Q8: the project's other tasks by id, Add's candidates
+
+
+# --- GET /api/pages/tasks/{id}/flow?round= (§8 item 4's Factory section; 089) -----------
+
+
+class FlowVerdict(BaseModel):
+    verdict: str
+    body_md: str
+    body_html: str
+
+
+class FlowComment(BaseModel):
+    path: str | None  # all null for a conversation comment
+    line: int | None
+    side: str | None
+    body_md: str
+    body_html: str
+
+
+class FlowDecision(BaseModel):
+    actor: Literal["approver", "me"]
+    decision: str
+    body_md: str
+    body_html: str
+
+
+class FlowResult(BaseModel):
+    """What clicking the node shows; only its type's keys are filled, the rest stay null or []."""
+    spec_md: str | None = None  # spec_writer
+    spec_html: str | None = None
+    build_md: str | None = None  # builder: round n's row; all null before it submits
+    build_html: str | None = None
+    files: int | None = None
+    additions: int | None = None
+    deletions: int | None = None
+    diff_url: str | None = None  # /tasks/{id}/review?round={n}&tab=files
+    verdict: FlowVerdict | None = None  # a security/ux/ui/code reviewer
+    comments: list[FlowComment] = []  # that reviewer's comments on round n, by id
+    decisions: list[FlowDecision] = []  # approver: every decision on round n, by id
+    answer: Literal["yes", "no"] | None = None  # a condition; null until reached
+    why: str | None = None
+    transcripts: list[TranscriptOut] = []  # an agent: round n's (a spec-writer: all of its)
+
+
+class FlowNode(BaseModel):
+    state: Literal["idle", "running", "done", "changes", "failed", "escalated"]
+    label: str  # PASS, CHANGES, APPROVE, ESCALATE, yes, no, running, failed, done, escalated, not reached
+    current: bool  # where the run is now
+    result: FlowResult
+
+
+class FlowSource(BaseModel):
+    factory_id: int
+    name: str
+
+
+class TaskFlow(BaseModel):
+    graph: Graph | None  # Q3: null for a standalone task
+    source: FlowSource | None  # the design slugged `factory`; null for default_graph()
+    rounds: list[int]  # 1..max(L, C)
+    round: int  # the one the states and results are for
+    nodes: dict[str, FlowNode]  # by node id; {} with no graph
 
 
 # --- GET /api/pages/tasks/{id}/review (§8 item 5, §8.2, §8.3) --------------------------

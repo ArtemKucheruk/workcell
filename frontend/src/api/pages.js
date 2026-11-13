@@ -9,6 +9,10 @@ export const boardPage = (id) => api(`/api/pages/projects/${encodeURIComponent(i
 
 export const taskPage = (id) => api(`/api/pages/tasks/${encodeURIComponent(id)}`)
 
+/** 089: the task's factory graph with each node's state and result; no `round` asks for the latest. */
+export const taskFlow = (id, round) =>
+  api(`/api/pages/tasks/${encodeURIComponent(id)}/flow${round ? `?${new URLSearchParams({ round })}` : ''}`)
+
 /** 024 Q2: `?round=` only when the URL has one; without it the backend picks the latest round. */
 export const reviewPage = (id, round) =>
   api(`/api/pages/tasks/${encodeURIComponent(id)}/review${round ? `?${new URLSearchParams({ round })}` : ''}`)

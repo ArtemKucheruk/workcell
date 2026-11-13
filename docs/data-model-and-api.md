@@ -448,7 +448,8 @@ Reload keeps both, since either may have been edited.
 
 **Factory graphs.** A factory is a design: it reaches `.claude/` only through Write to repo, and runs use
 `.claude/skills/factory/` (docs/MVP.md §3.2). The graph uses React Flow's shape. Only the keys below are stored and returned, and any others (`selected`, `measured`,
-`dragging`, an edge's `type` or `targetHandle`, extra `data` keys) are dropped:
+`dragging`, an edge's `type` or `targetHandle`, extra `data` keys) are dropped. The task page shows a task's graph
+with each node's state for a round through `GET /api/pages/tasks/{id}/flow` (§6.4, 089):
 ```
 <Graph> = {"nodes":[<Node>…],"edges":[<Edge>…]}
 <Node>  = {"id":"builder","type":"builder","position":{"x":500,"y":0},"data":{…}}
@@ -826,6 +827,33 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
                                                 094: blocked_by and blocks, each [{id, title, status}] by id, and
                                                 project_tasks, the project's other tasks as {id, title, status} by
                                                 id (the Blocked by section's Add choices); 093: pr (below)
+GET  /api/pages/tasks/{id}/flow?round=          089: the task page's Factory section. round is a number or latest
+                                                (the default). No git, no claude
+← 200 {"graph":<Graph>|null,"source":{"factory_id":4,"name":"Factory"}|null,"rounds":[1,2],"round":2,
+       "nodes":{"<node id>":{"state":"running","label":"running","current":true,"result":{…}}}}
+  # graph: the project's design whose slug (lib/factory_compile.slug) is `factory`, newest updated_at then
+  #   highest id among several, with source naming it; with none, §6.1's default graph and source null.
+  #   ponytail: the design as it is now, not as it was when the run started. null, with nodes {}, for a
+  #   standalone task (worktree_path null and at least one round): no factory ran
+  # rounds: 1..max(L, C), L = the highest round n (0 with none); C = L+1 while the stage is spec, build, or
+  #   rework and it started after round L's created_at (the newest events row with that stage), or with no
+  #   round; else max(L, 1)
+  # state: idle | running | done | changes | failed | escalated; label: PASS, CHANGES, APPROVE, ESCALATE, yes,
+  #   no, running, failed, done, escalated, or not reached. From the stage, round n's rows (verdicts, the
+  #   approver's latest decision), and the latest run: running while it runs at that node's stage on round C,
+  #   failed once it ended there with the task still in_progress. Custom agents and custom-focus reviewers
+  #   come from the running run's log (lib/run_log.run_agents), else round n's transcripts. A condition
+  #   answers once every agent leading into it is done or changes (or a condition leads in from the handle it
+  #   took). current: every running node; with none, round C's failed or escalated ones
+  # result: spec_writer {spec_md, spec_html}; builder round n's {build_md, build_html, files, additions,
+  #   deletions, diff_url "/tasks/{id}/review?round=n&tab=files"}; a security/ux/ui/code reviewer {verdict
+  #   {verdict, body_md, body_html} | null, comments [{path, line, side, body_md, body_html}] by that
+  #   reviewer}; approver {decisions [{actor, decision, body_md, body_html}]} by id, approver and me; a
+  #   condition {answer yes|no|null, why}: "security, code asked for changes" or "all PASS", "round 1 of
+  #   2", "decision APPROVE". Every agent: transcripts (TranscriptOut) whose agent_type is its name and whose
+  #   round is n, or with round null whose started_at is in [round n's created_at, round n+1's); a
+  #   spec-writer lists all of its own
+← 404 {"detail":"Task #99 not found"}  |  {"detail":"Task #12 has no round 3"}
 GET  /api/pages/tasks/{id}/review?round=        the same task plus commit_hint; pr; timeline; files with diff rows
                                                 carrying side, old/new line, kind, text, and the path:side:line
                                                 anchor; inline comments
