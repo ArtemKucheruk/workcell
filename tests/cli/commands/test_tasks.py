@@ -229,6 +229,95 @@ def test_task_block_refused(server, monkeypatch, capsys, argv, status, detail): 
     assert capsys.readouterr() == ("", f"fctl: {status} {detail}\n")
 
 
+# --- 105: fctl task delete ---------------------------------------------------------------------
+
+CSV = {"id": 14, "title": "Export CSV", "status": "backlog"}
+PROMPT = ("Delete #14 Export CSV?\nThis removes its runs, rounds and their files, verdicts, comments, decisions, status"
+          " history, and transcript records from the app. Its worktree, branch, run logs, and copied transcript files"
+          " stay on disk.\nDelete? [y/N] ")
+GONE = (204, "application/json", b"")  # DELETE's empty body, under FastAPI's default content type
+
+
+def Answer(line):
+    """A terminal stdin whose readline (input()'s) answers the prompt with `line`; "" is EOF. read() fails the test."""
+    return Terminal(line)
+
+
+def deleting(server, monkeypatch, capsys, *argv, stdin, code=0):
+    """Runs fctl task delete; returns (requests' (method, path), stdout, stderr)."""
+    if code:
+        with pytest.raises(SystemExit) as e:
+            fctl(monkeypatch, "task", "delete", *argv, stdin=stdin)
+        assert e.value.code == code
+    else:
+        fctl(monkeypatch, "task", "delete", *argv, stdin=stdin)
+    out, err = capsys.readouterr()
+    return [(m, p) for m, p, _, _ in server.requests], out, err
+
+
+def test_task_delete_yes(server, tmp_path, monkeypatch, capsys):  # 105 AC9
+    monkeypatch.chdir(tmp_path)  # task ids are global: no repo needed
+    server.replies = [reply(CSV), GONE]
+    sent, out, err = deleting(server, monkeypatch, capsys, "14", "--yes", stdin=Terminal())
+    assert sent == [("GET", "/api/tasks/14"), ("DELETE", "/api/tasks/14")]
+    assert server.requests[1][2]["X-Requested-By"] == "fctl"
+    assert (out, err) == ("Deleted #14 Export CSV\n", "")
+    # off a terminal too, and stdin stays unread
+    server.requests.clear()
+    server.replies = [reply(CSV), GONE]
+    sent, out, _ = deleting(server, monkeypatch, capsys, "14", "--yes", stdin="y\n")
+    assert sent == [("GET", "/api/tasks/14"), ("DELETE", "/api/tasks/14")]
+    assert sys.stdin.read() == "y\n"
+
+
+@pytest.mark.parametrize("answer", ["y\n", "yes\n", "  YES  \n", "Y\n", "Yes"])
+def test_task_delete_confirmed(server, monkeypatch, capsys, answer):  # 105 AC10
+    server.replies = [reply(CSV), GONE]
+    sent, out, err = deleting(server, monkeypatch, capsys, "14", stdin=Answer(answer))
+    assert sent == [("GET", "/api/tasks/14"), ("DELETE", "/api/tasks/14")]
+    assert (out, err) == (PROMPT + "Deleted #14 Export CSV\n", "")
+
+
+@pytest.mark.parametrize("answer", ["n\n", "no\n", "\n", "", "yep\n", "y es\n"])
+def test_task_delete_declined(server, monkeypatch, capsys, answer):  # 105 AC11, Q4: "" is EOF
+    server.replies = [reply(CSV)]
+    sent, out, err = deleting(server, monkeypatch, capsys, "14", stdin=Answer(answer), code=1)
+    assert sent == [("GET", "/api/tasks/14")]
+    assert (out, err) == (PROMPT, "fctl: not deleted\n")
+
+
+def test_task_delete_not_a_terminal(server, monkeypatch, capsys):  # 105 AC12, Q5
+    sent, out, err = deleting(server, monkeypatch, capsys, "14", stdin="y\n", code=1)
+    assert sent == []
+    assert (out, err) == ("", "fctl: not a terminal; pass --yes to delete #14 without asking\n")
+    assert sys.stdin.read() == "y\n"
+
+
+@pytest.mark.parametrize("argv, stdin", [(["99", "--yes"], ""), (["99"], Terminal())])
+def test_task_delete_unknown(server, monkeypatch, capsys, argv, stdin):  # 105 AC13, Q3
+    server.reply = reply({"detail": "Not Found"}, 404)
+    sent, out, err = deleting(server, monkeypatch, capsys, *argv, stdin=stdin, code=1)
+    assert sent == [("GET", "/api/tasks/99")]
+    assert (out, err) == ("", "fctl: 404 Not Found\n")
+
+
+@pytest.mark.parametrize("argv, stdin, prompt", [(["14", "--yes"], "", ""), (["14"], Answer("y\n"), PROMPT)])
+def test_task_delete_run_active(server, monkeypatch, capsys, argv, stdin, prompt):  # 105 AC14, Q6
+    server.replies = [reply(CSV | {"status": "in_progress"}), reply({"detail": "run #41 active"}, 409)]
+    sent, out, err = deleting(server, monkeypatch, capsys, *argv, stdin=stdin, code=1)
+    assert sent == [("GET", "/api/tasks/14"), ("DELETE", "/api/tasks/14")]
+    assert (out, err) == (prompt, "fctl: 409 run #41 active\n")
+
+
+@pytest.mark.parametrize("value", ["x", "1.5", ""])
+def test_task_delete_usage(server, monkeypatch, capsys, value):  # 105 AC15
+    with pytest.raises(SystemExit) as e:
+        fctl(monkeypatch, "task", "delete", value, "--yes")
+    assert e.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: fctl task delete")
+    assert server.requests == []
+
+
 # --- 032: fctl export, fctl import -------------------------------------------------------------
 
 ZIP = b"PK\x05\x06" + b"\x00" * 18  # an empty zip's bytes

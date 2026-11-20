@@ -7,7 +7,7 @@ from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
 from .commands.runs import run
 from .commands.submit import diff, submit
-from .commands.tasks import export, import_bundle, task_add, task_block, task_ids
+from .commands.tasks import export, import_bundle, task_add, task_block, task_delete, task_ids
 from .output import fail
 
 SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
@@ -138,6 +138,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("id", type=int, help="the task that waits")
         p.add_argument("--by", type=int, required=True, help="the task it waits on")
         p.set_defaults(func=task_block, method=method)
+    p = task_commands.add_parser("delete", help="delete a task and its runs, rounds, and records from the app")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("--yes", action="store_true", help="don't ask first; needed off a terminal")
+    p.set_defaults(func=task_delete)
     p = commands.add_parser("run", help="start a factory run on a task, or on the top of this repo's Backlog")
     p.add_argument("target", help='a task id, or "next"')
     p.add_argument("--account", metavar="ID|EMAIL",

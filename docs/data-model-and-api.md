@@ -596,7 +596,7 @@ PATCH /api/tasks/12                                               (fctl spec / f
   # the title is trimmed, 422 {"detail":"title must not be blank"} if that leaves nothing; description_md is
   #   stored as sent, "" clears it; null or a non-string → 422 (FastAPI's list detail)
 
-DELETE /api/tasks/12                                              (board Delete)
+DELETE /api/tasks/14                                              (board Delete, fctl task delete 14)
 ← 204, empty body
   # one transaction removes the task with its runs, rounds, round_files, verdicts, comments, decisions,
   #   events, and transcripts rows

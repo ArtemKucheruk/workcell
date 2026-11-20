@@ -179,17 +179,20 @@ Loading, failures, times, and motion are the same on every page:
      puts the card at its bottom; Up and Down move it one place, so Backlog reorders without
      dragging. The menu sends the same `PATCH /api/tasks/{id}` as a drop (§6.2), and focus
      comes back to the card's **Move** button after the board reloads.
-   - The Move menu ends with a divider, then **Edit** and **Delete**, on every card. **Edit**
+   - The Move menu ends with a divider, then **Edit**, on every card. **Edit**
      opens the **+ New task** popover under **+ New task**, labelled `Edit #14`, with Title and
      Description filled from the card and **Save** in place of **Add task**; a poll never refills
      it while it is open, and **+ New task** always opens it empty, in create mode. **Save** sends
      `PATCH /api/tasks/{id}` with `title` and `description_md` (§6.2), closes the popover, reloads
      the board, announces `Saved #14 <title>.`, and puts focus on the card's **Move** button.
-     **Delete** opens a modal `<dialog>` (wireframe below); its **Delete** sends
+   - Every card has its own **Delete** button (named `Delete #14`), first in its row, before
+     **Move** and **Run**: `[Delete] [Move] [Run]` in Backlog, `[Delete] [Move]` elsewhere. It
+     opens a modal `<dialog>` (wireframe below); its **Delete** sends
      `DELETE /api/tasks/{id}`, then the board reloads without the card, `Deleted #14 <title>.` is
      announced, and focus goes to **+ New task**. **Cancel** or Esc closes it with no request, and
-     focus returns to the card's **Move** button. **Delete** is disabled on a running card, with
-     the title `Stop the run to delete this task`; **Edit** never is. A refusal of either shows its
+     focus returns to the card's **Delete** button. The card's **Delete** is disabled on a running
+     card, with the title `Stop the run to delete this task`; **Edit** never is. `fctl task delete`
+     does the same from a terminal. A refusal of Edit or Delete shows its
      detail inside the popover or dialog, which stays open with what was typed; the board's alert
      is left alone.
    - A move, by menu or drop, is announced in a visually hidden `aria-live` status region
@@ -560,18 +563,18 @@ Loading, failures, times, and motion are the same on every page:
 ### 8.1 Board
 ```
 api-server · personal              Factory: ready ✓   [+ New task]  [Run next ▶]
-┌ Backlog 3 ──────────┐ ┌ In progress 1 ─────────────┐ ┌ Review 2 ──────────────────┐ ┌ Done 5 ─────┐
-│ #14 Export CSV      │ │ #13 Audit log              │ │ #12 Rate-limit login       │ │ #9 Health   │
-│       [Move] [Run]  │ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round     │
-├─────────────────────┤ │ r1 sec ✓ ux ✓ ui · code ✗  │ │ r2 sec ✓ ux ✓ ui ✓ code ✓  │ │     [Move]  │
-│ #15 Dark mode       │ │ started 5m ago             │ │ +126 −9                    │ ├─────────────┤
-│       [Move] [Run]  │ │                    [Move]  │ │                    [Move]  │ │ #8 Login UX │
-├─────────────────────┤ └────────────────────────────┘ ├────────────────────────────┤ │ 3 rounds    │
-│ #16 Rename env vars │                                │▌#11 Webhooks               │ │     [Move]  │
-│       [Move] [Run]  │                                │▌(escalated)                │ └─────────────┘
+┌ Backlog 3 ──────────┐ ┌ In progress 1 ─────────────┐ ┌ Review 2 ──────────────────┐ ┌ Done 5 ─────────┐
+│ #14 Export CSV      │ │ #13 Audit log              │ │ #12 Rate-limit login       │ │ #9 Health       │
+│[Delete] [Move] [Run]│ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round         │
+├─────────────────────┤ │ r1 sec ✓ ux ✓ ui · code ✗  │ │ r2 sec ✓ ux ✓ ui ✓ code ✓  │ │[Delete] [Move]  │
+│ #15 Dark mode       │ │ started 5m ago             │ │ +126 −9                    │ ├─────────────────┤
+│[Delete] [Move] [Run]│ │           [Delete] [Move]  │ │           [Delete] [Move]  │ │ #8 Login UX     │
+├─────────────────────┤ └────────────────────────────┘ ├────────────────────────────┤ │ 3 rounds        │
+│ #16 Rename env vars │                                │▌#11 Webhooks               │ │[Delete] [Move]  │
+│[Delete] [Move] [Run]│                                │▌(escalated)                │ └─────────────────┘
 └─────────────────────┘                                │▌r2 sec ✗ ux ✓ ui ✓ code ✓  │
                                                        │▌+88 −4                     │
-                                                       │▌                   [Move]  │
+                                                       │▌          [Delete] [Move]  │
                                                        └────────────────────────────┘
 pills, drawn ( ): a status is outlined in its token: Backlog muted, In progress accent,
   Review warning, Done success. (● running) is outlined accent; its dot pulses, and holds
@@ -581,10 +584,13 @@ escalated cards: red left bar ▌ + (escalated)
 chips: ✓ PASS in success, ✗ CHANGES in danger, · pending in muted; title "security: PASS"
 stalled card: "stalled · build  [Retry]"
 started 5m ago: a running card's start, relative; its title holds the local YYYY-MM-DD HH:MM
+[Delete]: on every card, first in its row, text-danger; it opens the Delete dialog. Disabled
+  while the card runs, titled "Stop the run to delete this task". Cards show [Delete] [Move] [Run]
+  in Backlog, [Delete] [Move] elsewhere.
 [Move]: a popover menu on every card: the other columns, then Up and Down in Backlog, then
-  under a divider Edit and Delete (Delete disabled while the card runs). A move is announced
-  in a hidden aria-live region; a refusal shows in the board's alert.
-Delete dialog (modal; Esc or Cancel closes it):
+  under a divider Edit. A move is announced in a hidden aria-live region; a refusal shows in
+  the board's alert.
+Delete dialog (modal; Esc or Cancel closes it and returns focus to the card's [Delete]):
   ┌ Delete #14 Export CSV? ────────────────────────────────────────────────┐
   │ This removes its runs, rounds and their files, verdicts, comments,     │
   │ decisions, status history, and transcript records from the app. Its    │

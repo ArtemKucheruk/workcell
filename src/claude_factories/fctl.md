@@ -1261,6 +1261,68 @@ me.
 fctl task unblock 15 --by 12
 ```
 
+## fctl task delete
+
+Deletes a task, like the board card's **Delete**. Calls `GET /api/tasks/{id}` for its title, asks to
+confirm, then calls `DELETE /api/tasks/{id}`. The app forgets the task's runs, rounds and their files,
+verdicts, comments, decisions, status history, and transcript records. Its worktree, branch, run logs,
+and copied transcript files stay on disk.
+
+**Synopsis**
+
+```
+fctl task delete <id> [--yes]
+```
+
+Task ids are global, so it works from any directory.
+
+**Arguments and flags**
+
+- `<id>`: the task.
+- `--yes`: delete without asking. Off a terminal (a script, a pipe) it is required.
+
+**Stdin**
+
+On a terminal without `--yes`, one line: the answer to the prompt. `y` or `yes`, in any case, deletes;
+anything else, an empty line, or end of input keeps the task. With `--yes` stdin isn't read.
+
+**Output**
+
+Without `--yes`, the prompt first:
+
+```
+Delete #14 Export CSV?
+This removes its runs, rounds and their files, verdicts, comments, decisions, status history, and transcript records from the app. Its worktree, branch, run logs, and copied transcript files stay on disk.
+Delete? [y/N] y
+```
+
+Then, once deleted:
+
+```
+Deleted #14 Export CSV
+```
+
+**Exit codes and errors**
+
+- `fctl: not a terminal; pass --yes to delete #14 without asking`: no `--yes` off a terminal; no
+  request is made, exit `1`.
+- `fctl: not deleted`: the prompt was answered with anything but `y`; nothing is deleted, exit `1`.
+- `fctl: 404 Not Found`: no task #14 (from the title lookup), exit `1`.
+- `fctl: 409 run #41 active`: the task's run is running; stop it first, then delete, exit `1`.
+- A non-integer `<id>`: a usage error, exit `2`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl task delete 14 --yes
+```
+
 ## fctl run
 
 Starts a factory run: `/factory <id>` in the task's worktree. Calls `POST /api/tasks/{id}/run`, or

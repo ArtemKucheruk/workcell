@@ -94,6 +94,9 @@ const pick = (id, name) => fireEvent.click(within(menuOf(id)).getByRole('button'
 /** A card's buttons outside its Move menu, by text. */
 const cardButtons = (id) =>
   within(cardEl(id)).queryAllByRole('button').filter((b) => !menuOf(id).contains(b)).map((b) => b.textContent)
+/** 105: card `id`'s own Delete button, outside its Move menu. */
+const deleteOf = (id) => within(cardEl(id)).getByRole('button', { name: `Delete #${id}` })
+const askDelete = (id) => fireEvent.click(deleteOf(id))
 /** An element's text without the Move menus in it. */
 function shown(el) {
   const copy = el.cloneNode(true)
@@ -300,11 +303,11 @@ test('AC9, 043 FE7: an escalated card has the escalated pill and the red left ba
   expect(screen.getAllByText('waiting on you')).toHaveLength(1)
 })
 
-test('AC10: a stage without a run shows the stage and no buttons but Move; no stage shows no stage line', async () => {
+test('AC10: a stage without a run shows the stage and no buttons but Delete and Move; no stage shows no stage line', async () => {
   await open(board({ in_progress: [card(13, 'in_progress', { stage: 'build' }), card(15, 'in_progress')] }))
   expect(within(cardEl(13)).getByText('build')).toBeTruthy()
-  expect(cardButtons(13)).toEqual(['Move'])
-  expect([...cardEl(15).children].map(shown)).toEqual(['#15 Task 15', 'Move'])
+  expect(cardButtons(13)).toEqual(['Delete', 'Move'])
+  expect([...cardEl(15).children].map(shown)).toEqual(['#15 Task 15', 'DeleteMove'])
 })
 
 test('AC11, 043 FE8, 046 FE2: a running card shows the ● running badge, its muted stage, how long ago it started, and no buttons', async () => {
@@ -321,11 +324,11 @@ test('AC11, 043 FE8, 046 FE2: a running card shows the ● running badge, its mu
   expect(within(li).getByText(fullText('started 5m ago'))).toBeTruthy()
   expect(li.querySelector('time').getAttribute('datetime')).toBe('2026-10-18T01:02:00Z')
   expect(li.querySelector('time').getAttribute('title')).toBe('2026-10-18 10:02')
-  expect(cardButtons(13)).toEqual(['Move'])
+  expect(cardButtons(13)).toEqual(['Delete', 'Move'])
   const bare = within(cardEl(16)).getByText(fullText('● running'))
   expect([...bare.parentElement.children]).toEqual([bare])
   expect(within(cardEl(16)).getByText(fullText('started 5m ago'))).toBeTruthy()
-  expect(cardButtons(16)).toEqual(['Move'])
+  expect(cardButtons(16)).toEqual(['Delete', 'Move'])
   for (const label of ['In progress', 'Backlog', 'Review', 'Done']) expect(shown(li)).not.toContain(label) // Q5: no status pill
 })
 
@@ -377,17 +380,17 @@ test('AC14: done cards show N rounds, no chips or +/−; a null round shows neit
     expect(cardEl(id).querySelectorAll('[title]')).toHaveLength(0)
     expect(cardEl(id).textContent).not.toMatch(/\+\d|−/)
   }
-  expect(shown(cardEl(10))).toBe('#10 Task 10Move')
+  expect(shown(cardEl(10))).toBe('#10 Task 10DeleteMove')
 })
 
-test('AC15: every backlog card has Run, which runs it and reloads; review and done cards have only Move', async () => {
+test('AC15: every backlog card has Run, which runs it and reloads; review and done cards have only Delete and Move', async () => {
   const { fetch } = await open(board({
     backlog: [card(14, 'backlog'), card(15, 'backlog')],
     review: [card(12, 'review', { stage: 'human_review', waiting: true })],
     done: [card(9, 'done', { round: 1 })],
   }), { 'POST /api/tasks/15/run': [202, { run_id: 50, session_id: 's', worktree: '/w' }] })
-  for (const id of [14, 15]) expect(within(cardEl(id)).getByRole('button', { name: 'Run' })).toBeTruthy()
-  for (const id of [12, 9]) expect(cardButtons(id)).toEqual(['Move'])
+  for (const id of [14, 15]) expect(cardButtons(id)).toEqual(['Delete', 'Move', 'Run']) // 105 Q1
+  for (const id of [12, 9]) expect(cardButtons(id)).toEqual(['Delete', 'Move'])
   fireEvent.click(within(cardEl(15)).getByRole('button', { name: 'Run' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
   expect(sent(fetch, 'POST', '/api/tasks/15/run')).toBeUndefined()
@@ -656,24 +659,24 @@ test('FE8: every card in every column has a Move button opening its own popover=
   }
 })
 
-test('FE9: a menu lists the other columns in order, then Up and Down in Backlog, not past its ends (048: then Edit and Delete)', async () => {
+test('FE9: a menu lists the other columns in order, then Up and Down in Backlog, not past its ends (048: then Edit; 105: no Delete)', async () => {
   const names = (id) => within(menuOf(id)).getAllByRole('button', { hidden: true }).map((b) => b.textContent)
   const { unmount } = await open(board(ALL))
-  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Down', 'Edit', 'Delete'])
-  expect(names(2)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Down', 'Edit', 'Delete'])
-  expect(names(3)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Edit', 'Delete'])
-  expect(names(7)).toEqual(['Backlog', 'Review', 'Done', 'Edit', 'Delete'])
-  expect(names(12)).toEqual(['Backlog', 'In progress', 'Done', 'Edit', 'Delete'])
-  expect(names(9)).toEqual(['Backlog', 'In progress', 'Review', 'Edit', 'Delete'])
+  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Down', 'Edit'])
+  expect(names(2)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Down', 'Edit'])
+  expect(names(3)).toEqual(['In progress', 'Review', 'Done', 'Up', 'Edit'])
+  expect(names(7)).toEqual(['Backlog', 'Review', 'Done', 'Edit'])
+  expect(names(12)).toEqual(['Backlog', 'In progress', 'Done', 'Edit'])
+  expect(names(9)).toEqual(['Backlog', 'In progress', 'Review', 'Edit'])
   unmount()
   await open(board({ backlog: [card(1, 'backlog')] }))
-  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Edit', 'Delete'])
+  expect(names(1)).toEqual(['In progress', 'Review', 'Done', 'Edit'])
 })
 
 test('FE10: every menu button hides its menu natively', async () => {
   await open(board(ALL))
   const buttons = [...document.querySelectorAll('[id^="move-"] button')]
-  expect(buttons).toHaveLength(4 + 5 + 4 + 3 + 3 + 3 + 6 * 2) // 048: Edit and Delete on each
+  expect(buttons).toHaveLength(4 + 5 + 4 + 3 + 3 + 3 + 6) // 048: Edit on each (105: Delete left the menu)
   for (const b of buttons) {
     expect(b.getAttribute('popovertarget')).toBe(b.closest('[popover]').id)
     expect(b.getAttribute('popovertargetaction')).toBe('hide')
@@ -943,18 +946,33 @@ async function editing(more = {}) {
   return { ...view, popover, form: within(popover), shown }
 }
 
-test('048 FE1: every Move menu ends with a divider, then Edit and Delete, after the columns and any Up and Down', async () => {
+test('048 FE1, 105 AC7: every Move menu ends with a divider, then Edit, after the columns and any Up and Down; no Delete', async () => {
   await open(board(ALL))
   const items = (id) => [...menuOf(id).children].slice(1).map((el) => (el.tagName === 'HR' ? '—' : el.textContent))
-  expect(items(2)).toEqual(['In progress', 'Review', 'Done', '—', 'Up', 'Down', '—', 'Edit', 'Delete'])
-  expect(items(7)).toEqual(['Backlog', 'Review', 'Done', '—', 'Edit', 'Delete'])
+  expect(items(2)).toEqual(['In progress', 'Review', 'Done', '—', 'Up', 'Down', '—', 'Edit'])
+  expect(items(7)).toEqual(['Backlog', 'Review', 'Done', '—', 'Edit'])
   for (const id of [1, 2, 3, 7, 12, 9]) {
-    expect(items(id).slice(-3)).toEqual(['—', 'Edit', 'Delete'])
-    for (const name of ['Edit', 'Delete']) {
-      const item = within(menuOf(id)).getByRole('button', { name, hidden: true })
-      expect(item.getAttribute('popovertarget')).toBe(`move-${id}`)
-      expect(item.getAttribute('popovertargetaction')).toBe('hide')
-    }
+    expect(items(id).slice(-2)).toEqual(['—', 'Edit'])
+    expect(within(menuOf(id)).queryByRole('button', { name: /Delete/, hidden: true })).toBeNull()
+    const item = within(menuOf(id)).getByRole('button', { name: 'Edit', hidden: true })
+    expect(item.getAttribute('popovertarget')).toBe(`move-${id}`)
+    expect(item.getAttribute('popovertargetaction')).toBe('hide')
+  }
+})
+
+test('105 AC1: every card in every column has its own Delete button, named Delete #id, first in its row, outside the Move menu', async () => {
+  const running = card(13, 'in_progress', { stage: 'build', run: { id: 41, status: 'running' }, started_at: '2026-10-18T01:02:00Z' })
+  const stalled = card(16, 'in_progress', { stage: 'build', run: { id: 42, status: 'failed' }, stalled: true })
+  const escalated = card(11, 'review', { stage: 'human_review', escalated: true })
+  await open(board({ ...ALL, in_progress: [running, stalled, ...ALL.in_progress], review: [escalated, ...ALL.review] }))
+  for (const id of [1, 2, 3, 13, 16, 7, 11, 12, 9]) {
+    const remove = deleteOf(id)
+    expect(remove.textContent).toBe('Delete')
+    expect(remove.getAttribute('type')).toBe('button')
+    expect(menuOf(id).contains(remove)).toBe(false)
+    expect(remove.className).toMatch(cls('text-danger'))
+    expect(remove.parentElement.firstElementChild).toBe(remove) // 105 Q1: first in the row, then Move (Retry sits above)
+    expect(remove.nextElementSibling).toBe(moveOf(id))
   }
 })
 
@@ -1053,7 +1071,7 @@ test('048 FE7: + New task clicked over an Edit keeps the popover open on the emp
   expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toEqual([])
 })
 
-test('048 FE8: Delete opens a modal <dialog> through showModal, named Delete #14 Export CSV?, with the Q8 text, Cancel, and a danger Delete', async () => {
+test("048 FE8, 105 AC2: the card's Delete opens a modal <dialog> through showModal, named Delete #14 Export CSV?, with the Q8 text, Cancel, and a danger Delete", async () => {
   let shown
   const showModal = vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function showModal() {
     shown = this.textContent
@@ -1061,7 +1079,7 @@ test('048 FE8: Delete opens a modal <dialog> through showModal, named Delete #14
   })
   await open(board({ backlog: [CSV] }))
   expect(screen.queryByRole('dialog')).toBeNull()
-  pick(14, 'Delete')
+  askDelete(14)
   expect(showModal).toHaveBeenCalledOnce()
   expect(shown).toContain('Delete #14 Export CSV?') // its body rendered first, so showModal can focus Cancel
   const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
@@ -1074,10 +1092,10 @@ test('048 FE8: Delete opens a modal <dialog> through showModal, named Delete #14
   expect(remove.className).toMatch(cls('text-surface'))
 })
 
-test("048 FE9: the dialog's Delete sends DELETE, closes, reloads without the card, says Deleted #14, and focuses + New task", async () => {
+test("048 FE9, 105 AC3: the dialog's Delete sends DELETE, closes, reloads without the card, says Deleted #14, and focuses + New task", async () => {
   const { fetch, responses } = await open(board({ backlog: [CSV, card(15, 'backlog')] }), { 'DELETE /api/tasks/14': [204] })
   responses[`GET ${BOARD}`] = [200, board({ backlog: [card(15, 'backlog')] })]
-  pick(14, 'Delete')
+  askDelete(14)
   const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
   fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
@@ -1089,29 +1107,29 @@ test("048 FE9: the dialog's Delete sends DELETE, closes, reloads without the car
   expect(screen.queryByRole('alert')).toBeNull()
 })
 
-test("048 FE10: Cancel, or the dialog closing on Esc, sends nothing and gives focus back to the card's Move button", async () => {
+test("048 FE10, 105 AC4: Cancel, or the dialog closing on Esc, sends nothing and gives focus back to the card's Delete button", async () => {
   const { fetch } = await open(board({ backlog: [CSV, card(15, 'backlog')] }), { 'DELETE /api/tasks/15': [204] })
   // a delete first leaves returnValue 'deleted' on the dialog, which the next open must clear
-  pick(15, 'Delete')
+  askDelete(15)
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
-  pick(14, 'Delete')
+  askDelete(14)
   fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
   expect(screen.queryByRole('dialog')).toBeNull()
-  expect(document.activeElement).toBe(moveOf(14))
+  expect(document.activeElement).toBe(deleteOf(14))
   document.activeElement.blur()
-  pick(14, 'Delete')
+  askDelete(14)
   const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
   act(() => dialog.close()) // what Esc does after its cancel event
   expect(dialog.open).toBe(false)
-  expect(document.activeElement).toBe(moveOf(14))
+  expect(document.activeElement).toBe(deleteOf(14))
   expect(sends(fetch, 'DELETE', '/api/tasks/14')).toEqual([])
   expect(loads(fetch)).toBe(2)
 })
 
-test('048 FE11: a refused delete shows its detail inside the dialog, which stays open; the board alert stays empty', async () => {
+test('048 FE11, 105 AC5: a refused delete shows its detail inside the dialog, which stays open; the board alert stays empty', async () => {
   const { fetch } = await open(board({ backlog: [CSV] }), { 'DELETE /api/tasks/14': ACTIVE })
-  pick(14, 'Delete')
+  askDelete(14)
   const dialog = screen.getByRole('dialog', { name: 'Delete #14 Export CSV?' })
   fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
   const alert = await within(dialog).findByRole('alert')
@@ -1123,7 +1141,7 @@ test('048 FE11: a refused delete shows its detail inside the dialog, which stays
   expect(loads(fetch)).toBe(1)
 })
 
-test('048 FE12: Delete is disabled, with why in its title, on the running card only; Edit is enabled on every card', async () => {
+test("048 FE12, 105 AC6: the card's Delete is disabled, with why in its title, on the running card only; Edit is enabled on every card", async () => {
   const running = card(13, 'in_progress', { stage: 'build', run: { id: 41, status: 'running' }, started_at: '2026-10-18T01:02:00Z' })
   const stalled = card(16, 'in_progress', { stage: 'build', run: { id: 42, status: 'failed' }, stalled: true })
   await open(board({ ...ALL, in_progress: [running, stalled, ...ALL.in_progress] }))
@@ -1131,7 +1149,7 @@ test('048 FE12: Delete is disabled, with why in its title, on the running card o
   for (const id of [1, 2, 3, 13, 16, 7, 12, 9]) {
     const menu = within(menuOf(id))
     expect(menu.getByRole('button', { name: 'Edit', hidden: true }).disabled).toBe(false)
-    const remove = menu.getByRole('button', { name: 'Delete', hidden: true })
+    const remove = deleteOf(id)
     expect(remove.disabled).toBe(id === 13)
     expect(remove.getAttribute('title')).toBe(id === 13 ? 'Stop the run to delete this task' : null)
   }
