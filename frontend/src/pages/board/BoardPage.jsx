@@ -116,9 +116,9 @@ const cardLook = [
 
 /**
  * Q4: a native popover of plain buttons; each hides it natively as it's chosen (FE10). `nudges` are Up and Down.
- * 048 FE1, FE12: then a divider, Edit, and Delete, which a running card disables (Q10).
+ * 048 FE1, FE12: then a divider and Edit. 105: Delete left the menu for its own card button.
  */
-function MoveMenu({ card, moves, nudges, running, onEdit, onDelete }) {
+function MoveMenu({ card, moves, nudges, onEdit }) {
   const id = `move-${card.id}`
   const item = (label, pick, { className = '', ...more } = {}) => (
     <button
@@ -157,11 +157,6 @@ function MoveMenu({ card, moves, nudges, running, onEdit, onDelete }) {
         {nudges.map(([label, pick]) => item(label, pick))}
         <hr className="my-1 border-line" />
         {item('Edit', () => onEdit(card))}
-        {item('Delete', () => onDelete(card), {
-          disabled: running,
-          title: running ? 'Stop the run to delete this task' : undefined,
-          className: 'text-danger',
-        })}
       </div>
     </>
   )
@@ -204,7 +199,19 @@ function Card({ card, canRun, runTitle, onRun, moves, nudges, onEdit, onDelete, 
         </p>
       )}
       <div className="flex justify-end gap-2">
-        <MoveMenu card={card} moves={moves} nudges={nudges} running={running} onEdit={onEdit} onDelete={onDelete} />
+        {/* 105 Q1: first, away from Run; the label, not only the danger color, says what it does. 048 Q10: a running card disables it */}
+        <button
+          type="button"
+          onClick={() => onDelete(card)}
+          disabled={running}
+          title={running ? 'Stop the run to delete this task' : undefined}
+          aria-label={`Delete #${card.id}`}
+          data-delete={card.id}
+          className={`${smallButton} text-danger`}
+        >
+          Delete
+        </button>
+        <MoveMenu card={card} moves={moves} nudges={nudges} onEdit={onEdit} />
         {card.status === 'backlog' && runButton('Run')}
       </div>
     </li>
@@ -482,10 +489,13 @@ export function BoardPage() {
     refresh()
   }
 
-  /** FE9, FE10, Q9: Cancel, Esc, or a delete closed it: focus goes to + New task once the card is gone, else to its Move button. */
+  /**
+   * FE9, FE10, Q9: Cancel, Esc, or a delete closed it: focus goes to + New task once the card is gone, else
+   * (105 Q2) to the card's Delete button, the dialog's opener.
+   */
   function deleteClosed(event) {
     const gone = event.currentTarget.returnValue === 'deleted'
-    document.querySelector(gone ? '[popovertarget="new-task"]' : moveButton(doomed.id))?.focus()
+    document.querySelector(gone ? '[popovertarget="new-task"]' : `[data-delete="${doomed.id}"]`)?.focus()
     setDoomed(null)
   }
 
