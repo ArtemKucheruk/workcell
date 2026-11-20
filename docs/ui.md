@@ -46,8 +46,9 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
-  `warning` pill shown when above 0), **Context**, **Factories**, and **Settings**, and the current page's
-  project opens by itself with its current link marked. **Factories** is also marked in the factory designer.
+  `warning` pill shown when above 0), **Context**, **Workflows** (`/projects/{id}/factories`, item 14), and
+  **Settings**, and the current page's project opens by itself with its current link marked. **Workflows** is also
+  marked in the factory designer.
 - Each project row, at its right, and the workspace switcher, beside it, have a `⋯` button
   (`Actions for <project>`, `Actions for workspace <name>`) that opens a native popover menu.
   The project's holds **Rename**, a **Settings** link, a muted `Move to workspace` caption with
@@ -94,7 +95,7 @@ first. Below `md` the sidebar is a `<dialog>` drawer behind a **Menu** button: E
 backdrop close it, and focus returns to the button. The board, review, code, and factory designer
 pages use the full width beside it, and the other pages keep a max width.
 
-The project pages (Board, Code, Reviews, Context, the Factories list, Settings) share one project header:
+The project pages (Board, Code, Reviews, Context, the Workflows list, Settings) share one project header:
 `<name> · <workspace>`, with the workspace linking to `/workspaces/{id}`, then the factory
 state: `Factory: ready ✓`, else `Factory: <state>` (`none`, `uncommitted`, or `legacy`, MVP §3.2
 step 4) in the `warning` token, linking to the project's Settings.
@@ -106,7 +107,7 @@ last item is the current page, as plain text: `#12` on the task page, `Review` o
 page, the agent's label on the transcript page, and `Code` on the code page, which has no
 `#id`. The `›` separators are hidden from screen readers. Its names come from the page's own
 view-model, as the project and workspace are now. The factory designer opens with
-`workspace › project › Factories › <name>` instead, Factories linking to `/projects/{id}/factories` and the
+`workspace › project › Workflows › <name>` instead, Workflows linking to `/projects/{id}/factories` and the
 factory's name the current page. The other pages have no breadcrumb: the sidebar and the project header cover
 them.
 
@@ -448,33 +449,43 @@ Loading, failures, times, and motion are the same on every page:
     - **Danger zone**: **Delete workspace** opens the sidebar's workspace delete dialog (§8.4).
       On 204 the app goes to `/`; a workspace that still holds projects gets its 409 inside the
       dialog.
-14. **Factories** (`/projects/{id}/factories`, and the designer at `/projects/{id}/factories/{fid}`;
+14. **Workflows** (`/projects/{id}/factories`, and the designer at `/projects/{id}/factories/{fid}`;
     wireframe §8.7)
     - A factory is a design: a graph of agents and conditions saved in the app
       (`docs/data-model-and-api.md §6.1`). Runs still use the `.claude/` files that Create factory
-      or a design's **Write to repo** wrote.
+      or a design's **Write to repo** wrote. Each design has a kind, fixed at creation: a
+      **workflow** (the factory loop, run on board tasks) or an **automation** (run on the repo
+      itself, with no task, e.g. Security audit; running and scheduling them are later pages).
     - The list loads `GET /api/pages/projects/{id}` (the project header),
       `GET /api/projects/{id}/factories`, and `GET /api/factory-templates` once each, with no
       polling. The list loads again after each of its actions. The title reads
-      `<project> · Factories`. **+ New factory** sits in the header.
+      `<project> · Workflows`.
+    - Under the project header, two sections, each an `h2` with its own **+ New** at its right:
+      **Workflows** (`kind` workflow, **+ New workflow**), then **Automations** (`kind`
+      automation, **+ New automation**). Each lists only its kind, in the API's order.
     - Each row: the name, linking to the designer, the node count (`10 nodes`, `1 node`), and
-      Updated as a relative time. With none, `No factories yet.`
-    - **+ New factory** opens a native popover with a `Name` field, a `Template` fieldset, and
-      **Create** (`POST /api/projects/{id}/factories` `{"name","template"}`). The fieldset has
-      one radio per template in the API's order, each labeled by its name and described
-      (`aria-describedby`, muted) by its one-line description; `Standard` is checked. A failed
-      templates request shows its detail (`role="alert"`) in the fieldset instead, and Create
-      still posts the name. On 201 the designer opens on the chosen template's graph. A
-      refusal (`factory default already exists`) shows inside the popover, which keeps the typed
-      name.
+      Updated as a relative time. A section with none says `No workflows yet.` or
+      `No automations yet.`
+    - **+ New workflow** and **+ New automation** each open their own native popover (own id and
+      anchor) with a `Name` field, a `Template` fieldset, and **Create**
+      (`POST /api/projects/{id}/factories` `{"name","template","kind"}`, kind the section's).
+      The fieldset has one radio per template of the section's kind (the template's `kind`) in
+      the API's order, each labeled by its name and described (`aria-describedby`, muted) by its
+      one-line description; `Standard` is checked for workflows, the first (`Security audit`) for
+      automations. A failed templates request shows its detail (`role="alert"`) in the fieldset
+      instead, and Create still posts the name with a null template. On 201 the designer opens
+      on the chosen template's graph. A refusal (`factory default already exists`) shows inside
+      the popover that sent it, which keeps the typed name.
     - **Rename** (`Rename <name>`) works in place, the sidebar's way: Enter sends
       `PUT /api/factories/{fid}` `{"name"}`, Esc or blur cancels, and a refusal shows beside the
       field, which stays. **Delete** (`Delete <name>`) opens the delete dialog titled
-      `Delete factory <name>?`: "This removes the factory's design from the app. Files in the
-      repo, such as the ones Create factory wrote, stay."
-    - The designer loads `GET /api/factories/{fid}` once, with no polling, and is a wide page. A
-      factory of another project at this URL is the not-found page. The title reads
-      `<name> · <project>`. The breadcrumb, then an `h1` with the name, and at its right a
+      `Delete workflow <name>?` or `Delete automation <name>?`: "This removes the factory's
+      design from the app. Files in the repo, such as the ones Create factory wrote, stay." After
+      a delete, focus goes to the + New of the row's section.
+    - The designer is the same for both kinds. It loads `GET /api/factories/{fid}` once, with no
+      polling, and is a wide page. A factory of another project at this URL is the not-found
+      page. The title reads `<name> · <project>`. The breadcrumb, then an `h1` with the name, the
+      kind beside it as muted text (`Workflow` or `Automation`), and at its right a
       `role="status"` reading `Unsaved changes` while unsaved, **Files**, and **Save**.
     - The palette (left) lists **Agents** (Spec writer, Builder, Reviewer, Approver, Custom agent)
       and **Conditions** (All reviews PASS, Any review CHANGES, Rounds used < N, Decision
@@ -667,7 +678,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │     Code                 │
 │     Reviews          (2) │  ← waiting on me or escalated, when above 0: a warning pill
 │     Context              │
-│     Factories            │
+│     Workflows            │  ← /projects/{id}/factories: workflows and automations
 │     Settings             │
 │ ▸ web                  ⋯ │
 │                          │
@@ -754,14 +765,19 @@ Branch [main ▾]: a native <select>, the checked-out branch first (the working 
 ### 8.7 Factory designer
 ```
 /projects/3/factories
-api-server · personal                                   Factory: ready ✓   [+ New factory]
+api-server · personal                                   Factory: ready ✓
+Workflows                                                           [+ New workflow]
  Name        Nodes       Updated
  default     10 nodes    5m ago        [Rename] [Delete]
  nightly     12 nodes    yesterday     [Rename] [Delete]
+Automations                                                       [+ New automation]
+ No automations yet.
+h2 sections; each + New offers its kind's templates (Standard / Security audit checked)
 
 /projects/3/factories/7  (wide)
-personal › api-server › Factories › default
-default                                                Unsaved changes   [Files] [Save]
+personal › api-server › Workflows › default
+default  Workflow                                      Unsaved changes   [Files] [Save]
+         ↑ the kind, muted text (Workflow or Automation)
 ┌ [« Palette] ────┬─ dotted background ───────────────────────────────┬─ Node ─────────────────┐
 │ Agents          │ ┌─────────┐   ┌───────────────┐      ┌───────────┐ │ Name                   │
 │  Spec writer    │ │ Start   ●──►● spec-writer   ●──×──►● builder   │ │ [builder_____________] │

@@ -6,11 +6,11 @@ const ofProject = (projectId) => `/api/projects/${encodeURIComponent(projectId)}
 
 export const listFactories = (projectId) => api(ofProject(projectId))
 
-/** 088: `template` is a key from listTemplates; null means Standard. */
-export const addFactory = (projectId, name, template) =>
-  api(ofProject(projectId), { method: 'POST', body: { name, template } })
+/** 088: `template` is a key from listTemplates; null means Standard. 101: `kind` is 'workflow' or 'automation'. */
+export const addFactory = (projectId, name, template, kind) =>
+  api(ofProject(projectId), { method: 'POST', body: { name, template, kind } })
 
-/** 088: + New factory's templates, `[{key, name, description}]`, Standard first. */
+/** 088: + New's templates, `[{key, name, description, kind}]`, Standard first; 101 Q1: kind picks the section. */
 export const listTemplates = () => api('/api/factory-templates')
 
 export const getFactory = (id) => api(one(id))

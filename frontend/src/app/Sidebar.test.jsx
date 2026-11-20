@@ -166,7 +166,7 @@ test('FE10 (Q8): Cancel or Esc hides the field and returns focus to + New worksp
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('FE11, 042 FE34, 051 FE6: each project is a disclosure button for Board, Code, Reviews, Context, Factories, and Settings', async () => {
+test('FE11, 042 FE34, 051 FE6, 101 AC10: each project is a disclosure button for Board, Code, Reviews, Context, Workflows, and Settings', async () => {
   await open('/')
   const button = projectButton('api-server')
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -180,7 +180,7 @@ test('FE11, 042 FE34, 051 FE6: each project is a disclosure button for Board, Co
     ['Code', '/projects/3/code'],
     ['Reviews', '/projects/3/reviews'],
     ['Context', '/projects/3/context'],
-    ['Factories', '/projects/3/factories'],
+    ['Workflows', '/projects/3/factories'],
     ['Settings', '/projects/3/settings'],
   ])
   fireEvent.click(button)
@@ -188,12 +188,12 @@ test('FE11, 042 FE34, 051 FE6: each project is a disclosure button for Board, Co
   expect(within(list).queryAllByRole('link')).toEqual([])
 })
 
-test('051 FE6: Factories is the current page on the list and in a factory\'s designer, and no other link is', async () => {
+test('051 FE6, 101 AC10: Workflows is the current page on the list and in a factory\'s designer, and no other link is', async () => {
   for (const path of ['/projects/3/factories', '/projects/3/factories/7']) {
     const { unmount } = await open(path)
     const links = linksOf('api-server').getAllByRole('link')
-    expect(links.filter((a) => a.getAttribute('aria-current') === 'page').map((a) => a.textContent)).toEqual(['Factories'])
-    expect(linksOf('api-server').getByRole('link', { name: 'Factories' }).className).toMatch(accent)
+    expect(links.filter((a) => a.getAttribute('aria-current') === 'page').map((a) => a.textContent)).toEqual(['Workflows'])
+    expect(linksOf('api-server').getByRole('link', { name: 'Workflows' }).className).toMatch(accent)
     unmount()
   }
 })

@@ -124,8 +124,10 @@ CREATE TABLE factories (                  -- a project's named factory designs (
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   graph TEXT NOT NULL,                    -- the compact JSON of §6.1's <Graph>
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
-CREATE UNIQUE INDEX factories_name ON factories(project_id, name);  -- a name once per project
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'workflow' CHECK (kind IN ('workflow','automation')));  -- fixed at creation: a workflow
+                                          -- runs on board tasks, an automation on the repo with no task
+CREATE UNIQUE INDEX factories_name ON factories(project_id, name);  -- a name once per project, across both kinds
 
 CREATE TABLE claude_accounts (            -- Claude logins (MVP §4.6), each in its own CLAUDE_CONFIG_DIR
   id INTEGER PRIMARY KEY,
@@ -164,7 +166,9 @@ CREATE TABLE settings (                   -- the app's one settings row (Setting
 INSERT OR IGNORE INTO settings (id) VALUES (1);  -- seeded on every startup, never overwritten
 ```
 `db.init()` brings an old database up to date: it drops `one_active_run`, adds `runs.account_id` (NULL on old
-rows) and `claude_accounts.email` (NULL until the next status check), and seeds the settings row.
+rows), `claude_accounts.email` (NULL until the next status check), and `factories.kind` (`ALTER TABLE factories ADD
+COLUMN kind TEXT NOT NULL DEFAULT 'workflow' CHECK (…)`, so every existing design becomes a workflow), and seeds the
+settings row.
 
 A run's `finish()` (succeeded, failed, or stopped), and the startup sweep that fails leftover running runs, read
 its stream-json log for `rate_limit_event`s and upsert one `usage_snapshots` row: the last valid event, on the
@@ -386,19 +390,25 @@ POST /api/projects/3/import                                       (Import, fctl 
   # 413 a body over 50 MB, over 500 MB unpacked, or a file over 5 MB · 422 not a zip, a refused entry, bad task.json
   # 409 the import_key is another project's task, or that task has a run going · 404 unknown project
 
-GET  /api/projects/3/factories                                    (Factories list)
-← 200 [{"id":7,"name":"default","nodes":10,"created_at":"2026-10-21T08:00:00Z","updated_at":"2026-10-21T09:30:00Z"}]
-  # by name, then id; [] with none. nodes = len(graph.nodes), start and conditions included. No graph here.
+GET  /api/projects/3/factories                                    (Workflows page: both sections)
+← 200 [{"id":7,"name":"default","kind":"workflow","nodes":10,"created_at":"2026-10-21T08:00:00Z",
+        "updated_at":"2026-10-21T09:30:00Z"}]
+  # by name, then id, across both kinds; [] with none. nodes = len(graph.nodes), start and conditions included.
+  #   No graph here. The page splits the list by kind
   # 404 {"detail":"Project #99 not found"}
 
-GET  /api/factory-templates                                       (+ New factory's Template radios)
-← 200 [{"key":"standard","name":"Standard","description":"Spec, build, then security, UX, UI, …"},
-       {"key":"bug-fix",…}, {"key":"security-audit",…}, {"key":"ml-experiment",…}, {"key":"test-coverage",…}]
-  # in this order, Standard first; each description is one line. The graphs are listed below
+GET  /api/factory-templates                                       (+ New workflow's / + New automation's radios)
+← 200 [{"key":"standard","name":"Standard","description":"Spec, build, then security, UX, UI, …","kind":"workflow"},
+       {"key":"bug-fix",…,"kind":"workflow"}, {"key":"security-audit",…,"kind":"automation"},
+       {"key":"ml-experiment",…,"kind":"workflow"}, {"key":"test-coverage",…,"kind":"automation"}]
+  # in this order, Standard first; each description is one line. The graphs are listed below. kind says which
+  #   section offers it: + New automation offers the automation ones (repo runs), + New workflow the rest
 
-POST /api/projects/3/factories                                    (+ New factory)
-→ {"name":"default","template":"bug-fix"}
+POST /api/projects/3/factories                                    (+ New workflow, + New automation)
+→ {"name":"default","template":"bug-fix","kind":"workflow"}
 ← 201 <Factory>, whose graph is the template's graph (below), with created_at = updated_at
+  # kind is optional: left out → "workflow". Anything but "workflow" or "automation" (null and numbers too) →
+  #   422 FastAPI's list detail, and nothing is written. Any template goes with either kind
   # template is optional: left out or null → standard, the default graph
   # name is trimmed: 422 {"detail":"name must not be blank"}; missing, null, or not a string → 422 FastAPI's list detail
   # 422 {"detail":"unknown template nightly: use standard, bug-fix, security-audit, ml-experiment, or test-coverage"};
@@ -414,6 +424,7 @@ PUT  /api/factories/7                                             (designer Save
 → {"graph":<Graph>}  |  {"name":"nightly"}  |  both, applied together
 ← 200 <Factory> after the update; updated_at is now, created_at unchanged
   # 422 {"detail":"send at least one of: name, graph"} for {} or only unknown keys
+  # kind is ignored like any unknown key: it is fixed at creation
   # name or graph sent as null or the wrong type → 422 FastAPI's list detail
   # name: trimmed, blank → 422 as POST; 409 {"detail":"factory nightly already exists"} when another factory of the
   #   same project has it; its own name → 200
@@ -452,7 +463,7 @@ POST /api/factories/7/write                                       (Files → Wri
   # 409 {"detail":".claude/skills is a symlink"}   (any component from .claude down; Create factory too)
 
 <Factory> = {"id":7,"project_id":3,"project":"api-server","workspace_id":2,"workspace":"personal",
-             "name":"default","graph":<Graph>,"created_at":"…","updated_at":"…"}
+             "name":"default","kind":"workflow","graph":<Graph>,"created_at":"…","updated_at":"…"}
              # project and workspace: the names as they are now (for the breadcrumb)
 ```
 

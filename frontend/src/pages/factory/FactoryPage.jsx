@@ -33,6 +33,7 @@ const PALETTE = new Set([...AGENTS, ...CONDITIONS])
 // an arrowhead on every edge, drawn in the edge's stroke: defaultMarkerColor={null} leaves it to index.css's variable
 const EDGE_OPTIONS = { markerEnd: { type: MarkerType.ArrowClosed } }
 const DELETE_KEYS = ['Backspace', 'Delete']
+const KIND_LABELS = { workflow: 'Workflow', automation: 'Automation' } // 101 AC18
 
 /**
  * Round-1 review-ui: the first view is readable. The whole loop shows when it fits at 0.8× or more (up to 1×), centred;
@@ -175,12 +176,15 @@ function Designer({ factory }) {
         <Breadcrumbs
           items={[
             ...projectTrail(factory),
-            { label: 'Factories', to: `/projects/${factory.project_id}/factories` },
+            // 101: the list page's sidebar label
+            { label: 'Workflows', to: `/projects/${factory.project_id}/factories` },
             { label: factory.name },
           ]}
         />
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h1 className="mr-auto wrap-anywhere">{factory.name}</h1>
+          <h1 className="wrap-anywhere">{factory.name}</h1>
+          {/* 101 AC18, Q7: the fixed kind as muted text beside the name, not color alone */}
+          <p className={`mr-auto text-sm ${muted}`}>{KIND_LABELS[factory.kind]}</p>
           <p role="status" className={`text-sm ${muted}`}>
             {dirty ? 'Unsaved changes' : ''}
           </p>

@@ -325,7 +325,8 @@ INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_
 
 
 FACTORY_COLUMNS = [("id", "INTEGER", 0), ("project_id", "INTEGER", 1), ("name", "TEXT", 1), ("graph", "TEXT", 1),
-                   ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1)]  # 051 BE1: (name, type, notnull)
+                   ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1),
+                   ("kind", "TEXT", 1)]  # 051 BE1: (name, type, notnull); 101 AC1: kind
 
 
 def assert_factories_table():
@@ -354,6 +355,43 @@ def test_old_db_gets_factories_table():  # 051 BE1: a factory.db made before thi
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]
         assert conn.execute("SELECT id FROM workspaces").fetchall() == [(1,)]
+
+
+FACTORY_ROW = f"INSERT INTO factories (project_id, name, graph, created_at, updated_at) VALUES (1, ?, '{{}}', '{NOW}', '{NOW}')"
+
+
+def test_fresh_db_factory_kind():  # 101 AC1
+    start_app()
+    with closing(db.connect()) as conn:
+        [kind] = [c for c in conn.execute("PRAGMA table_info(factories)") if c[1] == "kind"]
+        assert (kind[2], kind[3], kind[4]) == ("TEXT", 1, "'workflow'")
+        assert "CHECK (kind IN ('workflow','automation'))" in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'factories'").fetchone()[0]
+        conn.execute("INSERT INTO workspaces (name, created_at) VALUES ('w', ?)", (NOW,))
+        conn.execute("INSERT INTO projects (workspace_id, name, path, default_branch, created_at)"
+                     " VALUES (1, 'p', '/p', 'main', ?)", (NOW,))
+        conn.execute(FACTORY_ROW, ("a",))
+        assert conn.execute("SELECT kind FROM factories").fetchall() == [("workflow",)]
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE factories SET kind = 'nightly'")
+
+
+def test_old_db_gets_factory_kind():  # 101 AC2
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + """
+CREATE TABLE factories (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, graph TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+""")
+        conn.execute(FACTORY_ROW, ("old",))
+        conn.commit()
+    db.init()
+    db.init()  # a second init skips the ALTER
+    with closing(db.connect()) as conn:
+        assert [c[1] for c in conn.execute("PRAGMA table_info(factories)")].count("kind") == 1
+        assert conn.execute("SELECT name, kind FROM factories").fetchall() == [("old", "workflow")]
+    assert_factories_table()
 
 
 def accounts() -> list[tuple]:

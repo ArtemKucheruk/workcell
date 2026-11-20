@@ -76,8 +76,8 @@ def test_create_factory(client, project):  # BE2
     f = r.json()
     [(workspace_id, workspace)] = sql("SELECT w.id, w.name FROM workspaces w JOIN projects p ON p.workspace_id = w.id"
                                       " WHERE p.id = ?", (project,))
-    assert set(f) == {"id", "project_id", "project", "workspace_id", "workspace", "name", "graph", "created_at",
-                      "updated_at"}
+    assert set(f) == {"id", "project_id", "project", "workspace_id", "workspace", "name", "kind", "graph",
+                      "created_at", "updated_at"}
     assert (f["project_id"], f["project"], f["workspace_id"], f["workspace"], f["name"]) == (
         project, "api", workspace_id, workspace, "default")
     assert TIMESTAMP.fullmatch(f["created_at"])
@@ -188,15 +188,16 @@ def test_list_templates(client):  # 088 AC1
     assert r.status_code == 200
     assert r.json() == [
         {"key": "standard", "name": "Standard", "description": "Spec, build, then security, UX, UI, and code reviews;"
-         " up to 2 rounds; the approver decides."},
+         " up to 2 rounds; the approver decides.", "kind": "workflow"},
         {"key": "bug-fix", "name": "Bug fix", "description": "Reproduce the bug as a failing test, fix its root cause,"
-         " then code and security reviews."},
+         " then code and security reviews.", "kind": "workflow"},
         {"key": "security-audit", "name": "Security audit", "description": "Audit dependencies, secrets, and code;"
-         " write SECURITY-AUDIT.md and fix what is safe; security review. Built for scheduled runs."},
+         " write SECURITY-AUDIT.md and fix what is safe; security review. Built for scheduled runs.",
+         "kind": "automation"},
         {"key": "ml-experiment", "name": "ML experiment", "description": "Check the data and baseline, run the"
-         " experiment, and gate it on eval metrics against the baseline."},
+         " experiment, and gate it on eval metrics against the baseline.", "kind": "workflow"},
         {"key": "test-coverage", "name": "Test coverage", "description": "Find risky untested code and pin its"
-         " behavior with tests, leaving production code unchanged."},
+         " behavior with tests, leaving production code unchanged.", "kind": "automation"},
     ]
     assert all(t["description"].strip() and "\n" not in t["description"] for t in r.json())
 
@@ -256,8 +257,9 @@ def test_list_factories(client, project):  # BE9
     beta = created(client, project, "Beta")
     r = client.get(f"/api/projects/{project}/factories")
     assert r.status_code == 200
-    assert r.json() == [{"id": f["id"], "name": f["name"], "nodes": 10, "created_at": f["created_at"],
-                         "updated_at": f["updated_at"]} for f in (beta, default, nightly)]  # SQLite's BINARY order
+    assert r.json() == [{"id": f["id"], "name": f["name"], "kind": "workflow", "nodes": 10,
+                         "created_at": f["created_at"], "updated_at": f["updated_at"]}
+                        for f in (beta, default, nightly)]  # SQLite's BINARY order
     r = client.get("/api/projects/999/factories")
     assert (r.status_code, r.json()) == (404, {"detail": "Project #999 not found"})
 
