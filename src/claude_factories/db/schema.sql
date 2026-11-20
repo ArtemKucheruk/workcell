@@ -114,7 +114,9 @@ CREATE TABLE IF NOT EXISTS factories (    -- 051: a project's named factory desi
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   graph TEXT NOT NULL,                    -- the compact JSON of docs/data-model-and-api.md §6.1's <Graph>
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  -- 101: a workflow runs on board tasks, an automation on the repo; fixed at creation. db.init() adds it
+  kind TEXT NOT NULL DEFAULT 'workflow' CHECK (kind IN ('workflow','automation')));
 CREATE UNIQUE INDEX IF NOT EXISTS factories_name ON factories(project_id, name);
 
 CREATE TABLE IF NOT EXISTS claude_accounts (  -- 056: Claude logins, each its own CLAUDE_CONFIG_DIR; runs use the active one

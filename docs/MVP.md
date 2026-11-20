@@ -129,8 +129,8 @@ the factory's reviewers run it this way.
    decides, not the one on disk. Meanwhile the board's automatic `factory/` sync
    (`docs/data-model-and-api.md §6.1` import-factory) keeps showing the bootstrap's jobs.
 
-Design a factory: Project → **Factories** → **+ New factory** (a name and a template) → the designer
-opens on the template's graph → drag or click agents and conditions from the palette, connect handles, and edit the
+Design a factory: Project → **Workflows** → **+ New workflow** or **+ New automation** (a name and a template) →
+the designer opens on the template's graph → drag or click agents and conditions from the palette, connect handles, and edit the
 selected node in the side panel → **Save** or Ctrl/⌘+S. Save shows a refusal (a bad graph,
 `docs/data-model-and-api.md §6.1`) beside it, and the design stays unsaved. → **Files** shows the
 last saved design compiled into Claude Code files (`docs/claude-code.md §7.3`):
@@ -140,6 +140,12 @@ writes them with step 2's writer: existing files skipped unless *Overwrite*, the
 skipped lists, and a commit hint naming `.claude/skills/<factory-slug>`. A design reaches
 `.claude/` only through Write to repo, and runs use `.claude/skills/factory/`: only a factory
 whose name slugs to `factory` writes the skill runs start, and step 4 is unchanged.
+
+A design's kind is fixed when it is created (101): a **workflow** is the factory loop, run on board tasks; an
+**automation** runs on the repo itself, with no task (Security audit, Test coverage). The Workflows page lists
+each kind in its own section with its own **+ New**: + New automation offers the templates built for repo runs
+(Security audit, Test coverage), + New workflow the rest, Standard checked. The designer is the same for both and
+shows the kind beside the name. Running an automation and scheduling it come later (§9).
 
 The templates (088; graphs in `docs/data-model-and-api.md §6.1`, agents in `docs/claude-code.md §7.3`):
 - **Standard** (the default): the default loop. Spec, build, then security, UX, UI, and code reviews; up to 2
@@ -621,7 +627,8 @@ Rules:
 - `fctl serve`, `fctl setup`, and the CLI in §7.2.
 - Workspaces, projects, and `/factory-connect`.
 - Create factory (templates → `.claude/`).
-- Factory designer: named factories per project, designed on a canvas, with any reviewer set (§3.2).
+- Factory designer: named factories per project, designed on a canvas, with any reviewer set (§3.2), each a
+  workflow or an automation.
 - Tasks, the board with drag and drop, Run / Run next / Stop / Retry, and run logs.
 - Subscription-only runs with the auth check (§4.3), one per task, up to a global cap at once.
 - Headless runs in worktrees, rework on Request changes, and takeover by
@@ -650,7 +657,8 @@ Rules:
 - `fctl export` of a task to markdown, search, labels, and priorities.
 - Worktree browsing on the code page.
 - Scheduled runs (cron checkup agents, other codebase automations), each a run of its own kind
-  beside `factory` on the Agents page.
+  beside `factory` on the Agents page. What they run are automations, the designs of kind `automation` made on the
+  Workflows page (§3.2); scheduling them moves to its own Scheduler page.
 
 ---
 

@@ -23,7 +23,7 @@ def list_factories(project_id: int, projects: Projects, factories: Factories) ->
 @router.post("/api/projects/{project_id}/factories", status_code=201)
 def create_factory(project_id: int, body: NewFactory, projects: Projects, factories: Factories,
                    tasks: Tasks) -> FactoryDesign:
-    return handler.create_factory(projects, factories, tasks, project_id, body.name, body.template)
+    return handler.create_factory(projects, factories, tasks, project_id, body.name, body.template, body.kind)
 
 
 @router.get("/api/factories/{factory_id}")

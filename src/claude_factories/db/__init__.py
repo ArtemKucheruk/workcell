@@ -58,3 +58,7 @@ def init() -> None:
         # 095 AC10: the account's label; usage_snapshots comes from IF NOT EXISTS
         if "email" not in {row[1] for row in conn.execute("PRAGMA table_info(claude_accounts)")}:
             conn.execute("ALTER TABLE claude_accounts ADD COLUMN email TEXT")
+        # 101 AC2: the design's kind; the DEFAULT makes every existing row a workflow
+        if "kind" not in {row[1] for row in conn.execute("PRAGMA table_info(factories)")}:
+            conn.execute("ALTER TABLE factories ADD COLUMN kind TEXT NOT NULL DEFAULT 'workflow'"
+                         " CHECK (kind IN ('workflow','automation'))")

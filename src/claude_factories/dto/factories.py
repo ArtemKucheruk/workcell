@@ -83,16 +83,21 @@ class Graph(BaseModel):
     edges: list[Edge]
 
 
+Kind = Literal["workflow", "automation"]  # 101: workflow runs on board tasks, automation on the repo
+
+
 class NewFactory(BaseModel):
     name: str
     template: str | None = None  # 088 Q7: a FactoryTemplate key; null or left out → standard
+    kind: Kind = "workflow"  # 101 AC5: anything else, null included, is a 422
 
 
 class FactoryTemplate(BaseModel):
-    """088: one of + New factory's templates."""
+    """088: one of + New factory's templates. 101 Q1: kind picks the Workflows page section that offers it."""
     key: str
     name: str
     description: str
+    kind: Kind
 
 
 class FactoryPatch(BaseModel):
@@ -113,6 +118,7 @@ class FactoryItem(BaseModel):
     """A Factories list row: `nodes` counts every node, start and conditions included (Q7)."""
     id: int
     name: str
+    kind: Kind
     nodes: int
     created_at: str
     updated_at: str
@@ -126,6 +132,7 @@ class FactoryDesign(BaseModel):
     workspace_id: int
     workspace: str
     name: str
+    kind: Kind
     graph: Graph
     created_at: str
     updated_at: str

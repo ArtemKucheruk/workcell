@@ -57,20 +57,25 @@ def changes_loop(writer: str, reviewers: tuple[tuple[str, str], ...], n: int) ->
     return nodes, edges
 
 
-# 088: + New factory's templates, in list order: key → (name, description, nodes, edges). docs/data-model-and-api.md
-# §6.1. A new agent name gets its own file in factory_templates/agents/; a reused one is the 011 file (Q5).
+# 088: + New factory's templates, in list order: key → (name, description, kind, nodes, edges).
+# docs/data-model-and-api.md §6.1. A new agent name gets its own file in factory_templates/agents/; a reused one is
+# the 011 file (Q5). 101 Q1: kind says which Workflows page section offers the template; the server accepts any
+# template with any kind (Q2).
 PRESETS = {
     "standard": ("Standard", "Spec, build, then security, UX, UI, and code reviews; up to 2 rounds; the approver"
-                 " decides.", DEFAULT_NODES, DEFAULT_EDGES),
+                 " decides.", "workflow", DEFAULT_NODES, DEFAULT_EDGES),
     "bug-fix": ("Bug fix", "Reproduce the bug as a failing test, fix its root cause, then code and security reviews.",
+                "workflow",
                 *changes_loop("bug-spec-writer", (("review-code", "code"), ("review-security", "security")), 2)),
     "security-audit": ("Security audit", "Audit dependencies, secrets, and code; write SECURITY-AUDIT.md and fix what"
-                       " is safe; security review. Built for scheduled runs.",
+                       " is safe; security review. Built for scheduled runs.", "automation",
                        *changes_loop("security-auditor", (("review-security", "security"),), 2)),
     "ml-experiment": ("ML experiment", "Check the data and baseline, run the experiment, and gate it on eval metrics"
-                      " against the baseline.", *changes_loop("data-check", (("review-eval", "custom"),), 3)),
+                      " against the baseline.", "workflow",
+                      *changes_loop("data-check", (("review-eval", "custom"),), 3)),
     "test-coverage": ("Test coverage", "Find risky untested code and pin its behavior with tests, leaving production"
-                      " code unchanged.", *changes_loop("coverage-planner", (("review-tests", "custom"),), 2)),
+                      " code unchanged.", "automation",
+                      *changes_loop("coverage-planner", (("review-tests", "custom"),), 2)),
 }
 
 
@@ -83,7 +88,7 @@ def agent(name: str) -> dict:
 
 def preset_graph(key: str) -> Graph:
     """088: a template's graph; an agent node's data is its template file's, under its extra keys."""
-    _, _, preset_nodes, preset_edges = PRESETS[key]
+    *_, preset_nodes, preset_edges = PRESETS[key]
     nodes = [{"id": id_, "type": type_, "position": {"x": x, "y": y},
               "data": agent(id_) | data if type_ in AGENTS else data}
              for id_, type_, data, x, y in preset_nodes]
@@ -97,7 +102,8 @@ def default_graph() -> Graph:
 
 
 def list_templates() -> list[FactoryTemplate]:
-    return [FactoryTemplate(key=key, name=name, description=text) for key, (name, text, _, _) in PRESETS.items()]
+    return [FactoryTemplate(key=key, name=name, description=text, kind=kind)
+            for key, (name, text, kind, _, _) in PRESETS.items()]
 
 
 def template_graph(key: str | None) -> Graph:
@@ -133,9 +139,10 @@ def list_factories(projects: ProjectsRepo, factories: FactoriesRepo, project_id:
 
 
 def create_factory(projects: ProjectsRepo, factories: FactoriesRepo, tasks: TasksRepo, project_id: int,
-                   name: str, template: str | None = None) -> FactoryDesign:
+                   name: str, template: str | None = None, kind: str = "workflow") -> FactoryDesign:
     """+ New factory: a template's graph (088; default Standard) under a name new to this project (exact match after
-    trim). 088 AC12: the blank name's 422, then the template's, then 404 and 409."""
+    trim). 088 AC12: the blank name's 422, then the template's, then 404 and 409. 101: kind is fixed here; PUT
+    never changes it (Q5)."""
     name = trimmed(name)
     graph = stored(template_graph(template))
     tasks.lock()  # the clash check and the insert commit together
@@ -143,7 +150,7 @@ def create_factory(projects: ProjectsRepo, factories: FactoriesRepo, tasks: Task
         raise NotFound(f"Project #{project_id} not found")
     if factories.by_name(project_id, name) is not None:
         raise Conflict(f"factory {name} already exists")
-    return design(factories.get(factories.add(project_id, name, graph)))
+    return design(factories.get(factories.add(project_id, name, graph, kind)))
 
 
 def get_factory(factories: FactoriesRepo, factory_id: int) -> FactoryDesign:

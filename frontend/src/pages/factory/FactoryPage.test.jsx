@@ -33,8 +33,8 @@ const GRAPH = {
   ],
 }
 const FACTORY = {
-  id: 7, project_id: 3, project: 'api-server', workspace_id: 2, workspace: 'personal', name: 'default', graph: GRAPH,
-  created_at: '2026-10-21T08:00:00Z', updated_at: '2026-10-21T09:30:00Z',
+  id: 7, project_id: 3, project: 'api-server', workspace_id: 2, workspace: 'personal', name: 'default', kind: 'workflow',
+  graph: GRAPH, created_at: '2026-10-21T08:00:00Z', updated_at: '2026-10-21T09:30:00Z',
 }
 
 afterEach(() => {
@@ -128,21 +128,33 @@ test('FE8: a 404, or a factory of another project (Q13), is the not-found page; 
   expect((await screen.findByRole('alert')).textContent).toBe('boom')
 })
 
-test('FE9: the breadcrumb, then the h1 with the name, an empty status, and Save', async () => {
+test('FE9, 101: the breadcrumb, then the h1 with the name, the kind, an empty status, and Save', async () => {
   await open()
   const crumbs = within(screen.getByRole('navigation', { name: 'Breadcrumb' }))
   expect(crumbs.getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
     ['personal', '/workspaces/2'],
     ['api-server', '/projects/3'],
-    ['Factories', '/projects/3/factories'],
+    ['Workflows', '/projects/3/factories'],
   ])
   const current = crumbs.getByText('default')
   expect(current.getAttribute('aria-current')).toBe('page')
-  expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).textContent).toBe('personal › api-server › Factories › default')
+  expect(screen.getByRole('navigation', { name: 'Breadcrumb' }).textContent).toBe('personal › api-server › Workflows › default')
   const row = screen.getByRole('heading', { level: 1, name: 'default' }).parentElement
-  expect([...row.children].map((el) => el.tagName)).toEqual(['H1', 'P', 'BUTTON', 'BUTTON']) // 052: Files, then Save
+  // 101 AC18: the kind; 052: Files, then Save
+  expect([...row.children].map((el) => el.tagName)).toEqual(['H1', 'P', 'P', 'BUTTON', 'BUTTON'])
   expect(status()).toBe('')
   expect(save().disabled).toBe(true)
+})
+
+test('101 AC18: the header shows the design\'s kind as muted text beside its name', async () => {
+  for (const [kind, label] of [['workflow', 'Workflow'], ['automation', 'Automation']]) {
+    const { unmount } = await open({}, { ...FACTORY, kind })
+    const h1 = screen.getByRole('heading', { level: 1, name: 'default' })
+    const note = h1.nextElementSibling
+    expect(note.textContent).toBe(label)
+    expect(note.className).toMatch(cls('text-muted'))
+    unmount()
+  }
 })
 
 test('FE10: each node is a card with an aria-hidden SVG icon, its title, and its summary; Controls and a dots Background', async () => {
