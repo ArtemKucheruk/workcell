@@ -106,3 +106,44 @@ def test_run_usage_errors(server, capsys, argv):  # 015 AC14
     assert e.value.code == 2
     assert capsys.readouterr().err.startswith("usage: fctl run")
     assert server.requests == []
+
+
+# --- 102: fctl automation run ---------------------------------------------------------------------------
+
+AUTOMATION_RUN = {"run_id": 43, "session_id": "1a2b3c4d-0000", "account_id": 2, "account": "b@y",
+                  "worktree": ".claude/worktrees/automation-security-audit-1a2b3c4d"}
+
+
+def test_automation_run(server, capsys):  # 102 AC20
+    server.reply = reply(AUTOMATION_RUN, 202)
+    main(["automation", "run", "7"])
+    assert requests(server) == [("POST", "/api/factories/7/run", None)]
+    assert capsys.readouterr().out == ("Run #43 of automation #7 as b@y in"
+                                       " .claude/worktrees/automation-security-audit-1a2b3c4d"
+                                       f" → {os.environ['FCTL_URL']}/agents\n")
+
+
+def test_automation_run_account(server):  # 102 AC21
+    server.replies = [reply(ACCOUNTS), reply(AUTOMATION_RUN, 202), reply(AUTOMATION_RUN, 202)]
+    main(["automation", "run", "7", "--account", "b@y"])
+    main(["automation", "run", "7", "--account", "2"])
+    assert requests(server) == [("GET", "/api/auth/accounts", None),
+                                ("POST", "/api/factories/7/run", {"account_id": 2}),
+                                ("POST", "/api/factories/7/run", {"account_id": 2})]
+
+
+def test_automation_run_refused(server, capsys):  # 102 AC21
+    server.reply = reply({"detail": "Review loop is a workflow; run it on a task from the board"}, 409)
+    with pytest.raises(SystemExit) as e:
+        main(["automation", "run", "7"])
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", "fctl: 409 Review loop is a workflow; run it on a task from the board\n")
+
+
+@pytest.mark.parametrize("argv", [["automation", "run", "abc"], ["automation", "run"], ["automation"]])
+def test_automation_run_usage(server, capsys, argv):  # 102 AC21
+    with pytest.raises(SystemExit) as e:
+        main(argv)
+    assert e.value.code == 2
+    assert capsys.readouterr().err.startswith("usage: fctl automation")
+    assert server.requests == []

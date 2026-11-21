@@ -42,7 +42,7 @@ def test_page_handlers_raise_not_found(conn, repo):  # 036 AC11
     runs, workspaces, accounts = RunsRepo(conn), WorkspacesRepo(conn), ClaudeAccountsRepo(conn)
     assert detail(lambda: pages.workspace(workspaces, projects, git, 999)) == "Not Found"
     assert detail(lambda: pages.board(projects, tasks, rounds, reviews, runs, TranscriptsRepo(conn), workspaces, git,
-                                      claude, accounts, SettingsRepo(conn), 999)) == "Not Found"
+                                      claude, accounts, SettingsRepo(conn), UsageRepo(conn), 999)) == "Not Found"
     assert detail(lambda: pages.task(tasks, rounds, reviews, runs, TranscriptsRepo(conn), git, claude, accounts,
                                      UsageRepo(conn), 999)) == "Task #999 not found"
     assert detail(lambda: pages.review(tasks, rounds, reviews, git, 999, "latest", "")) == "Task #999 not found"

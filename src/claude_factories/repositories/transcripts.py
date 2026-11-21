@@ -14,10 +14,12 @@ class TranscriptsRepo:
 
     def source(self, run_id: int) -> sqlite3.Row | None:
         """What collecting a run needs: its task, its session, the task's worktree, and its own account's
-        config_dir (096 Q5: NULL for a run with no account_id, or whose account is gone)."""
+        config_dir (096 Q5: NULL for a run with no account_id, or whose account is gone). 102 AC14: an automation
+        run has no task (task_id NULL) and its own worktree_path."""
         return self.conn.execute(
-            "SELECT r.task_id, r.session_id, t.worktree_path, a.config_dir FROM runs r"
-            " JOIN tasks t ON t.id = r.task_id LEFT JOIN claude_accounts a ON a.id = r.account_id"
+            "SELECT r.task_id, r.session_id, COALESCE(r.worktree_path, t.worktree_path) AS worktree_path,"
+            " a.config_dir FROM runs r"
+            " LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN claude_accounts a ON a.id = r.account_id"
             " WHERE r.id = ?",
             (run_id,),
         ).fetchone()

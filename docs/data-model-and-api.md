@@ -45,14 +45,19 @@ CREATE TABLE task_deps (                  -- task_id waits on blocked_by_id, a t
 
 CREATE TABLE runs (
   id INTEGER PRIMARY KEY,
-  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  task_id INTEGER REFERENCES tasks(id),   -- NULL only for an automation run
   session_id TEXT NOT NULL,               -- passed as --session-id; enables takeover
   pid INTEGER,
   status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','stopped')),
   exit_code INTEGER, error TEXT,
   log_path TEXT NOT NULL,
   started_at TEXT NOT NULL, ended_at TEXT,
-  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);  -- the account it ran in, chosen at start (Auto or my pick, 097); NULL = the active one
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL,  -- the account it ran in, chosen at start (Auto or my pick, 097); NULL = the active one
+  factory_id INTEGER REFERENCES factories(id) ON DELETE SET NULL,  -- an automation run's automation; NULL for a task run, or once it's deleted
+  kind TEXT NOT NULL DEFAULT 'factory' CHECK (kind IN ('factory','automation')),  -- a task run (/factory <id>), or an automation's (/<slug>)
+  trigger TEXT NOT NULL DEFAULT 'manual' CHECK (trigger IN ('manual','schedule')),  -- manual for every run today; schedule is the scheduler's (§9)
+  worktree_path TEXT,                     -- an automation run's own fresh worktree; a task run's is tasks.worktree_path
+  CHECK ((kind = 'factory') = (task_id IS NOT NULL)));  -- a factory run has a task, an automation run none
 -- one running run per task; settings.max_concurrent_runs caps them all (Pro limits). Replaced the global one_active_run
 CREATE UNIQUE INDEX one_run_per_task ON runs(task_id) WHERE status = 'running';
 
@@ -108,7 +113,7 @@ CREATE TABLE events (                     -- status/stage history
 CREATE TABLE transcripts (                -- a run's Claude Code transcripts, copied when it ends (§4.4)
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES runs(id),
-  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  task_id INTEGER REFERENCES tasks(id),   -- its run's task; NULL for an automation run's
   agent_type TEXT,                        -- 'orchestrator' for the run's own session, else the agent type
   name TEXT,                              -- a teammate's name, e.g. builder-12
   round INTEGER,                          -- n from "Job|Task <id>, round <n>." in its first prompt
@@ -168,7 +173,12 @@ INSERT OR IGNORE INTO settings (id) VALUES (1);  -- seeded on every startup, nev
 `db.init()` brings an old database up to date: it drops `one_active_run`, adds `runs.account_id` (NULL on old
 rows), `claude_accounts.email` (NULL until the next status check), and `factories.kind` (`ALTER TABLE factories ADD
 COLUMN kind TEXT NOT NULL DEFAULT 'workflow' CHECK (…)`, so every existing design becomes a workflow), and seeds the
-settings row.
+settings row. ALTER can't drop a NOT NULL or add a table CHECK, so a `runs` table without `kind` (from before
+102), then a `transcripts` table whose `task_id` is NOT NULL, is rebuilt into the schema's own CREATE TABLE with
+SQLite's 12-step rebuild: `foreign_keys` off, the new table created, every row copied with its id, the old one
+dropped, the new one renamed, its foreign keys checked, then `one_run_per_task` recreated. Old runs read
+`kind = 'factory'`, `trigger = 'manual'`, and NULL `factory_id` and `worktree_path`; the `transcripts` and
+`usage_snapshots` rows pointing at them keep pointing at them. A second startup finds nothing to rebuild.
 
 A run's `finish()` (succeeded, failed, or stopped), and the startup sweep that fails leftover running runs, read
 its stream-json log for `rate_limit_event`s and upsert one `usage_snapshots` row: the last valid event, on the
@@ -183,7 +193,9 @@ A task has 1–n runs, at most one of them running, and 1–n rounds. At most `s
 are running at once, across all projects. A run records the Claude account it started in (`account_id`, picked at
 start by Auto or by me, MVP §4.3), whose config dir its env, takeover command, and transcripts use; NULL (a run
 from before the column, or a disconnected account) means the active one. A run has 0–n
-transcripts. A round has
+transcripts. An automation (a factory of kind `automation`) has 0–n runs of kind `automation`, with no task and
+each in its own worktree; any number of them may run at once, under the same cap, which counts every kind. Deleting
+the automation, or its project, sets their `factory_id` to NULL and keeps the runs. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
 ordered by `created_at`.
@@ -633,7 +645,9 @@ POST /api/tasks/12/run                                            (Run, Retry, f
   # 409, checked right after the 404, while the task's own run is running:
   #   {"detail":"run #41 is already running on #12; wait for it or stop it"}; then at the run cap (runs by id):
   #   {"detail":"2 runs active (#41 on #12, #42 on #14); the limit is 2. Wait, stop one, or raise it in Settings"}
-  #   ("1 run active (…)" when one); both again under the write lock; no run row, no wt call, no spawn
+  #   ("1 run active (…)" when one); both again under the write lock; no run row, no wt call, no spawn.
+  #   102: the cap counts automation runs too, each listed as "#43 on automation Security audit" ("#43 on
+  #   automation (deleted)" once its automation is gone)
   # 409 if auth isn't claude.ai, or the factory isn't committed on default_branch;
   #   a legacy factory (MVP §3.2 step 4): 409 {"detail":"this repo runs the file-based /factory loop:
   #   Create factory with Overwrite, then commit it on main"}
@@ -648,6 +662,28 @@ POST /api/tasks/12/run                                            (Run, Retry, f
   #   ignored in the main checkout but not on main, so it was left out of the worktree: commit its .gitignore
   #   line on main, then run again" (the copied file is deleted); no run row, and a worktree made before the
   #   refusal stays stored
+
+POST /api/factories/7/run                                         (Run now on the Workflows page, fctl automation run 7)
+→ no body, {}, or {"account_id":null}   Auto;  {"account_id":2}   run in account 2, as for a task run
+← 202 {"run_id":43,"session_id":"1a2b3c4d-…","worktree":".claude/worktrees/automation-security-audit-1a2b3c4d",
+       "account_id":2,"account":"b@y"}
+  # 102: an automation (factories.kind = 'automation') run on the repo itself, with no task. Checks in this order:
+  #   404 {"detail":"Factory #99 not found"} ·
+  #   409 {"detail":"Review loop is a workflow; run it on a task from the board"} for a workflow ·
+  #   the run cap, as for a task run (no per-automation limit: two Run nows run side by side) ·
+  #   409 {"detail":"automation Security audit isn't committed on main: open it, Files → Write to repo, then on
+  #   main run git add .claude/skills/security-audit .claude/agents && git commit -m \"Add factory\""} when
+  #   .claude/skills/<slug>/SKILL.md isn't a blob on default_branch (one git call) ·
+  #   then a fresh worktree and branch from default_branch with `wt switch --create`, named by the session id's
+  #   first 8 characters: branch automation/<slug>-<s8>, path <repo>/.claude/worktrees/automation-<slug>-<s8>,
+  #   then `wt step copy-ignored`; wt's refusals as task runs' 409s · then the account and auth, as above
+  # a refusal after the worktree is made (copy-ignored, account, auth, or the cap again under the write lock)
+  #   removes it with `wt remove` and its branch with `git branch -d`, ignoring their failures; no run row
+  # the row: task_id NULL, factory_id 7, kind automation, trigger manual, the account, and worktree_path; no
+  #   tasks or events row. It spawns `claude -p /<slug>` (no argument) in the worktree with a task run's
+  #   --allowedTools and --disallowedTools. Log, transcripts (from worktree_path's folder, task_id NULL), usage
+  #   snapshot, failed-run error, Stop, and the startup sweep work as for a task run; a spawn that raises is
+  #   500 {"detail":"can't start claude: …"} with the row failed. The worktree and branch stay after the run
 
 POST /api/projects/3/run-next                                     (Run next, fctl run next)
 ← 202 {"task_id":14,"run_id":42,"account_id":1,"account":"a@x"}  # 404 if backlog empty; 409 as run
@@ -862,7 +898,11 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 With Sec-Fetch-Site: cross-site it skips the sync (MVP §4.5).
                                                 096: runs_active (running runs across all projects) and
                                                 max_concurrent_runs; can_run is false at runs_active >=
-                                                max_concurrent_runs, as for an unready factory or no login
+                                                max_concurrent_runs, as for an unready factory or no login.
+                                                102: runs_enabled (the active account is logged in to
+                                                claude.ai, the login badge's check), plus accounts and auto
+                                                shaped as the task page's (DB only), for the Workflows page's
+                                                Run now and its Run menu
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
@@ -942,7 +982,7 @@ GET  /api/pages/sidebar?transcript=5                              (/transcripts/
   # a non-integer id gets the 422; there is no ?project=: the SPA finds it in workspaces
 
 GET  /api/pages/agents                                            (/agents, polled)
-← 200 {"running":[{"id":41,"kind":"factory","task_id":12,"title":"Rate-limit login endpoint",
+← 200 {"running":[{"id":41,"kind":"factory","task_id":12,"factory_id":null,"title":"Rate-limit login endpoint",
          "project_id":3,"project":"api-server","stage":"agent_review","round":1,
          "started_at":"2026-10-21T10:04:11Z",
          "agents":[
@@ -952,13 +992,17 @@ GET  /api/pages/agents                                            (/agents, poll
             "last_tool":"Bash pytest -q"},
            {"name":"review-code","type":"review-code","round":2,"running":true,"duration_ms":null,
             "last_tool":"Bash fctl verdict 12 code PASS"}]}],
-       "recent":[{"id":40,"task_id":11,"title":"Webhooks","project_id":3,"project":"api-server",
+       "recent":[{"id":40,"kind":"factory","task_id":11,"factory_id":null,"title":"Webhooks","project_id":3,"project":"api-server",
          "status":"failed","error":"exit code 1","started_at":"2026-10-21T09:40:00Z",
          "ended_at":"2026-10-21T09:52:03Z","transcripts":2}]}
   # read-only, no ids or query, so no error statuses; Stop is POST /api/runs/{id}/stop (§6.2)
   # running: every running run (one per task, up to the run cap, MVP §4.4), newest started_at first, then id descending
-  #   kind: always "factory" today (scheduled runs, §9 Later) · stage: the task's, or null ·
+  #   kind: "factory" for a task run, "automation" for an automation's (102) · stage: the task's, or null ·
   #   round: the task's highest rounds.n, or null with no rounds
+  #   an automation run: task_id, stage, and round null; factory_id its automation; title the automation's name;
+  #   project_id and project the automation's project. Once the automation is deleted: title
+  #   "deleted automation", factory_id, project_id, and project null. A task run's factory_id is null. recent's
+  #   items carry kind, task_id, factory_id, title, project_id, and project the same way
   # agents: from the run's stream-json log, read as GET /api/runs/{id}/log reads it (complete lines,
   #   anything not a JSON object skipped, no readable file = the orchestrator alone): the orchestrator
   #   first, then one per `Agent` tool_use in log order (no other tool name counts)

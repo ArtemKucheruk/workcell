@@ -14,6 +14,15 @@ def print_run(task_id: int, started: dict):
     print(f"Run #{started['run_id']} on #{task_id}{account} → {base_url()}/tasks/{task_id}")
 
 
+def print_automation_run(factory_id: int, started: dict):
+    """102 Q18: an automation run has no task page yet, so the Agents page, and the run's own worktree."""
+    from .client import base_url  # lazy, as in print_run
+
+    account = f" as {started['account']}" if started.get("account") else ""
+    print(f"Run #{started['run_id']} of automation #{factory_id}{account} in {started['worktree']}"
+          f" → {base_url()}/agents")
+
+
 def stdin_text() -> str:
     """Q9: a heredoc or a pipe, sent unchanged; nothing from a terminal, so a hand-typed command
     doesn't wait for Ctrl-D."""

@@ -136,8 +136,7 @@ def sidebar(projects: Projects, tasks: Tasks, transcripts: Transcripts, accounts
 @router.get("/api/pages/agents")
 def agents(runs: Runs) -> dto.AgentsPage:
     """053: polled every 3 s by the Agents page; no ids, so no error statuses."""
-    page = handler.agents(runs)
-    return page | {"recent": objs(page["recent"])}
+    return handler.agents(runs)
 
 
 @router.get("/api/pages/dashboard")
@@ -161,11 +160,12 @@ def workspace(workspace_id: int, workspaces: Workspaces, projects: Projects, git
 @router.get("/api/pages/projects/{project_id}")
 def board(project_id: int, projects: Projects, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs,
           transcripts: Transcripts, workspaces: Workspaces, git: GitAdapter, claude: ClaudeAdapter,
-          accounts: ClaudeAccounts, settings: Settings, sec_fetch_site: str | None = Header(None)) -> dto.BoardPage:
+          accounts: ClaudeAccounts, settings: Settings, usage: Usage,
+          sec_fetch_site: str | None = Header(None)) -> dto.BoardPage:
     """058: Transcripts for the factory/ sync's import. §4.5: this GET writes when it syncs, which the
     X-Requested-By check doesn't cover, so a cross-site request gets the page without the sync."""
     page = handler.board(projects, tasks, rounds, reviews, runs, transcripts, workspaces, git, claude, accounts,
-                         settings, project_id, sec_fetch_site != "cross-site")
+                         settings, usage, project_id, sec_fetch_site != "cross-site")
     return page | {"project": obj(page["project"]), "workspaces": objs(page["workspaces"])}
 
 

@@ -26,5 +26,12 @@ export const factoryFiles = (id) => api(`${one(id)}/files`)
 /** A plain <a download> target: the browser fetches it, so a refusal is its JSON detail, not a zip. */
 export const downloadUrl = (id) => `${one(id)}/download`
 
+/**
+ * 102: Run now on an automation. No `accountId` (null) is Auto and sends no body; else `{account_id}`. The reply is a
+ * task run's `{run_id, session_id, worktree, account_id, account}`.
+ */
+export const runAutomation = (id, accountId) =>
+  api(`${one(id)}/run`, { method: 'POST', ...(accountId == null ? {} : { body: { account_id: accountId } }) })
+
 /** The reply is Create factory's `{written, skipped, commit_hint}`. */
 export const writeFactory = (id, overwrite) => api(`${one(id)}/write`, { method: 'POST', body: { overwrite } })

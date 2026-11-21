@@ -37,6 +37,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl task unblock <id> --by <id>` | me | `DELETE /api/tasks/{id}/blocked-by/{blocker}` → prints the blockers left |
 | `fctl task delete <id> [--yes]` | me | `DELETE /api/tasks/{id}` (after `GET /api/tasks/{id}` for the title) |
 | `fctl run <id> [--account <id\|email>]` / `fctl run next` | me | `POST /api/tasks/{id}/run` (`{"account_id"}` with `--account`, else Auto), `/api/projects/{id}/run-next` (always Auto) |
+| `fctl automation run <id> [--account <id\|email>]` | me | `POST /api/factories/{id}/run` (`{"account_id"}` with `--account`, else Auto): the automation's `/<slug>`, headless in a fresh worktree, no task (102) |
 | `fctl rework <id> "note"` | me | `POST /api/tasks/{id}/request-changes` |
 | `fctl approve <id>` | me | `POST /api/tasks/{id}/approve` |
 | `fctl submit --new --title T` (stdin: description) | `/factory-submit` | `POST /api/projects/{id}/tasks` with `submit` |
@@ -59,7 +60,8 @@ How the FACTORY.md commands map to the new ones:
 | `/factory rework <id> <note>` | **Request changes**, or `fctl rework <id> "note"` |
 | `/factory approve <id>` | **Approve**, or `fctl approve <id>` (marks done, no merge) |
 
-All of them end in the app spawning `/factory <id>`, except approve.
+All of them end in the app spawning `/factory <id>`, except approve. An automation's **Run now** (or
+`fctl automation run <id>`) spawns `/<slug>` instead, with no task id (102, §7.3).
 
 ### 7.3 Templates
 `.claude/skills/factory/SKILL.md` (excerpt). Create factory renders it with `skill` = `factory`:
@@ -195,8 +197,9 @@ Rules the templates keep:
   auditor reads files and names the tools it didn't run. The same goes for an ML eval command
   that isn't the test command.
 
-**Scheduling the security audit.** The app has no scheduler, and every run starts
-`/factory <id>`, so a scheduled task runs whichever design was written to the repo as
+**Scheduling the security audit.** The app has no scheduler, and every task run starts
+`/factory <id>` (an automation runs only by hand, with **Run now**), so a scheduled task runs whichever design was
+written to the repo as
 `factory`. Write the Security audit design under the name `factory`, commit it on the default
 branch, then add a crontab line:
 ```
@@ -212,7 +215,11 @@ what Create factory writes.
 - The slug is the factory's name lowercased, each run of characters outside `a-z0-9` turned into one `-`, and `-`
   trimmed at both ends; nothing left → `factory`. `Nightly Build!` → `nightly-build`. The files are
   `.claude/skills/<slug>/SKILL.md`, then `.claude/agents/<name>.md` per agent node in node order, reachable or not.
-  Only the skill named `factory` is the one runs start.
+  A task run starts the skill named `factory` (`/factory <id>`). An automation's run (102, **Run now** on the
+  Workflows page or `fctl automation run <id>`) starts its own `<slug>` as `/<slug>`, with no argument, headless in
+  a fresh worktree from the default branch; its `.claude/skills/<slug>/SKILL.md` must be committed there. The
+  compiled SKILL.md is still a task orchestrator, so with no task id it has no task to read: a task-free
+  automation template is a follow-up.
 - SKILL.md is the template above with `skill` = the slug, where only the body of `## The loop` (after its heading's
   blank line, up to the blank line before `## Conditions`) is generated from the graph. The template is split before
   any value goes in, so no project value can move that boundary.

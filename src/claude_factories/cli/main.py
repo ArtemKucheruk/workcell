@@ -5,7 +5,7 @@ from .commands import service
 from .commands.agent import DECISIONS, REVIEWERS, STAGES, comment, decide, round_status, show, spec, stage, verdict
 from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
-from .commands.runs import run
+from .commands.runs import automation_run, run
 from .commands.submit import diff, submit
 from .commands.tasks import export, import_bundle, task_add, task_block, task_delete, task_ids
 from .output import fail
@@ -147,6 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--account", metavar="ID|EMAIL",
                    help="the Claude account to run in, by id or email (default: Auto; not with next)")
     p.set_defaults(func=run, usage_error=p.error)
+    p = commands.add_parser("automation", help="run an automation: a design that works on the repo, with no task")
+    automation_commands = p.add_subparsers(dest="automation_command", required=True)
+    p = automation_commands.add_parser("run", help="start an automation by hand, in a fresh worktree")
+    p.add_argument("id", type=int, help="the automation, its id on the Workflows page")
+    p.add_argument("--account", metavar="ID|EMAIL",
+                   help="the Claude account to run in, by id or email (default: Auto)")
+    p.set_defaults(func=automation_run)
     p = commands.add_parser("submit", help="send this tree's changes for review, as a new task or a round")
     p.add_argument("id", nargs="?", type=int, help="the task to add a round to (stdin: build notes)")
     p.add_argument("--new", action="store_true", help="create a task straight in Review (stdin: description)")
