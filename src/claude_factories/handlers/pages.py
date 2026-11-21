@@ -1,4 +1,5 @@
-"""Page data for the dashboard, workspace, board, task, review, and agents pages (docs/ui.md §8), the sidebar
+"""Page data for the dashboard, workspace, board, task, review, agents, and automation runs (103) pages (docs/ui.md
+§8), the sidebar
 (041), its login badge, the Settings page's Claude accounts (§8 item 9, 056) and run cap (096), and the fctl reference
 (§8 item 7). Each page returns the dict controllers/pages_api.py maps onto its dto/pages.py view-model."""
 
@@ -23,6 +24,7 @@ from ..lib.diff import diff_rows, file_tree
 from ..lib.markdown import render_with_headings
 from ..lib.run_log import run_agents
 from ..repositories.claude_accounts import ClaudeAccountsRepo
+from ..repositories.factories import FactoriesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -403,6 +405,33 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
         "can_run": factory == "ready" and active < cap and logged_in,
         "runs_enabled": logged_in, "accounts": listed, "auto": auto,
         "factory_error": factory_error, "factory_files": factory_files(project["path"]),  # 059
+    }
+
+
+def automation_runs(factories: FactoriesRepo, runs: RunsRepo, transcripts: TranscriptsRepo, claude: Claude,
+                    accounts: ClaudeAccountsRepo, settings: SettingsRepo, usage: UsageRepo, factory_id: int,
+                    now: float | None = None) -> dict:
+    """103, docs/ui.md §8 item 17: an automation's runs newest first, each with its account's label and its
+    transcripts (Q13), and the Run menu as the board builds it (AC5: no claude call beyond claude_login's cache).
+    ponytail: Q12: every run with its transcripts in each 3 s poll; page the list once an automation has hundreds."""
+    found = factories.get(factory_id)
+    if found is None:
+        raise NotFound(f"Factory #{factory_id} not found")
+    if found["kind"] != "automation":
+        raise NotFound(f"{found['name']} is a workflow; its runs are on its tasks")  # Q3
+    by_run: dict[int, list[dict]] = {}
+    for t in transcripts.for_factory(factory_id):
+        by_run.setdefault(t["run_id"], []).append(dict(t))
+    listed, auto = run_menu(accounts, usage, time.time() if now is None else now)
+    return {
+        "automation": {k: found[k] for k in ("id", "name", "project_id", "project", "workspace_id", "workspace")},
+        "runs": [{k: r[k] for k in ("id", "status", "trigger", "started_at", "ended_at")}
+                 | {"error": r["error"] if r["status"] == "failed" else None,
+                    "account": label(r["email"], r["config_dir"]) if r["config_dir"] else None,
+                    "transcripts": by_run.get(r["id"], [])} for r in runs.for_factory(factory_id)],
+        "runs_enabled": claude_login(claude, accounts)[1],
+        "runs_active": len(runs.running_ids()), "max_concurrent_runs": settings.max_concurrent_runs(),
+        "accounts": listed, "auto": auto,
     }
 
 

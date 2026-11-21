@@ -68,6 +68,19 @@ test('047 FE5: the breadcrumb reads personal › api › #12 › builder-12, #12
   expect(within(header()).getAllByRole('link').filter((a) => !crumbs.contains(a)).map((a) => a.textContent)).toEqual(['Download raw'])
 })
 
+test("103 AC25: an automation transcript's breadcrumb is personal › api › Workflows › Security audit › orchestrator", async () => {
+  const auto = { task_id: null, factory_id: 7, factory: 'Security audit', agent_type: 'orchestrator', name: null }
+  await open({ [`GET ${URL}`]: [200, detail(auto)] })
+  const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' })
+  expect(crumbs.textContent).toBe('personal › api › Workflows › Security audit › orchestrator')
+  expect(within(crumbs).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+    ['personal', '/workspaces/2'], ['api', '/projects/3'], ['Workflows', '/projects/3/factories'],
+    ['Security audit', '/projects/3/factories/7/runs?run=41'],
+  ])
+  expect(within(crumbs).getByText('orchestrator').getAttribute('aria-current')).toBe('page')
+  expect(screen.queryByText(/#null/)).toBeNull()
+})
+
 test('030 AC25: the label falls back to the agent type, then to agent', async () => {
   const typed = await open({ [`GET ${URL}`]: [200, detail({ name: null, agent_type: 'orchestrator' })] })
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('orchestrator')

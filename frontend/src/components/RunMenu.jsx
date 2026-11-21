@@ -1,6 +1,16 @@
 import { Item } from './Menu.jsx'
 import { popover, smallButton } from './styles.js'
 
+/**
+ * 102 AC25, Q11: why runs can't start, from a page's `runs_enabled`, `runs_active`, and `max_concurrent_runs`; null when
+ * they can. 103 AC20: moved here from the Workflows page, so the automation runs page says the same.
+ */
+export function runsOff(page) {
+  if (!page.runs_enabled) return 'Not signed in — runs disabled'
+  if (page.runs_active >= page.max_concurrent_runs) return `${page.runs_active} of ${page.max_concurrent_runs} runs active`
+  return null
+}
+
 /** 097 AC27: a usage window as a whole percentage, `—` while it's unknown. */
 const percent = (w) => (w ? `${Math.round(w.utilization * 100)}%` : '—')
 

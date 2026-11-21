@@ -53,8 +53,10 @@ class Message(BaseModel):
 
 
 class TranscriptDetail(TranscriptOut):
-    task_id: int
-    project_id: int  # 047 Q3: its task's project and workspace now, for the breadcrumb
+    task_id: int | None  # 103 AC8: null for an automation run's transcript
+    factory_id: int | None  # 103 AC8: the automation; null for a task's transcript
+    factory: str | None  # the automation's name now
+    project_id: int  # 047 Q3: its task's (103: or automation's) project and workspace now, for the breadcrumb
     project: str
     workspace_id: int
     workspace: str

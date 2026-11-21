@@ -1,4 +1,5 @@
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 from conftest import commit, sql
@@ -153,6 +154,7 @@ def test_detail(client, ran):  # AC17, 047 BE6
         "model": "claude-opus-4-1", "turns": 38, "input_tokens": 412, "cache_read_tokens": 1830211,
         "output_tokens": 20977, "started_at": "2026-10-17T10:04:10Z", "ended_at": "2026-10-17T10:21:40Z"}
     assert body["task_id"] == ran.task and "path" not in body
+    assert (body["factory_id"], body["factory"]) == (None, None)  # 103 AC9
     [(project_id, workspace_id)] = sql("SELECT p.id, p.workspace_id FROM tasks t JOIN projects p ON p.id = t.project_id"
                                        " WHERE t.id = ?", (ran.task,))
     assert {k: body[k] for k in ("project_id", "project", "workspace_id", "workspace")} == {
@@ -174,6 +176,39 @@ def test_detail(client, ran):  # AC17, 047 BE6
         {"role": "assistant", "at": "2026-10-17T10:05:00Z",
          "blocks": [{"type": "text", "text_html": "<p>done</p>\n"}]},
     ]
+
+
+def automation_transcript(ran) -> SimpleNamespace:
+    """103: an automation `Security audit` in ran.task's project, a run of it, and a transcript of that run."""
+    [(project_id, workspace_id)] = sql("SELECT p.id, p.workspace_id FROM tasks t JOIN projects p ON p.id = t.project_id"
+                                       " WHERE t.id = ?", (ran.task,))
+    factory = sql("INSERT INTO factories (project_id, name, kind, graph, created_at, updated_at)"
+                  " VALUES (?, 'Security audit', 'automation', '{}', 'x', 'x') RETURNING id", (project_id,))[0][0]
+    run_id = sql("INSERT INTO runs (task_id, factory_id, kind, session_id, status, log_path, started_at)"
+                 " VALUES (NULL, ?, 'automation', 's', 'succeeded', 'l', 'x') RETURNING id", (factory,))[0][0]
+    tid = add_transcript(run_id, None, f"{run_id}/{SID}.jsonl", text=DETAIL)
+    return SimpleNamespace(id=tid, run_id=run_id, factory=factory, project_id=project_id, workspace_id=workspace_id)
+
+
+def test_automation_transcript(client, ran):  # 103 AC8
+    x = automation_transcript(ran)
+    r = client.get(f"/api/transcripts/{x.id}")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {k: body[k] for k in ("run_id", "task_id", "factory_id", "factory", "project_id", "project", "workspace_id",
+                                 "workspace")} == {
+        "run_id": x.run_id, "task_id": None, "factory_id": x.factory, "factory": "Security audit",
+        "project_id": x.project_id, "project": "p", "workspace_id": x.workspace_id, "workspace": str(ran.wt)}
+    assert body["messages"]
+    assert client.get(f"/api/transcripts/{x.id}/raw").content == copy(f"{x.run_id}/{SID}.jsonl").read_bytes()
+
+
+def test_deleted_automation_transcript(client, ran):  # 103 AC10, Q9
+    x = automation_transcript(ran)
+    sql("DELETE FROM factories WHERE id = ?", (x.factory,))  # the run's factory_id becomes NULL
+    for url in (f"/api/transcripts/{x.id}", f"/api/transcripts/{x.id}/raw"):
+        r = client.get(url)
+        assert (r.status_code, r.json()) == (404, {"detail": f"Transcript #{x.id} not found"})
 
 
 def result_line(text: str) -> str:

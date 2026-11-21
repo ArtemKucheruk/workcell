@@ -157,6 +157,17 @@ test('101 AC18: the header shows the design\'s kind as muted text beside its nam
   }
 })
 
+test("103 AC24: an automation's header has a Runs link to its runs page, before Files; a workflow's has none", async () => {
+  const auto = await open({}, { ...FACTORY, kind: 'automation' })
+  const row = screen.getByRole('heading', { level: 1, name: 'default' }).parentElement
+  const runs = within(row).getByRole('link', { name: 'Runs' })
+  expect(runs.getAttribute('href')).toBe('/projects/3/factories/7/runs')
+  expect([...row.querySelectorAll('a, button')].map((el) => el.textContent)).toEqual(['Runs', 'Files', 'Save'])
+  auto.unmount()
+  await open()
+  expect(screen.queryByRole('link', { name: 'Runs' })).toBeNull()
+})
+
 test('FE10: each node is a card with an aria-hidden SVG icon, its title, and its summary; Controls and a dots Background', async () => {
   const graph = {
     nodes: [

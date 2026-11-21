@@ -376,6 +376,39 @@ class TaskPage(BaseModel):
     project_tasks: list[Dep]  # 094 Q8: the project's other tasks by id, Add's candidates
 
 
+# --- GET /api/pages/factories/{id}/runs (§8 item 17; 103) ----------------------------------
+
+
+class AutomationRef(BaseModel):
+    id: int
+    name: str
+    project_id: int
+    project: str  # the project's and workspace's names now, for the breadcrumb
+    workspace_id: int
+    workspace: str
+
+
+class AutomationRun(BaseModel):
+    id: int
+    status: Literal["running", "succeeded", "failed", "stopped"]
+    trigger: Literal["manual", "schedule"]
+    started_at: str
+    ended_at: str | None
+    error: str | None  # AC2: only a failed run's
+    account: str | None  # the label of the account it ran in; null for none or a deleted one
+    transcripts: list[TranscriptOut]  # AC3: by started_at, then id
+
+
+class AutomationRunsPage(BaseModel):
+    automation: AutomationRef
+    runs: list[AutomationRun]  # started_at newest first, then id
+    runs_enabled: bool  # AC5: as BoardPage's
+    runs_active: int
+    max_concurrent_runs: int
+    accounts: list[RunAccount]
+    auto: AutoPick | None
+
+
 # --- GET /api/pages/tasks/{id}/flow?round= (§8 item 4's Factory section; 089) -----------
 
 
