@@ -8,7 +8,7 @@ import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { Rename } from '../../components/Rename.jsx'
-import { RunMenu } from '../../components/RunMenu.jsx'
+import { RunMenu, runsOff } from '../../components/RunMenu.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { Time } from '../../components/Time.jsx'
 import { button, field, muted, popover, smallButton } from '../../components/styles.js'
@@ -176,6 +176,16 @@ function FactoryRow({ projectId, factory, run, onReload, onDelete }) {
       <td>
         <div className="flex justify-end gap-2">
           {factory.kind === 'automation' && <RunNow factory={factory} run={run} />}
+          {/* 103 AC23: an automation's runs page; a workflow's runs are on its tasks */}
+          {factory.kind === 'automation' && (
+            <Link
+              to={`/projects/${projectId}/factories/${factory.id}/runs`}
+              aria-label={`Runs of ${factory.name}`}
+              className={`${smallButton} hover:no-underline`}
+            >
+              Runs
+            </Link>
+          )}
           <button
             ref={rename}
             type="button"
@@ -265,13 +275,6 @@ function FactoriesSkeleton() {
       ))}
     </Skeleton>
   )
-}
-
-/** 102 AC25, Q11: why runs can't start, from the board view-model's page-level state only; null when they can. */
-function runsOff(page) {
-  if (!page.runs_enabled) return 'Not signed in — runs disabled'
-  if (page.runs_active >= page.max_concurrent_runs) return `${page.runs_active} of ${page.max_concurrent_runs} runs active`
-  return null
 }
 
 /**

@@ -38,6 +38,15 @@ export function RunningBadge() {
   )
 }
 
+// 103 Q6: an ended run's outlined pill, its word as the label
+const RUN_TONE = { succeeded: 'border-success text-success', failed: 'border-danger text-danger', stopped: 'border-muted text-muted' }
+
+/** 103 Q6: a run's status; running is RunningBadge, an unknown status shows as it is, muted. */
+export function RunStatusPill({ status }) {
+  if (status === 'running') return <RunningBadge />
+  return <span className={`${pill} ${RUN_TONE[status] ?? RUN_TONE.stopped}`}>{status}</span>
+}
+
 /** Q6: human_review and escalated as their pills, any other stage as muted text, null as nothing. */
 export function Stage({ stage }) {
   if (stage === 'human_review') return <WaitingPill />

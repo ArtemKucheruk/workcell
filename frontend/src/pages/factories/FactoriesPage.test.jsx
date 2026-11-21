@@ -384,6 +384,16 @@ test('102 AC23: each automation row has Run now and its own Choose account menu 
   expect(row.queryByRole('button', { name: /Run|Choose account/ })).toBeNull()
 })
 
+test('103 AC23: each automation row has a Runs link to its runs page; workflow rows have none', async () => {
+  await open([200, [DEFAULT, AUDIT, PATROL]])
+  for (const [name, id] of [['audit', 9], ['patrol', 10]]) {
+    const link = screen.getByRole('link', { name: `Runs of ${name}` })
+    expect([link.textContent, link.getAttribute('href')]).toEqual(['Runs', `/projects/3/factories/${id}/runs`])
+  }
+  expect(section('Workflows').queryByRole('link', { name: /^Runs/ })).toBeNull()
+  expect(screen.queryByRole('link', { name: 'Runs of default' })).toBeNull()
+})
+
 test('102 AC24: Run now posts with no body; a menu account sends {account_id}; Auto sends no body', async () => {
   const { fetch } = await open([200, [AUDIT]], { [`POST ${RUN(9)}`]: [202, STARTED] })
   fireEvent.click(runNow('audit'))

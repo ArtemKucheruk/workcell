@@ -1,5 +1,6 @@
 import { NotFound } from '../components/NotFound.jsx'
 import { AgentsPage } from '../pages/agents/AgentsPage.jsx'
+import { AutomationRunsPage } from '../pages/automation-runs/AutomationRunsPage.jsx'
 import { BoardPage } from '../pages/board/BoardPage.jsx'
 import { CodePage } from '../pages/code/CodePage.jsx'
 import { ContextPage } from '../pages/context/ContextPage.jsx'
@@ -37,6 +38,7 @@ export const routes = [
       { path: '/projects/:id/settings', element: <ProjectSettingsPage /> },
       { path: '/projects/:id/factories', element: <FactoriesPage /> }, // 051: a list, not wide
       { path: '/projects/:id/factories/:fid', element: <FactoryPage />, handle: { wide: true } },
+      { path: '/projects/:id/factories/:fid/runs', element: <AutomationRunsPage /> }, // 103: a list, not wide
       { path: '/tasks/:id', element: <TaskPage /> },
       { path: '/tasks/:id/review', element: <ReviewPage />, handle: { wide: true } },
       { path: '/transcripts/:id', element: <TranscriptPage /> },

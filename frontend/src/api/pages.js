@@ -32,5 +32,8 @@ export const fctlDoc = () => api('/api/docs/fctl')
 /** 041 Q3: `?task=` or `?transcript=` only when the route has an all-digit id; otherwise no query. */
 export const sidebarPage = (query) => api(`/api/pages/sidebar${query ? `?${new URLSearchParams(query)}` : ''}`)
 
+/** 103: an automation, its runs newest first with their transcripts, and the Run menu's state. */
+export const automationRunsPage = (fid) => api(`/api/pages/factories/${encodeURIComponent(fid)}/runs`)
+
 /** 053: every running run with its agents, and the last 20 ended runs. */
 export const agentsPage = () => api('/api/pages/agents')
