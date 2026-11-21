@@ -207,6 +207,42 @@ test('FE7: recent rows show the run, links, how it ended, the duration, and tran
   expect(within(region('Recent')).getByText('No runs yet.')).toBeTruthy()
 })
 
+// --- 102: automation runs -------------------------------------------------------------------------------
+
+const automation = (extra = {}) =>
+  running({ kind: 'automation', task_id: null, factory_id: 9, title: 'Security audit', stage: null, round: null, ...extra })
+const DELETED = { factory_id: null, title: 'deleted automation', project_id: null, project: null }
+
+test('102 AC28: an automation card shows automation, its name linking to the designer, the project; no stage, round, or Run log; Stop posts', async () => {
+  const { fetch } = await open(page([automation()]), { [`POST ${STOP}`]: [200, { id: 41, status: 'stopped' }] })
+  const row = within(card())
+  expect(head().textContent).toBe('automationSecurity auditapi-server')
+  expect(href(row.getByRole('link', { name: 'Security audit' }))).toBe('/projects/3/factories/9')
+  expect(href(row.getByRole('link', { name: 'api-server' }))).toBe('/projects/3')
+  expect(row.queryByRole('link', { name: 'Run log' })).toBeNull()
+  fireEvent.click(row.getByRole('button', { name: 'Stop' }))
+  await waitFor(() => expect(fetch.mock.calls.some(([url, init]) => url === STOP && init.method === 'POST')).toBe(true))
+})
+
+test('102 AC28, Q14: a deleted automation reads deleted automation as plain text, with no project link', async () => {
+  await open(page([automation(DELETED)]))
+  expect(head().textContent).toBe('automationdeleted automation')
+  expect(within(card()).queryAllByRole('link')).toEqual([])
+  expect(within(card()).getByRole('button', { name: 'Stop' })).toBeTruthy()
+})
+
+test('102 AC29: a Recent automation row shows its name like the card, and its transcripts as plain text', async () => {
+  const auto = recent(50, { kind: 'automation', task_id: null, factory_id: 9, title: 'Security audit', transcripts: 2 })
+  const gone = recent(51, { kind: 'automation', task_id: null, ...DELETED, transcripts: 1 })
+  await open(page([], [auto, gone]))
+  const [first, second] = recentRows()
+  expect(href(within(first).getByRole('link', { name: 'Security audit' }))).toBe('/projects/3/factories/9')
+  expect(within(first).getByText('2 transcripts').tagName).toBe('SPAN')
+  expect(within(first).queryByRole('link', { name: /transcript/ })).toBeNull()
+  expect(within(second).queryAllByRole('link')).toEqual([])
+  expect(within(second).getByText('deleted automation')).toBeTruthy()
+})
+
 test('FE8: polls every 3 s, and after a good load the offline banner comes and goes; a 404 is not-found', async () => {
   vi.useFakeTimers()
   const responses = { [`GET ${PAGE}`]: [200, page()] }

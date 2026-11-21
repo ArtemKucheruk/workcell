@@ -1317,6 +1317,68 @@ fctl task retry 12
 fctl task retry 12 --account b@y
 ```
 
+## fctl task delete
+
+Deletes a task, like the board card's **Delete**. Calls `GET /api/tasks/{id}` for its title, asks to
+confirm, then calls `DELETE /api/tasks/{id}`. The app forgets the task's runs, rounds and their files,
+verdicts, comments, decisions, status history, and transcript records. Its worktree, branch, run logs,
+and copied transcript files stay on disk.
+
+**Synopsis**
+
+```
+fctl task delete <id> [--yes]
+```
+
+Task ids are global, so it works from any directory.
+
+**Arguments and flags**
+
+- `<id>`: the task.
+- `--yes`: delete without asking. Off a terminal (a script, a pipe) it is required.
+
+**Stdin**
+
+On a terminal without `--yes`, one line: the answer to the prompt. `y` or `yes`, in any case, deletes;
+anything else, an empty line, or end of input keeps the task. With `--yes` stdin isn't read.
+
+**Output**
+
+Without `--yes`, the prompt first:
+
+```
+Delete #14 Export CSV?
+This removes its runs, rounds and their files, verdicts, comments, decisions, status history, and transcript records from the app. Its worktree, branch, run logs, and copied transcript files stay on disk.
+Delete? [y/N] y
+```
+
+Then, once deleted:
+
+```
+Deleted #14 Export CSV
+```
+
+**Exit codes and errors**
+
+- `fctl: not a terminal; pass --yes to delete #14 without asking`: no `--yes` off a terminal; no
+  request is made, exit `1`.
+- `fctl: not deleted`: the prompt was answered with anything but `y`; nothing is deleted, exit `1`.
+- `fctl: 404 Not Found`: no task #14 (from the title lookup), exit `1`.
+- `fctl: 409 run #41 active`: the task's run is running; stop it first, then delete, exit `1`.
+- A non-integer `<id>`: a usage error, exit `2`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me.
+
+**Example**
+
+```sh
+fctl task delete 14 --yes
+```
+
 ## fctl run
 
 Starts a factory run: `/factory <id>` in the task's worktree. Calls `POST /api/tasks/{id}/run`, or
@@ -1418,6 +1480,68 @@ approve its own work or start other runs.
 ```sh
 fctl run next
 fctl run 12 --account b@y
+```
+
+## fctl automation run
+
+Starts an automation by hand (**Run now** on the Workflows page): its compiled skill, `/<slug>`,
+headless on the repo itself, with no board task. Calls `POST /api/factories/{id}/run`.
+
+**Synopsis**
+
+```
+fctl automation run <id> [--account <id|email>]
+```
+
+**Arguments and flags**
+
+- `<id>`: the automation, its id on the Workflows page (`/projects/3/factories/7` is `7`). It works
+  from any directory. Not a number: argparse's usage error.
+- `--account <id|email>`: the Claude account to run in, by id or email, as for
+  [fctl run](#fctl-run). Without it, no body is sent and the app picks with **Auto**.
+
+**Stdin**
+
+none
+
+**Output**
+
+The run, its account, and its worktree, then the Agents page, where it shows under the automation's
+name:
+
+```
+Run #43 of automation #7 as b@y in .claude/worktrees/automation-security-audit-1a2b3c4d → http://127.0.0.1:4545/agents
+```
+
+Every run gets a fresh worktree from the default branch, on a new branch
+`automation/<slug>-<first 8 characters of the session id>`, made and filled with the ignored files
+as for `fctl run`. Two runs of one automation run side by side; only the run cap limits them. The
+worktree and branch stay after the run.
+
+**Exit codes and errors**
+
+- `fctl: 404 Factory #99 not found`, exit `1`.
+- `fctl: 409 Review loop is a workflow; run it on a task from the board`, exit `1`.
+- `fctl: 409 2 runs active (#41 on #12, #43 on automation Security audit); the limit is 2. Wait,
+  stop one, or raise it in Settings`: the run cap is full, exit `1`.
+- `fctl: 409 automation Security audit isn't committed on main: open it, Files → Write to repo, then
+  on main run git add .claude/skills/security-audit .claude/agents && git commit -m "Add factory"`:
+  its `.claude/skills/<slug>/SKILL.md` isn't committed on the default branch, exit `1`.
+- `fctl run`'s worktree, account, auth, and spawn refusals, exit `1`. A refusal after the worktree
+  is made removes it and its branch again.
+- `fctl: no Claude account b@y`: no account has that email; no run is started, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me. A run can't call it.
+
+**Example**
+
+```sh
+fctl automation run 7
+fctl automation run 7 --account b@y
 ```
 
 ## fctl rework

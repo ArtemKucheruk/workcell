@@ -327,9 +327,13 @@ def agents(runs: RunsRepo) -> dict:
     runs. No git, no claude."""
     # ponytail: each 3 s poll reads the running run's whole log, as handlers/runs.log does; keep a byte
     # offset and the parsed agents per run if logs get big
-    return {"running": [dict(r) | {"kind": "factory", "agents": run_agents(log_lines(r["log_path"]))}
-                        for r in runs.running_rows()],
-            "recent": runs.recent(RECENT)}
+    return {"running": [named(r) | {"agents": run_agents(log_lines(r["log_path"]))} for r in runs.running_rows()],
+            "recent": [named(r) for r in runs.recent(RECENT)]}
+
+
+def named(row) -> dict:
+    """102 AC16, AC17, Q9: an Agents row as a dict, a deleted automation's titled `deleted automation`."""
+    return dict(row) | ({"title": "deleted automation"} if row["title"] is None else {})
 
 
 def sidebar(projects: ProjectsRepo, tasks: TasksRepo, transcripts: TranscriptsRepo, task: int | None,
@@ -362,10 +366,12 @@ def workspace(workspaces: WorkspacesRepo, projects: ProjectsRepo, git: Git, work
 
 def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,
           transcripts: TranscriptsRepo, workspaces: WorkspacesRepo, git: Git, claude: Claude,
-          accounts: ClaudeAccountsRepo, settings: SettingsRepo, project_id: int, may_sync: bool = True) -> dict:
+          accounts: ClaudeAccountsRepo, settings: SettingsRepo, usage: UsageRepo, project_id: int,
+          may_sync: bool = True) -> dict:
     """058: syncs factory/ first when board.json or backlog.md changed, so the columns already hold it. With
     `may_sync` False (a cross-site request, §4.5) it only reads the stored error. 096 AC29: the running runs
-    across all projects and the cap; at the cap, `can_run` is false."""
+    across all projects and the cap; at the cap, `can_run` is false. 102 AC19, Q12: for the Workflows page's
+    Run now, `runs_enabled` (the active account's claude.ai login) and the task page's `accounts` and `auto`."""
     # ponytail: each 3 s poll renders the whole page, one git call included (Q7);
     # add a /projects/{id}/board fragment route if that shows up in profiling
     project = projects.for_board(project_id)
@@ -387,14 +393,27 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
                                          "started_at": t["run"] and started[t["run"]["id"]]})
     factory = factory_state(git, project["path"], project["default_branch"])
     active, cap = len(runs.running_ids()), settings.max_concurrent_runs()
+    logged_in = claude_login(claude, accounts)[1]
+    listed, auto = run_menu(accounts, usage, time.time())
     return {
         "project": project, "workspaces": workspaces.all(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
         "runs_active": active, "max_concurrent_runs": cap,
         # Q4: the server's checks still decide
-        "can_run": factory == "ready" and active < cap and claude_login(claude, accounts)[1],
+        "can_run": factory == "ready" and active < cap and logged_in,
+        "runs_enabled": logged_in, "accounts": listed, "auto": auto,
         "factory_error": factory_error, "factory_files": factory_files(project["path"]),  # 059
     }
+
+
+def run_menu(accounts: ClaudeAccountsRepo, usage: UsageRepo, now: float) -> tuple[list[dict], dict | None]:
+    """097 AC26, 102 Q12: the Run menu's (accounts with their windows, Auto's first candidate or None), from the DB
+    alone (Q9: no claude call on the poll)."""
+    rows, listed = accounts.all(), accounts_usage(accounts, usage, now)
+    candidates = rank(rows, usage.latest(), now)[0]
+    auto = {"account_id": candidates[0]["id"], "label": label(candidates[0]["email"], candidates[0]["config_dir"])
+            } if candidates else None
+    return [{k: a[k] for k in ("id", "label", "active", "five_hour", "seven_day")} for a in listed], auto
 
 
 def summaries(rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int) -> list[dict]:
@@ -437,17 +456,12 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
         named = f"CLAUDE_CONFIG_DIR={shlex.quote(own['config_dir'])} " if own else ""
         takeover = (f"docker compose exec -w {wt} {named and f'-e {named}'}backend claude --resume {session}"
                     if config.in_docker() else f"cd {wt} && {named}claude --resume {session}")  # 028 Q7
-    now = time.time() if now is None else now
-    rows, listed = accounts.all(), accounts_usage(accounts, usage, now)
-    candidates = rank(rows, usage.latest(), now)[0]
-    auto = {"account_id": candidates[0]["id"], "label": label(candidates[0]["email"], candidates[0]["config_dir"])
-            } if candidates else None
+    listed, auto = run_menu(accounts, usage, time.time() if now is None else now)
     run_out = run and {k: run[k] for k in ("id", "status", "error", "session_id", "started_at")} | {
         "account": label(run["email"], run["config_dir"]) if run["config_dir"] else None}
     return {
         "run": run_out, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
-        "accounts": [{k: a[k] for k in ("id", "label", "active", "five_hour", "seven_day")} for a in listed],
-        "auto": auto,
+        "accounts": listed, "auto": auto,
         "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4
         "task": found, "pr": page_pr(git, found),
         "rounds": summaries(rounds, reviews, task_id), "posted": posted_verdicts(reviews, task_id),

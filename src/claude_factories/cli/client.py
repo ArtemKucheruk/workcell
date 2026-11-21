@@ -27,7 +27,7 @@ def api(method: str, path: str, body=None, data: bytes | None = None, content_ty
         with urllib.request.urlopen(req) as resp:
             raw = resp.read()
             if resp.headers.get_content_type() == "application/json":
-                return json.loads(raw)
+                return json.loads(raw) if raw else None  # 105: a 204 (DELETE /api/tasks/{id}) can still say JSON
             if resp.headers.get_content_type() == "application/zip":
                 return raw
             return raw.decode()

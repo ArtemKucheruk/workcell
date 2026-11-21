@@ -173,12 +173,13 @@ class RunAgent(BaseModel):
 
 class RunningRun(BaseModel):
     id: int
-    kind: Literal["factory"]  # scheduled runs join later (MVP §9)
-    task_id: int
-    title: str
-    project_id: int
-    project: str
-    stage: str | None
+    kind: Literal["factory", "automation"]  # 102: a task run, or an automation's (MVP §9)
+    task_id: int | None  # 102: null for an automation run
+    factory_id: int | None  # 102: the automation; null for a task run or a deleted automation
+    title: str  # the task's title, the automation's name, or `deleted automation` (Q9)
+    project_id: int | None  # 102 Q9: null once the automation is deleted
+    project: str | None
+    stage: str | None  # null for an automation run
     round: int | None  # Q4: the task's highest rounds.n
     started_at: str
     agents: list[RunAgent]  # the orchestrator first, then one per Agent tool_use in log order
@@ -186,10 +187,12 @@ class RunningRun(BaseModel):
 
 class RecentRun(BaseModel):
     id: int
-    task_id: int
+    kind: Literal["factory", "automation"]  # 102: as RunningRun
+    task_id: int | None
+    factory_id: int | None
     title: str
-    project_id: int
-    project: str
+    project_id: int | None
+    project: str | None
     status: Literal["succeeded", "failed", "stopped"]
     error: str | None
     started_at: str
@@ -272,6 +275,9 @@ class BoardPage(BaseModel):
     columns: dict[str, list[Card]]  # backlog, in_progress, review, done
     factory_error: str | None  # 058 Q10: the last automatic factory/ sync's refusal
     factory_files: list[str]  # 059 Q3: Create factory's paths on disk now, the order it writes them
+    runs_enabled: bool  # 102 AC19: the active account is logged in to claude.ai (claude_login)
+    accounts: list["RunAccount"]  # 102 Q12: the Workflows page's Run menu, as the task page's
+    auto: "AutoPick | None"
 
 
 # --- GET /api/pages/tasks/{id} (§8 item 4) ---------------------------------------------

@@ -12,13 +12,15 @@ class FactoriesRepo:
     def for_project(self, project_id: int) -> list[sqlite3.Row]:
         """The Factories list: by name, then id (Q7), with the node count read from the stored JSON."""
         return self.conn.execute(
-            "SELECT id, name, json_array_length(graph, '$.nodes') AS nodes, created_at, updated_at FROM factories"
-            " WHERE project_id = ? ORDER BY name, id",
+            "SELECT id, name, kind, json_array_length(graph, '$.nodes') AS nodes, created_at, updated_at"
+            " FROM factories WHERE project_id = ? ORDER BY name, id",
             (project_id,),
         ).fetchall()
 
     def graphs(self, project_id: int) -> list[sqlite3.Row]:
-        """089 Q1: the project's designs with their stored graph JSON, newest updated_at first, then highest id."""
+        """089 Q1: the project's designs with their stored graph JSON, newest updated_at first, then highest id.
+        ponytail: 101 Q6: automations are included too, so a task run may pick one; filtering by kind is the
+        run/scheduler tasks' job."""
         return self.conn.execute(
             "SELECT id, name, graph FROM factories WHERE project_id = ? ORDER BY updated_at DESC, id DESC",
             (project_id,),
@@ -27,9 +29,18 @@ class FactoriesRepo:
     def get(self, factory_id: int) -> sqlite3.Row | None:
         """<Factory>'s columns, with the project's and workspace's names as they are now."""
         return self.conn.execute(
-            "SELECT f.id, f.project_id, p.name AS project, p.workspace_id, w.name AS workspace, f.name, f.graph,"
+            "SELECT f.id, f.project_id, p.name AS project, p.workspace_id, w.name AS workspace, f.name, f.kind, f.graph,"
             " f.created_at, f.updated_at FROM factories f JOIN projects p ON p.id = f.project_id"
             " JOIN workspaces w ON w.id = p.workspace_id WHERE f.id = ?",
+            (factory_id,),
+        ).fetchone()
+
+    def for_run(self, factory_id: int) -> sqlite3.Row | None:
+        """102: what an automation run needs: its name and kind, and its project's path, default branch, and test
+        command."""
+        return self.conn.execute(
+            "SELECT f.id, f.name, f.kind, p.path, p.default_branch, p.test_cmd FROM factories f"
+            " JOIN projects p ON p.id = f.project_id WHERE f.id = ?",
             (factory_id,),
         ).fetchone()
 
@@ -39,11 +50,11 @@ class FactoriesRepo:
         ).fetchone()
         return None if row is None else row[0]
 
-    def add(self, project_id: int, name: str, graph: str) -> int:
+    def add(self, project_id: int, name: str, graph: str, kind: str = "workflow") -> int:
         now = db.now()
         return self.conn.execute(
-            "INSERT INTO factories (project_id, name, graph, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (project_id, name, graph, now, now),
+            "INSERT INTO factories (project_id, name, kind, graph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, name, kind, graph, now, now),
         ).lastrowid
 
     def update(self, factory_id: int, fields: dict) -> None:

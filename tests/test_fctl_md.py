@@ -149,6 +149,20 @@ def test_task_block_sections():  # 094 AC21: the new commands' rows, and fctl ru
     assert "409 all backlog tasks are blocked: #15 waits on #12, #14" in run
 
 
+def test_task_delete_section():  # 105 AC16, AC18
+    body = section("task delete")
+    for text in ("fctl task delete <id> [--yes]", "`--yes`", "Deleted #14 Export CSV", "fctl: 404 Not Found",
+                 "fctl: 409 run #41 active", "fctl: not deleted", "pass --yes to delete #14 without asking"):
+        assert text in body, text
+    doc = (REPO / "docs" / "claude-code.md").read_text()
+    commands = doc[doc.index("### 7.2 Commands"):doc.index("### 7.3")]
+    [row] = [line for line in commands.splitlines() if line.startswith("| `fctl task delete <id> [--yes]`")]
+    assert row == ("| `fctl task delete <id> [--yes]` | me | `DELETE /api/tasks/{id}` (after `GET /api/tasks/{id}` for"
+                   " the title) |")
+    api = (REPO / "docs" / "data-model-and-api.md").read_text()
+    assert "(board Delete, fctl task delete 14)" in api
+
+
 def test_run_account_section():  # 097 AC33
     run = section("run")
     for text in ("fctl run <id> [--account <id|email>]", "Run #41 on #12 as b@y →",
@@ -181,6 +195,19 @@ def test_task_retry_docs(client):  # 106 AC10, AC11
 def test_task_retry_not_allowed_to_agents():  # 106 AC12
     from claude_factories.handlers.runs import ALLOWED_TOOLS
     assert not any("retry" in rule or "task" in rule for rule in ALLOWED_TOOLS)
+
+
+def test_automation_run_section():  # 102 AC22; the parametrized tests above check its labels and flags
+    body = section("automation run")
+    for text in ("fctl automation run <id> [--account <id|email>]", "POST /api/factories/{id}/run",
+                 "Run #43 of automation #7 as b@y in .claude/worktrees/automation-security-audit-1a2b3c4d →",
+                 "404 Factory #99 not found",
+                 "is a workflow; run it on a task from the board", "#43 on automation Security audit",
+                 "isn't committed on main: open it, Files → Write to repo"):
+        assert text in body, text
+    doc = (REPO / "docs" / "claude-code.md").read_text()
+    commands = doc[doc.index("### 7.2 Commands"):doc.index("### 7.3")]
+    assert "| `fctl automation run <id> [--account <id\\|email>]`" in commands
 
 
 def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example

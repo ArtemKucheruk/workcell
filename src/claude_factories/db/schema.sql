@@ -33,16 +33,22 @@ CREATE TABLE IF NOT EXISTS task_deps (    -- 094: task_id waits on blocked_by_id
   blocked_by_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,  -- deleting either task drops the link
   PRIMARY KEY (task_id, blocked_by_id));
 
+-- 102: db.init() rebuilds a pre-102 runs table (no kind column) into this one, ids and values kept
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY,
-  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  task_id INTEGER REFERENCES tasks(id),   -- NULL only for an automation run (102)
   session_id TEXT NOT NULL,               -- passed as --session-id; enables takeover
   pid INTEGER,
   status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','stopped')),
   exit_code INTEGER, error TEXT,
   log_path TEXT NOT NULL,
   started_at TEXT NOT NULL, ended_at TEXT,
-  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);  -- 096 Q5: its account; NULL = the active one (pre-096); db.init() adds it
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL,  -- 096 Q5: its account, NULL = the active one
+  factory_id INTEGER REFERENCES factories(id) ON DELETE SET NULL,  -- 102: the automation; NULL for a task run or once deleted
+  kind TEXT NOT NULL DEFAULT 'factory' CHECK (kind IN ('factory','automation')),  -- 102: a task run, or an automation's
+  trigger TEXT NOT NULL DEFAULT 'manual' CHECK (trigger IN ('manual','schedule')),  -- 102 Q17: schedule is the scheduler's
+  worktree_path TEXT,                     -- 102 Q4: an automation run's own worktree; a task run uses tasks.worktree_path
+  CHECK ((kind = 'factory') = (task_id IS NOT NULL)));
 -- 096: one running run per task; settings.max_concurrent_runs caps them all. db.init() drops the old global one_active_run
 CREATE UNIQUE INDEX IF NOT EXISTS one_run_per_task ON runs(task_id) WHERE status = 'running';
 
@@ -98,7 +104,7 @@ CREATE TABLE IF NOT EXISTS events (                     -- status/stage history
 CREATE TABLE IF NOT EXISTS transcripts (  -- 030: a run's copied Claude Code transcripts
   id INTEGER PRIMARY KEY,
   run_id INTEGER NOT NULL REFERENCES runs(id),
-  task_id INTEGER NOT NULL REFERENCES tasks(id),
+  task_id INTEGER REFERENCES tasks(id),   -- 102: NULL for an automation run's; db.init() rebuilds a NOT NULL one
   agent_type TEXT,                        -- 'orchestrator' for the run's own session, else the agent type
   name TEXT,                              -- a teammate's name, e.g. builder-12
   round INTEGER,                          -- n from "Job|Task <id>, round <n>." in its first prompt
@@ -114,7 +120,9 @@ CREATE TABLE IF NOT EXISTS factories (    -- 051: a project's named factory desi
   project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   graph TEXT NOT NULL,                    -- the compact JSON of docs/data-model-and-api.md §6.1's <Graph>
-  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  -- 101: a workflow runs on board tasks, an automation on the repo; fixed at creation. db.init() adds it
+  kind TEXT NOT NULL DEFAULT 'workflow' CHECK (kind IN ('workflow','automation')));
 CREATE UNIQUE INDEX IF NOT EXISTS factories_name ON factories(project_id, name);
 
 CREATE TABLE IF NOT EXISTS claude_accounts (  -- 056: Claude logins, each its own CLAUDE_CONFIG_DIR; runs use the active one

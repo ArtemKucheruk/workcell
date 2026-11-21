@@ -129,8 +129,8 @@ the factory's reviewers run it this way.
    decides, not the one on disk. Meanwhile the board's automatic `factory/` sync
    (`docs/data-model-and-api.md §6.1` import-factory) keeps showing the bootstrap's jobs.
 
-Design a factory: Project → **Factories** → **+ New factory** (a name and a template) → the designer
-opens on the template's graph → drag or click agents and conditions from the palette, connect handles, and edit the
+Design a factory: Project → **Workflows** → **+ New workflow** or **+ New automation** (a name and a template) →
+the designer opens on the template's graph → drag or click agents and conditions from the palette, connect handles, and edit the
 selected node in the side panel → **Save** or Ctrl/⌘+S. Save shows a refusal (a bad graph,
 `docs/data-model-and-api.md §6.1`) beside it, and the design stays unsaved. → **Files** shows the
 last saved design compiled into Claude Code files (`docs/claude-code.md §7.3`):
@@ -140,6 +140,13 @@ writes them with step 2's writer: existing files skipped unless *Overwrite*, the
 skipped lists, and a commit hint naming `.claude/skills/<factory-slug>`. A design reaches
 `.claude/` only through Write to repo, and runs use `.claude/skills/factory/`: only a factory
 whose name slugs to `factory` writes the skill runs start, and step 4 is unchanged.
+
+A design's kind is fixed when it is created (101): a **workflow** is the factory loop, run on board tasks; an
+**automation** runs on the repo itself, with no task (Security audit, Test coverage). The Workflows page lists
+each kind in its own section with its own **+ New**: + New automation offers the templates built for repo runs
+(Security audit, Test coverage), + New workflow the rest, Standard checked. The designer is the same for both and
+shows the kind beside the name. An automation runs by hand with **Run now** on its row (102, §4.4); scheduling it
+comes later (§9).
 
 The templates (088; graphs in `docs/data-model-and-api.md §6.1`, agents in `docs/claude-code.md §7.3`):
 - **Standard** (the default): the default loop. Spec, build, then security, UX, UI, and code reviews; up to 2
@@ -478,6 +485,28 @@ claude -p "/factory 12" \
   Disconnect stay refused while any run is active. A failed copy leaves that file out and never
   fails the run.
 
+**An automation's run (102).** **Run now** on an automation's row (or `fctl automation run <id>`) runs its compiled
+skill on the repo itself, with no board task:
+```
+wt -C /Users/artem/code/api-server switch --create automation/security-audit-1a2b3c4d --base main \
+   --no-cd --no-hooks --format json                    # every run: a fresh worktree
+wt -C /Users/artem/code/api-server/.claude/worktrees/automation-security-audit-1a2b3c4d step copy-ignored
+cd /Users/artem/code/api-server/.claude/worktrees/automation-security-audit-1a2b3c4d
+claude -p "/security-audit" --session-id 1a2b3c4d-…  …    # the same flags and tool lists as a task run
+```
+- The checks: the automation exists (404), is an automation and not a workflow (409), the run cap, then its
+  `.claude/skills/<slug>/SKILL.md` committed on the default branch (409 naming Write to repo and the commit). Then
+  the worktree and the copy, then the account and auth, as for a task run.
+- Every run gets its own worktree and branch, named by the session id's first 8 characters, since the run's id
+  doesn't exist yet. Two runs of one automation run side by side; only the cap limits them, and it counts both
+  kinds. A refusal after the worktree is made removes it again (`wt remove`, then `git branch -d`), so failed
+  attempts leave nothing behind. After the run, the worktree and branch stay.
+- The run row has no task: `kind = 'automation'`, `factory_id`, `trigger = 'manual'`, and its own
+  `worktree_path`, where the transcripts are collected from. No task moves and no event is written. The log,
+  usage snapshot, failed-run error, Stop, and the startup sweep work as for a task run.
+- The prompt is `/<slug>` with no argument. The compiled SKILL.md is still the task orchestrator, which expects a
+  task id; a task-free automation template is a follow-up.
+
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.
 - Both servers, `fctl serve` and the frontend server, bind `127.0.0.1` by default.
@@ -621,8 +650,10 @@ Rules:
 - `fctl serve`, `fctl setup`, and the CLI in §7.2.
 - Workspaces, projects, and `/factory-connect`.
 - Create factory (templates → `.claude/`).
-- Factory designer: named factories per project, designed on a canvas, with any reviewer set (§3.2).
+- Factory designer: named factories per project, designed on a canvas, with any reviewer set (§3.2), each a
+  workflow or an automation.
 - Tasks, the board with drag and drop, Run / Run next / Stop / Retry, and run logs.
+- **Run now** on an automation: a headless run on the repo, with no task (§4.4).
 - Subscription-only runs with the auth check (§4.3), one per task, up to a global cap at once.
 - Headless runs in worktrees, rework on Request changes, and takeover by
   `claude --resume`.
@@ -649,8 +680,11 @@ Rules:
 - Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
 - Worktree browsing on the code page.
-- Scheduled runs (cron checkup agents, other codebase automations), each a run of its own kind
-  beside `factory` on the Agents page.
+- Scheduled runs (cron checkup agents, other codebase automations). What they run are automations, the designs of
+  kind `automation` made on the Workflows page (§3.2); scheduling them moves to its own Scheduler page, and its
+  runs get `trigger = 'schedule'`. Starting an automation by hand is in already (102: **Run now**, `fctl
+  automation run`), as a run of kind `automation` beside `factory` on the Agents page (§4.4). Its own runs page,
+  and Create PR from an automation's branch, come with it.
 
 ---
 

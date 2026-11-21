@@ -235,7 +235,7 @@ def test_startup_adds_task_deps():  # 094 AC1
 
 
 TRANSCRIPT_COLUMNS = [  # 030 AC15: (name, type, notnull)
-    ("id", "INTEGER", 0), ("run_id", "INTEGER", 1), ("task_id", "INTEGER", 1), ("agent_type", "TEXT", 0),
+    ("id", "INTEGER", 0), ("run_id", "INTEGER", 1), ("task_id", "INTEGER", 0), ("agent_type", "TEXT", 0),  # 102
     ("name", "TEXT", 0), ("round", "INTEGER", 0), ("path", "TEXT", 1), ("model", "TEXT", 0),
     ("turns", "INTEGER", 1), ("input_tokens", "INTEGER", 1), ("cache_read_tokens", "INTEGER", 1),
     ("output_tokens", "INTEGER", 1), ("started_at", "TEXT", 0), ("ended_at", "TEXT", 0),
@@ -325,7 +325,8 @@ INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_
 
 
 FACTORY_COLUMNS = [("id", "INTEGER", 0), ("project_id", "INTEGER", 1), ("name", "TEXT", 1), ("graph", "TEXT", 1),
-                   ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1)]  # 051 BE1: (name, type, notnull)
+                   ("created_at", "TEXT", 1), ("updated_at", "TEXT", 1),
+                   ("kind", "TEXT", 1)]  # 051 BE1: (name, type, notnull); 101 AC1: kind
 
 
 def assert_factories_table():
@@ -354,6 +355,43 @@ def test_old_db_gets_factories_table():  # 051 BE1: a factory.db made before thi
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]
         assert conn.execute("SELECT id FROM workspaces").fetchall() == [(1,)]
+
+
+FACTORY_ROW = f"INSERT INTO factories (project_id, name, graph, created_at, updated_at) VALUES (1, ?, '{{}}', '{NOW}', '{NOW}')"
+
+
+def test_fresh_db_factory_kind():  # 101 AC1
+    start_app()
+    with closing(db.connect()) as conn:
+        [kind] = [c for c in conn.execute("PRAGMA table_info(factories)") if c[1] == "kind"]
+        assert (kind[2], kind[3], kind[4]) == ("TEXT", 1, "'workflow'")
+        assert "CHECK (kind IN ('workflow','automation'))" in conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'factories'").fetchone()[0]
+        conn.execute("INSERT INTO workspaces (name, created_at) VALUES ('w', ?)", (NOW,))
+        conn.execute("INSERT INTO projects (workspace_id, name, path, default_branch, created_at)"
+                     " VALUES (1, 'p', '/p', 'main', ?)", (NOW,))
+        conn.execute(FACTORY_ROW, ("a",))
+        assert conn.execute("SELECT kind FROM factories").fetchall() == [("workflow",)]
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE factories SET kind = 'nightly'")
+
+
+def test_old_db_gets_factory_kind():  # 101 AC2
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + """
+CREATE TABLE factories (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, graph TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+""")
+        conn.execute(FACTORY_ROW, ("old",))
+        conn.commit()
+    db.init()
+    db.init()  # a second init skips the ALTER
+    with closing(db.connect()) as conn:
+        assert [c[1] for c in conn.execute("PRAGMA table_info(factories)")].count("kind") == 1
+        assert conn.execute("SELECT name, kind FROM factories").fetchall() == [("old", "workflow")]
+    assert_factories_table()
 
 
 def accounts() -> list[tuple]:
@@ -436,3 +474,93 @@ def test_old_db_gets_context_items_table():  # 057 BE1: a factory.db made before
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT project_id, title FROM context_items").fetchall() == [(1, "kept")]
         assert conn.execute("SELECT id, name FROM projects").fetchall() == [(1, "p")]
+
+
+# --- 102: runs without a task (automation runs) --------------------------------------------------------------
+
+RUN_ROW = ("INSERT INTO runs (task_id, session_id, status, log_path, started_at, kind, factory_id)"
+           " VALUES (?, 's', 'succeeded', 'l', ?, ?, ?)")
+
+
+def seed_project(conn):
+    conn.execute("INSERT INTO workspaces (id, name, created_at) VALUES (1, 'w', ?)", (NOW,))
+    conn.execute("INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at)"
+                 " VALUES (1, 1, 'p', '/p', 'main', ?)", (NOW,))
+    conn.execute("INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)"
+                 " VALUES (1, 1, 't', 'in_progress', 1, ?, ?)", (NOW, NOW))
+    conn.execute(FACTORY_ROW, ("Security audit",))
+
+
+def test_fresh_db_automation_runs():  # 102 AC1
+    db.init()
+    with closing(db.connect()) as conn, conn:
+        columns = {c[1]: (c[2], c[3], c[4]) for c in conn.execute("PRAGMA table_info(runs)")}
+        assert columns["task_id"] == ("INTEGER", 0, None)
+        assert columns["factory_id"] == ("INTEGER", 0, None)
+        assert columns["kind"] == ("TEXT", 1, "'factory'")
+        assert columns["trigger"] == ("TEXT", 1, "'manual'")
+        assert columns["worktree_path"] == ("TEXT", 0, None)
+        fks = {(fk[2], fk[3], fk[4], fk[6]) for fk in conn.execute("PRAGMA foreign_key_list(runs)")}
+        assert ("factories", "factory_id", "id", "SET NULL") in fks
+        assert [c for c in conn.execute("PRAGMA table_info(transcripts)") if c[1] == "task_id"][0][3] == 0
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'one_run_per_task'").fetchone()
+        seed_project(conn)
+        conn.execute(RUN_ROW, (None, NOW, "automation", 1))
+        conn.execute(RUN_ROW, (1, NOW, "factory", None))
+        assert conn.execute("SELECT kind, trigger FROM runs ORDER BY id").fetchall() == [
+            ("automation", "manual"), ("factory", "manual")]
+        for bad in ((None, NOW, "factory", None), (1, NOW, "automation", 1), (1, NOW, "nightly", None)):
+            with pytest.raises(sqlite3.IntegrityError):
+                conn.execute(RUN_ROW, bad)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE runs SET trigger = 'cron'")
+
+
+BEFORE_102 = """
+CREATE TABLE runs (id INTEGER PRIMARY KEY, task_id INTEGER NOT NULL REFERENCES tasks(id), session_id TEXT NOT NULL,
+  pid INTEGER, status TEXT NOT NULL CHECK (status IN ('running','succeeded','failed','stopped')), exit_code INTEGER,
+  error TEXT, log_path TEXT NOT NULL, started_at TEXT NOT NULL, ended_at TEXT,
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL);
+CREATE UNIQUE INDEX one_run_per_task ON runs(task_id) WHERE status = 'running';
+CREATE TABLE transcripts (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL REFERENCES runs(id),
+  task_id INTEGER NOT NULL REFERENCES tasks(id), agent_type TEXT, name TEXT, round INTEGER, path TEXT NOT NULL,
+  model TEXT, turns INTEGER NOT NULL, input_tokens INTEGER NOT NULL, cache_read_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL, started_at TEXT, ended_at TEXT, UNIQUE (run_id, path));
+"""
+
+
+def test_old_db_rebuilds_runs():  # 102 AC2
+    db.init()
+    with closing(db.connect()) as conn:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.executescript("DROP TABLE runs; DROP TABLE transcripts;" + BEFORE_102)
+        with conn:
+            seed_project(conn)
+            conn.execute("INSERT INTO runs VALUES (5, 1, 's5', 42, 'failed', 1, 'boom', '/l5', ?, ?, 1)", (NOW, NOW))
+            conn.execute("INSERT INTO runs VALUES (7, 1, 's7', NULL, 'running', NULL, NULL, '/l7', ?, NULL, NULL)",
+                         (NOW,))
+            conn.execute("INSERT INTO transcripts VALUES (3, 5, 1, 'orchestrator', NULL, 1, '5/a.jsonl', 'm', 2, 10,"
+                         " 20, 30, ?, ?)", (NOW, NOW))
+            conn.execute("INSERT INTO usage_snapshots VALUES (5, 1, 0.5, 1, 'allowed', 0.2, 2, 'allowed', NULL, 0,"
+                         " 0, ?)", (NOW,))
+        runs_before = conn.execute("SELECT * FROM runs ORDER BY id").fetchall()
+        transcripts_before = conn.execute("SELECT * FROM transcripts").fetchall()
+    db.init()
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT id, task_id, session_id, pid, status, exit_code, error, log_path, started_at,"
+                            " ended_at, account_id FROM runs ORDER BY id").fetchall() == runs_before
+        assert conn.execute("SELECT kind, trigger, factory_id, worktree_path FROM runs").fetchall() == [
+            ("factory", "manual", None, None)] * 2
+        assert conn.execute("SELECT * FROM transcripts").fetchall() == transcripts_before
+        assert conn.execute("SELECT run_id FROM usage_snapshots").fetchall() == [(5,)]
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'one_run_per_task'").fetchone()
+        assert [c for c in conn.execute("PRAGMA table_info(transcripts)") if c[1] == "task_id"][0][3] == 0
+        with pytest.raises(sqlite3.IntegrityError):  # one_run_per_task is back: task 1 already runs #7
+            conn.execute("INSERT INTO runs (task_id, session_id, status, log_path, started_at)"
+                         " VALUES (1, 's', 'running', 'l', ?)", (NOW,))
+        schema = conn.execute("SELECT name, sql FROM sqlite_master ORDER BY name").fetchall()
+    db.init()  # a second init changes nothing
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT name, sql FROM sqlite_master ORDER BY name").fetchall() == schema
+        assert conn.execute("SELECT COUNT(*) FROM runs").fetchone() == (2,)

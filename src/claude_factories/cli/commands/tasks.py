@@ -1,4 +1,5 @@
 import argparse
+import sys
 from pathlib import Path
 
 from ..client import api, base_url
@@ -52,6 +53,32 @@ def task_retry(args):
         fail(f"run #{run['id']} is running on #{args.id}; wait for it or stop it")
     body = {"account_id": account_id(args.account)} if args.account is not None else None
     print_run(args.id, api("POST", f"/api/tasks/{args.id}/run", body))
+
+
+# 105 AC10: the board's delete dialog sentence (BoardPage.jsx DeleteTask), word for word
+REMOVES = ("This removes its runs, rounds and their files, verdicts, comments, decisions, status history, and transcript"
+           " records from the app. Its worktree, branch, run logs, and copied transcript files stay on disk.")
+
+
+def task_delete(args):
+    """105: DELETE /api/tasks/{id} after a confirmation that --yes skips. Q5: off a TTY without --yes it refuses before
+    any request. Q3: the GET runs even with --yes, so the output names the title; its 404 shows as given.
+    Q6: no early refusal for a running run: the DELETE's 409 shows as given. Q7: the prompt goes to stdout."""
+    if not args.yes and not sys.stdin.isatty():
+        fail(f"not a terminal; pass --yes to delete #{args.id} without asking")
+    task = api("GET", f"/api/tasks/{args.id}")
+    name = f"#{task['id']} {task['title']}"
+    if not args.yes:
+        print(f"Delete {name}?")
+        print(REMOVES)
+        try:
+            answer = input("Delete? [y/N] ")
+        except EOFError:  # Q4: EOF counts as no
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            fail("not deleted")
+    api("DELETE", f"/api/tasks/{args.id}")
+    print(f"Deleted {name}")
 
 
 def export(args):
