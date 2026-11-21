@@ -40,6 +40,12 @@ def factory_state(git: Git, path: str, default_branch: str) -> str:
     return "uncommitted" if os.path.isfile(os.path.join(path, SKILL)) else "none"
 
 
+def skill_committed(git: Git, path: str, default_branch: str, skill: str) -> bool:
+    """102 AC9: `.claude/skills/<skill>/SKILL.md` is a blob on the default branch. One git call; git failing is
+    not committed."""
+    return git.blob(path, f"{default_branch}:.claude/skills/{skill}/SKILL.md")[0] is not None
+
+
 def factory_files(path: str) -> list[str]:
     """059 Q3: which of Create factory's paths exist on disk now, by its own skip test, in FACTORY_FILES order."""
     return [rel for rel in FACTORY_FILES if os.path.lexists(os.path.join(path, rel))]

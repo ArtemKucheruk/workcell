@@ -17,6 +17,23 @@ const TaskLink = ({ id, title, className = '' }) => (
 )
 const ProjectLink = ({ id, name }) => <Link to={`/projects/${id}`}>{name}</Link>
 
+/**
+ * 102 AC28, AC29, Q14: what a run works on. A task run's `#id title` links to the task; an automation run's name links
+ * to its designer, and once the automation is deleted (Q9) its `deleted automation` is plain text.
+ */
+function RunTitle({ run, className }) {
+  if (run.kind !== 'automation') return <TaskLink id={run.task_id} title={run.title} className={className} />
+  if (run.factory_id == null) return <span className={className}>{run.title}</span>
+  return (
+    <Link to={`/projects/${run.project_id}/factories/${run.factory_id}`} className={className}>
+      {run.title}
+    </Link>
+  )
+}
+
+/** 102 Q9: a deleted automation's run has no project; an empty cell keeps the Recent columns in place. */
+const RunProject = ({ run }) => (run.project_id == null ? <span /> : <ProjectLink id={run.project_id} name={run.project} />)
+
 // the Dashboard's group label: a run's kind, small and muted, so `factory` and later kinds read as a tag, not a pill
 const kindLabel = `text-xs font-semibold tracking-wide uppercase ${muted}`
 
@@ -60,10 +77,12 @@ function RunningRun({ run, onStop }) {
       <div className="grid gap-1.5 px-4 py-3">
         <p className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className={kindLabel}>{run.kind}</span>
-          <TaskLink id={run.task_id} title={run.title} className="font-medium wrap-anywhere" />
-          <span className="text-sm">
-            <ProjectLink id={run.project_id} name={run.project} />
-          </span>
+          <RunTitle run={run} className="font-medium wrap-anywhere" />
+          {run.project_id != null && (
+            <span className="text-sm">
+              <ProjectLink id={run.project_id} name={run.project} />
+            </span>
+          )}
           {(run.stage || run.round != null) && (
             <span className={`inline-flex flex-wrap items-baseline gap-1.5 text-sm ${muted}`}>
               <Stage stage={run.stage} />
@@ -78,9 +97,12 @@ function RunningRun({ run, onStop }) {
             <Time iso={run.started_at} relative />
             {` · elapsed ${duration(run.started_at, new Date().toISOString())}`}
           </p>
-          <Link to={`/tasks/${run.task_id}#run-log`} className="text-sm">
-            Run log
-          </Link>
+          {/* 102 Q14: an automation run's log has no page yet */}
+          {run.kind !== 'automation' && (
+            <Link to={`/tasks/${run.task_id}#run-log`} className="text-sm">
+              Run log
+            </Link>
+          )}
           <ActionButton action={() => onStop(run.id)} className={smallButton}>
             Stop
           </ActionButton>
@@ -99,17 +121,21 @@ function RunningRun({ run, onStop }) {
   )
 }
 
-/** FE7, Q5, Q6: how an ended run went, as plain text; its duration (`—` with no end); its transcripts, left out at 0. */
+/**
+ * FE7, Q5, Q6: how an ended run went, as plain text; its duration (`—` with no end); its transcripts, left out at 0.
+ * 102 AC29: an automation run's transcripts have no page yet, so their count is plain text.
+ */
 function RecentRow({ run }) {
   const n = run.transcripts
+  const count = `${n} ${n === 1 ? 'transcript' : 'transcripts'}`
   return (
     <li className="flex flex-wrap items-baseline gap-x-4 gap-y-1 bg-surface px-4 py-2.5 text-sm md:col-span-6 md:grid md:grid-cols-subgrid">
       <span className={`tabular-nums ${muted}`}>{`run #${run.id}`}</span>
-      <TaskLink id={run.task_id} title={run.title} className="font-medium wrap-anywhere" />
-      <ProjectLink id={run.project_id} name={run.project} />
+      <RunTitle run={run} className="font-medium wrap-anywhere" />
+      <RunProject run={run} />
       <span className="wrap-anywhere">{run.status === 'failed' && run.error ? `failed: ${run.error}` : run.status}</span>
       <span className={`tabular-nums ${muted} md:text-right`}>{duration(run.started_at, run.ended_at)}</span>
-      {n > 0 && <Link to={`/tasks/${run.task_id}`}>{`${n} ${n === 1 ? 'transcript' : 'transcripts'}`}</Link>}
+      {n > 0 && (run.kind === 'automation' ? <span>{count}</span> : <Link to={`/tasks/${run.task_id}`}>{count}</Link>)}
     </li>
   )
 }

@@ -172,6 +172,19 @@ def test_run_account_section():  # 097 AC33
         assert text in run, text
 
 
+def test_automation_run_section():  # 102 AC22; the parametrized tests above check its labels and flags
+    body = section("automation run")
+    for text in ("fctl automation run <id> [--account <id|email>]", "POST /api/factories/{id}/run",
+                 "Run #43 of automation #7 as b@y in .claude/worktrees/automation-security-audit-1a2b3c4d →",
+                 "404 Factory #99 not found",
+                 "is a workflow; run it on a task from the board", "#43 on automation Security audit",
+                 "isn't committed on main: open it, Files → Write to repo"):
+        assert text in body, text
+    doc = (REPO / "docs" / "claude-code.md").read_text()
+    commands = doc[doc.index("### 7.2 Commands"):doc.index("### 7.3")]
+    assert "| `fctl automation run <id> [--account <id\\|email>]`" in commands
+
+
 def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example
     assert "seed" in COMMANDS
     assert "fctl seed" in section("seed")

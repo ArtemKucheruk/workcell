@@ -39,9 +39,10 @@ MALFORMED_LOG = "\n".join([
 ])
 ORCHESTRATOR = {"name": "orchestrator", "type": None, "round": None, "running": True, "duration_ms": None,
                 "last_tool": None}
-RUNNING_KEYS = {"id", "kind", "task_id", "title", "project_id", "project", "stage", "round", "started_at", "agents"}
-RECENT_KEYS = {"id", "task_id", "title", "project_id", "project", "status", "error", "started_at", "ended_at",
-               "transcripts"}
+RUNNING_KEYS = {"id", "kind", "task_id", "factory_id", "title", "project_id", "project", "stage", "round",
+                "started_at", "agents"}  # 102: factory_id
+RECENT_KEYS = {"id", "kind", "task_id", "factory_id", "title", "project_id", "project", "status", "error",
+               "started_at", "ended_at", "transcripts"}  # 102: kind, factory_id
 
 
 def tool(id, name, input, parent=None) -> str:
@@ -93,7 +94,8 @@ def test_running_row(client, proj):  # BE2
     assert page["recent"] == []
     [row] = page["running"]
     assert set(row) == RUNNING_KEYS  # no log_path, session_id, or status
-    assert row == {"id": run_id, "kind": "factory", "task_id": task, "title": "Rate-limit login endpoint",
+    assert row == {"id": run_id, "kind": "factory", "task_id": task, "factory_id": None,
+                   "title": "Rate-limit login endpoint",
                    "project_id": proj, "project": "api", "stage": "agent_review", "round": 2,
                    "started_at": STARTED, "agents": [ORCHESTRATOR]}
 
@@ -165,7 +167,8 @@ def test_recent_order(client, proj):  # BE8
     recent = page["recent"]
     assert [r["id"] for r in recent] == [succeeded, failed, stopped, no_end]
     assert all(set(r) == RECENT_KEYS for r in recent)
-    assert recent[1] == {"id": failed, "task_id": task, "title": "Webhooks", "project_id": proj, "project": "api",
+    assert recent[1] == {"id": failed, "kind": "factory", "task_id": task, "factory_id": None, "title": "Webhooks",
+                         "project_id": proj, "project": "api",
                          "status": "failed", "error": "exit code 1", "started_at": STARTED,
                          "ended_at": "2026-10-21T09:52:03Z", "transcripts": 0}
     assert (recent[2]["status"], recent[2]["error"]) == ("stopped", None)

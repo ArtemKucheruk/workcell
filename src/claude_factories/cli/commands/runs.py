@@ -1,6 +1,6 @@
 from ..client import api
 from ..git import main_checkout
-from ..output import fail, print_run
+from ..output import fail, print_automation_run, print_run
 from .projects import project_at
 
 
@@ -30,3 +30,10 @@ def run(args):
         print_run(task_id, api("POST", f"/api/tasks/{task_id}/run", body))
     else:
         args.usage_error(f"target must be a task id or next, not {args.target!r}")
+
+
+def automation_run(args):
+    """102 AC20, AC21: `fctl automation run <id>` starts an automation by hand; `--account` as `fctl run`'s,
+    else Auto with no body."""
+    body = {"account_id": account_id(args.account)} if args.account is not None else None
+    print_automation_run(args.id, api("POST", f"/api/factories/{args.id}/run", body))

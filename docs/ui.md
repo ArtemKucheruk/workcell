@@ -458,7 +458,8 @@ Loading, failures, times, and motion are the same on every page:
       (`docs/data-model-and-api.md §6.1`). Runs still use the `.claude/` files that Create factory
       or a design's **Write to repo** wrote. Each design has a kind, fixed at creation: a
       **workflow** (the factory loop, run on board tasks) or an **automation** (run on the repo
-      itself, with no task, e.g. Security audit; running and scheduling them are later pages).
+      itself, with no task, e.g. Security audit; **Run now** starts one by hand, and scheduling is a
+      later page).
     - The list loads `GET /api/pages/projects/{id}` (the project header),
       `GET /api/projects/{id}/factories`, and `GET /api/factory-templates` once each, with no
       polling. The list loads again after each of its actions. The title reads
@@ -485,6 +486,20 @@ Loading, failures, times, and motion are the same on every page:
       `Delete workflow <name>?` or `Delete automation <name>?`: "This removes the factory's
       design from the app. Files in the repo, such as the ones Create factory wrote, stay." After
       a delete, focus goes to the + New of the row's section.
+    - 102: each **automation** row starts its actions with **Run now** (`Run <name> now`) and a
+      **Choose account** `▾` menu (`Choose account for <name>`), the task page's Run menu (Auto
+      `(→ <label>)`, then each account with its 5h and 7d, the preferred one marked), each row's
+      with its own popover id and anchor. Workflow rows have neither: they run on board tasks.
+      **Run now** sends `POST /api/factories/{fid}/run` with no body (Auto); a menu account sends
+      `{"account_id"}`. The accounts come from the header's `GET /api/pages/projects/{id}`
+      (`runs_enabled`, `accounts`, `auto`). Not signed in (`runs_enabled` false), both are
+      disabled with the title `Not signed in — runs disabled`; at the run cap
+      (`runs_active >= max_concurrent_runs`), with `2 of 2 runs active`. The same text shows once
+      as a muted line at the top of the Automations section. An uncommitted skill isn't checked
+      ahead: its 409 shows in the alert. A refusal shows its detail in the page's red alert
+      (`role="alert"`) under the header, emptied as the next Run now starts. A start shows the
+      polite status `Started run #43 as b@y.` with an **Open Agents** link to `/agents`, and the
+      page data reloads.
     - The designer is the same for both kinds. It loads `GET /api/factories/{fid}` once, with no
       polling, and is a wide page. A factory of another project at this URL is the not-found
       page. The title reads `<name> · <project>`. The breadcrumb, then an `h1` with the name, the
@@ -531,11 +546,15 @@ Loading, failures, times, and motion are the same on every page:
       with the skeleton, the red alert for a failed first load, and the offline banner. The
       title reads `Agents · Claude Factories`. Not a wide page. `h1` `Agents`, then `h2`s
       **Running** and **Recent**.
-    - Each running run is a card: its kind (`factory`; scheduled runs join later), `#12 <title>`
+    - Each running run is a card: its kind (`factory` or `automation`), `#12 <title>`
       linking to `/tasks/12`, the project linking to `/projects/{id}`, the stage (as the board
       draws it) and `round <n>` (the task's highest round), each left out when null. Then
       `started <relative time>`, `elapsed 5m 12s` (from its start to now, as the task page's
       agent durations read), a **Run log** link to `/tasks/12#run-log`, and **Stop**.
+    - 102: an automation run's card shows `automation`, then the automation's name linking to its
+      designer (`/projects/{id}/factories/{fid}`), then the project link. It has no stage, round,
+      or **Run log** link (its log has no page yet); **Stop** works the same. Once the automation
+      is deleted, it reads `deleted automation` as plain text, with no project link.
     - **Stop** sends `POST /api/runs/{id}/stop` with its spinner and no confirm, as on the task
       page. A 200 reloads the page at once, before the next poll. A refusal (`run #41 is not
       running`) is a red alert and the page stays; the next successful Stop clears it.
@@ -550,7 +569,9 @@ Loading, failures, times, and motion are the same on every page:
       to `/tasks/11`, the project link, how it ended as plain text (`failed: exit code 1`,
       `succeeded`, or `stopped`), its duration from start to end (`—` with no end), and
       `2 transcripts` (`1 transcript`) linking to `/tasks/11`, where the task page lists them,
-      left out at 0. Ended runs carry no agents list. With none, `No runs yet.`
+      left out at 0. Ended runs carry no agents list. With none, `No runs yet.` An automation
+      run's row shows its name as the card does, and its transcript count as plain text, since
+      automation transcripts have no page yet.
 16. **Usage** (`/usage`; wireframe §8.10)
     - Loads `GET /api/usage?days=7` (`docs/data-model-and-api.md §6.4`) once, never polled, with
       the skeleton and the red alert for a failed load. The title reads `Usage · Claude Factories`.
@@ -777,8 +798,12 @@ Workflows                                                           [+ New workf
  default     10 nodes    5m ago        [Rename] [Delete]
  nightly     12 nodes    yesterday     [Rename] [Delete]
 Automations                                                       [+ New automation]
- No automations yet.
+ Not signed in — runs disabled                     (muted, only when Run now is off)
+ Security audit  7 nodes  1h ago    [Run now][▾] [Rename] [Delete]
 h2 sections; each + New offers its kind's templates (Standard / Security audit checked)
+[Run now]: POST /api/factories/{fid}/run, Auto · [▾]: Choose account, the task page's Run menu
+a refusal: the red alert under the header · a start: "Started run #43 as b@y. Open Agents" (polite)
+with no automations: "No automations yet."
 
 /projects/3/factories/7  (wide)
 personal › api-server › Workflows › default
@@ -835,7 +860,13 @@ Running
 │   builder-12   builder     round 1    finished · 12m 34s   Bash pytest -q         │
 │   review-code              round 2    (● running)          Bash fctl verdict 12 … │
 └───────────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│ automation  Security audit   api-server                                           │
+│ started 1m ago · elapsed 1m 4s                                           [Stop]   │
+│   orchestrator                        (● running)          Bash git status        │
+└───────────────────────────────────────────────────────────────────────────────────┘
 Recent
+ run #43   Security audit  api-server   succeeded             9m 2s    3 transcripts   (plain text)
  run #40   #11 Webhooks    api-server   failed: exit code 1   12m 3s   2 transcripts
  run #39   #9 Health       web          succeeded             8m 41s   5 transcripts
  run #38   #10 Audit log   api-server   stopped               1m 2s
@@ -844,6 +875,7 @@ agents: the orchestrator first, then each spawned agent in spawn order; the type
 (● running): the outlined accent pill; "finished · <duration>", or "finished" when the log gives no duration
 the latest tool line: monospace, muted, one line
 Run log → /tasks/12#run-log · N transcripts → /tasks/11, left out at 0 · [Stop] with its spinner; a refusal is a red alert
+an automation run: its name → /projects/3/factories/9, no stage, round, or Run log; deleted: "deleted automation", no links
 ```
 
 ### 8.9 Context

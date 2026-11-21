@@ -10,9 +10,9 @@ import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
-import { Item } from '../../components/Menu.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { PullRequest } from '../../components/PullRequest.jsx'
+import { RunMenu } from '../../components/RunMenu.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
@@ -20,45 +20,6 @@ import { usePoll } from '../../hooks/usePoll.js'
 import { TaskFlow } from './TaskFlow.jsx'
 
 const blank = (md) => !md?.trim()
-
-/** 097 AC27: a usage window as a whole percentage, `—` while it's unknown. */
-const percent = (w) => (w ? `${Math.round(w.utilization * 100)}%` : '—')
-
-/**
- * 097 AC27, AC28: the ▾ beside Run or Retry, a native popover menu: Auto with the account it would pick (`auto`, from the
- * DB, Q9), or `all near limits` with none, then every account with its 5h and 7d usage, the preferred one marked in
- * text. Choosing one starts the run with that account (Auto sends none); a refusal shows in the header alert.
- */
-function RunMenu({ page, onRun }) {
-  return (
-    <>
-      <button
-        type="button"
-        popoverTarget="run-menu"
-        aria-label="Choose account"
-        disabled={!page.can_run}
-        className={`${smallButton} -ml-2 [anchor-name:--run-menu]`}
-      >
-        <span aria-hidden="true">▾</span>
-      </button>
-      <div
-        id="run-menu"
-        popover="auto"
-        aria-label="Run as"
-        className={`${popover} w-80 max-w-[90vw] p-1 open:grid [position-anchor:--run-menu] [position-area:bottom_span-left]`}
-      >
-        <Item menu="run-menu" onClick={() => onRun(null)}>
-          {page.auto ? `Auto (→ ${page.auto.label})` : 'Auto (all near limits)'}
-        </Item>
-        {page.accounts.map((a) => (
-          <Item key={a.id} menu="run-menu" onClick={() => onRun(a.id)} className="wrap-anywhere">
-            {`${a.label} · 5h ${percent(a.five_hour)} · 7d ${percent(a.seven_day)}${a.active ? ' · preferred' : ''}`}
-          </Item>
-        ))}
-      </div>
-    </>
-  )
-}
 
 /**
  * Q3: Stop while the latest run runs, whatever the status; else Run for backlog, Retry for in_progress with a run.
@@ -79,7 +40,13 @@ function RunControls({ page, onAction }) {
         </ActionButton>
       )}
       {start && page.accounts?.length > 0 && (
-        <RunMenu page={page} onRun={(id) => onAction(() => runTask(task.id, id))} />
+        <RunMenu
+          id="run-menu"
+          accounts={page.accounts}
+          auto={page.auto}
+          disabled={!page.can_run}
+          onRun={(id) => onAction(() => runTask(task.id, id))}
+        />
       )}
       {run && (
         <span>

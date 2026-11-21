@@ -1,5 +1,6 @@
 """SQLite helpers. Stdlib only."""
 
+import re
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
@@ -62,3 +63,36 @@ def init() -> None:
         if "kind" not in {row[1] for row in conn.execute("PRAGMA table_info(factories)")}:
             conn.execute("ALTER TABLE factories ADD COLUMN kind TEXT NOT NULL DEFAULT 'workflow'"
                          " CHECK (kind IN ('workflow','automation'))")
+        # 102 AC2: an automation run has no task, and ALTER can't drop a NOT NULL or add a table CHECK
+        rebuilt = False
+        if "kind" not in {row[1] for row in conn.execute("PRAGMA table_info(runs)")}:
+            rebuild(conn, "runs")
+            rebuilt = True
+        if any(row[1] == "task_id" and row[3] for row in conn.execute("PRAGMA table_info(transcripts)")):
+            rebuild(conn, "transcripts")
+            rebuilt = True
+        if rebuilt:  # the dropped table took one_run_per_task with it; the schema's IF NOT EXISTS brings it back
+            conn.executescript(SCHEMA.read_text())
+
+
+def rebuild(conn: sqlite3.Connection, table: str) -> None:
+    """102: SQLite's 12-step table rebuild into schema.sql's own CREATE TABLE, every row's id and values kept.
+    foreign_keys is OFF meanwhile, so the DROP cascades nothing (usage_snapshots, transcripts) and the rows
+    pointing at the table point at the new one. Raises, rolled back, if the copy's own references are broken."""
+    found = re.search(rf"CREATE TABLE IF NOT EXISTS {table} \(.*?\);", SCHEMA.read_text(), re.DOTALL)
+    create = found[0].replace(f"CREATE TABLE IF NOT EXISTS {table} (", f"CREATE TABLE {table}_new (", 1)
+    columns = ", ".join(row[1] for row in conn.execute(f"PRAGMA table_info({table})"))
+    conn.execute("PRAGMA foreign_keys = OFF")  # outside a transaction, or SQLite ignores it
+    try:
+        conn.executescript(
+            f"BEGIN; {create} INSERT INTO {table}_new ({columns}) SELECT {columns} FROM {table};"
+            f" DROP TABLE {table}; ALTER TABLE {table}_new RENAME TO {table};")
+        if conn.execute(f"PRAGMA foreign_key_check({table})").fetchone():
+            raise sqlite3.IntegrityError(f"rebuilding {table} broke a foreign key")
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")

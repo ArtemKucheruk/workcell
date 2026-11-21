@@ -35,6 +35,15 @@ class FactoriesRepo:
             (factory_id,),
         ).fetchone()
 
+    def for_run(self, factory_id: int) -> sqlite3.Row | None:
+        """102: what an automation run needs: its name and kind, and its project's path, default branch, and test
+        command."""
+        return self.conn.execute(
+            "SELECT f.id, f.name, f.kind, p.path, p.default_branch, p.test_cmd FROM factories f"
+            " JOIN projects p ON p.id = f.project_id WHERE f.id = ?",
+            (factory_id,),
+        ).fetchone()
+
     def by_name(self, project_id: int, name: str) -> int | None:
         row = self.conn.execute(
             "SELECT id FROM factories WHERE project_id = ? AND name = ?", (project_id, name)

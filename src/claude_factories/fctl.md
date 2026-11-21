@@ -1426,6 +1426,68 @@ fctl run next
 fctl run 12 --account b@y
 ```
 
+## fctl automation run
+
+Starts an automation by hand (**Run now** on the Workflows page): its compiled skill, `/<slug>`,
+headless on the repo itself, with no board task. Calls `POST /api/factories/{id}/run`.
+
+**Synopsis**
+
+```
+fctl automation run <id> [--account <id|email>]
+```
+
+**Arguments and flags**
+
+- `<id>`: the automation, its id on the Workflows page (`/projects/3/factories/7` is `7`). It works
+  from any directory. Not a number: argparse's usage error.
+- `--account <id|email>`: the Claude account to run in, by id or email, as for
+  [fctl run](#fctl-run). Without it, no body is sent and the app picks with **Auto**.
+
+**Stdin**
+
+none
+
+**Output**
+
+The run, its account, and its worktree, then the Agents page, where it shows under the automation's
+name:
+
+```
+Run #43 of automation #7 as b@y in .claude/worktrees/automation-security-audit-1a2b3c4d → http://127.0.0.1:4545/agents
+```
+
+Every run gets a fresh worktree from the default branch, on a new branch
+`automation/<slug>-<first 8 characters of the session id>`, made and filled with the ignored files
+as for `fctl run`. Two runs of one automation run side by side; only the run cap limits them. The
+worktree and branch stay after the run.
+
+**Exit codes and errors**
+
+- `fctl: 404 Factory #99 not found`, exit `1`.
+- `fctl: 409 Review loop is a workflow; run it on a task from the board`, exit `1`.
+- `fctl: 409 2 runs active (#41 on #12, #43 on automation Security audit); the limit is 2. Wait,
+  stop one, or raise it in Settings`: the run cap is full, exit `1`.
+- `fctl: 409 automation Security audit isn't committed on main: open it, Files → Write to repo, then
+  on main run git add .claude/skills/security-audit .claude/agents && git commit -m "Add factory"`:
+  its `.claude/skills/<slug>/SKILL.md` isn't committed on the default branch, exit `1`.
+- `fctl run`'s worktree, account, auth, and spawn refusals, exit `1`. A refusal after the worktree
+  is made removes it and its branch again.
+- `fctl: no Claude account b@y`: no account has that email; no run is started, exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me. A run can't call it.
+
+**Example**
+
+```sh
+fctl automation run 7
+fctl automation run 7 --account b@y
+```
+
 ## fctl rework
 
 Requests changes on a task in review, with a note: my **Request changes**. Calls

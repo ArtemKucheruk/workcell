@@ -1,13 +1,20 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { cls, expectSkeleton, fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { cls, expectSkeleton, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const BOARD = '/api/pages/projects/3'
 const LIST = '/api/projects/3/factories'
 const PROJECT = { id: 3, name: 'api-server', workspace_id: 2, workspace: 'personal' }
-const board = () => ({
+// 102 AC19: the Run menu's accounts and Auto's pick, as the task page's
+const ACCOUNTS = [
+  { id: 1, label: 'a@x', active: true, five_hour: { utilization: 0.42, resets_at: 1, status: 'allowed' }, seven_day: null },
+  { id: 2, label: 'b@y', active: false, five_hour: null, seven_day: { utilization: 0.1, resets_at: 1, status: 'allowed' } },
+]
+const board = (extra = {}) => ({
   project: PROJECT, factory: 'ready', hint: null, can_run: true, workspaces: [],
   columns: { backlog: [], in_progress: [], review: [], done: [] },
+  runs_enabled: true, runs_active: 0, max_concurrent_runs: 2, accounts: ACCOUNTS, auto: { account_id: 1, label: 'a@x' },
+  ...extra,
 })
 const item = (id, name, nodes, updated_at = '2026-10-21T09:30:00Z', kind = 'workflow') => ({
   id, name, kind, nodes, created_at: '2026-10-21T08:00:00Z', updated_at,
@@ -350,4 +357,89 @@ test('FE5: Cancel or Esc sends nothing; a refusal shows inside the dialog, which
   expect((await within(dialog).findByRole('alert')).textContent).toBe('factory default is in use')
   expect(dialog.open).toBe(true)
   expect(names()).toEqual(['default', 'nightly'])
+})
+
+// --- 102: Run now on an automation ----------------------------------------------------------------------
+
+const PATROL = item(10, 'patrol', 3, '2026-10-18T09:30:00Z', 'automation')
+const RUN = (id) => `/api/factories/${id}/run`
+const STARTED = { run_id: 43, session_id: 's', worktree: '.claude/worktrees/automation-audit-1a2b3c4d', account_id: 2, account: 'b@y' }
+const runNow = (name) => screen.getByRole('button', { name: `Run ${name} now` })
+const chooser = (name) => screen.getByRole('button', { name: `Choose account for ${name}` })
+const menuItems = (name) =>
+  within(popOf(`Choose account for ${name}`)).getAllByRole('button', { hidden: true }).map((b) => b.textContent)
+const posted = (fetch, id) => calls(fetch, 'POST', RUN(id)).map(([, init]) => init.body ?? null)
+
+test('102 AC23: each automation row has Run now and its own Choose account menu like the task page; workflow rows have neither', async () => {
+  await open([200, [DEFAULT, AUDIT, PATROL]])
+  for (const name of ['audit', 'patrol']) {
+    expect(runNow(name).textContent).toBe('Run now')
+    expect(chooser(name).textContent).toBe('▾')
+    expect(menuItems(name)).toEqual(['Auto (→ a@x)', 'a@x · 5h 42% · 7d — · preferred', 'b@y · 5h — · 7d 10%'])
+  }
+  const ids = ['audit', 'patrol'].map((name) => chooser(name).getAttribute('popovertarget'))
+  expect(ids).toEqual(['run-menu-9', 'run-menu-10'])
+  for (const id of ids) expect(document.getElementById(id).getAttribute('popover')).toBe('auto')
+  const row = within(section('Workflows').getAllByRole('row')[1])
+  expect(row.queryByRole('button', { name: /Run|Choose account/ })).toBeNull()
+})
+
+test('102 AC24: Run now posts with no body; a menu account sends {account_id}; Auto sends no body', async () => {
+  const { fetch } = await open([200, [AUDIT]], { [`POST ${RUN(9)}`]: [202, STARTED] })
+  fireEvent.click(runNow('audit'))
+  await waitFor(() => expect(posted(fetch, 9)).toEqual([null]))
+  const pop = popOf('Choose account for audit')
+  fireEvent.click(within(pop).getByRole('button', { name: 'b@y · 5h — · 7d 10%', hidden: true }))
+  await waitFor(() => expect(posted(fetch, 9)).toEqual([null, JSON.stringify({ account_id: 2 })]))
+  fireEvent.click(within(pop).getByRole('button', { name: 'Auto (→ a@x)', hidden: true }))
+  await waitFor(() => expect(posted(fetch, 9)).toEqual([null, JSON.stringify({ account_id: 2 }), null]))
+})
+
+test('102 AC25: not signed in, or at the run cap, disables Run now and ▾ with a title, said once in the Automations section', async () => {
+  for (const [extra, text] of [
+    [{ runs_enabled: false }, 'Not signed in — runs disabled'],
+    [{ runs_active: 2, max_concurrent_runs: 2 }, '2 of 2 runs active'],
+  ]) {
+    const responses = { [`GET ${BOARD}`]: [200, board(extra)], [`GET ${LIST}`]: [200, [AUDIT, PATROL]], [`GET ${TEMPLATES}`]: [200, []] }
+    mockFetch(responses)
+    const { unmount } = renderAt('/projects/3/factories')
+    await screen.findByRole('button', { name: 'Run audit now' })
+    for (const name of ['audit', 'patrol']) {
+      for (const button of [runNow(name), chooser(name)]) {
+        expect([button.disabled, button.title]).toEqual([true, text])
+      }
+    }
+    expect(section('Automations').getAllByText(text).filter((el) => el.tagName === 'P')).toHaveLength(1)
+    expect(section('Automations').getByText(text).className).toMatch(cls('text-muted'))
+    unmount()
+  }
+  await open([200, [AUDIT]])
+  expect([runNow('audit').disabled, runNow('audit').title]).toEqual([false, ''])
+})
+
+test('102 AC26: a refusal shows its detail in the page alert; the next Run now empties it as it starts', async () => {
+  const detail = 'automation audit isn\'t committed on main: open it, Files → Write to repo, then on main run git add …'
+  const { responses } = await open([200, [AUDIT]], { [`POST ${RUN(9)}`]: [409, { detail }] })
+  fireEvent.click(runNow('audit'))
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe(detail)
+  expect(alert.className).toMatch(cls('text-danger'))
+  let answer
+  responses[`POST ${RUN(9)}`] = [422, { detail: 'no Claude account #99' }]
+  const fetch = globalThis.fetch
+  fetch.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+  fireEvent.click(runNow('audit'))
+  await waitFor(() => expect(screen.queryByRole('alert')).toBeNull()) // emptied while the request is in flight
+  answer(new Response(JSON.stringify({ detail: 'no Claude account #99' }), { status: 422 }))
+  expect((await screen.findByRole('alert')).textContent).toBe('no Claude account #99')
+})
+
+test('102 AC27: a start says Started run #43 as b@y. politely, links to /agents, and reloads the page data', async () => {
+  const { fetch } = await open([200, [AUDIT]], { [`POST ${RUN(9)}`]: [202, STARTED] })
+  expect([count(fetch, BOARD), count(fetch, LIST)]).toEqual([1, 1])
+  fireEvent.click(runNow('audit'))
+  const status = await screen.findByText(fullText('Started run #43 as b@y. Open Agents'))
+  expect(status.closest('[role="status"]')).toBeTruthy()
+  expect(within(status).getByRole('link', { name: 'Open Agents' }).getAttribute('href')).toBe('/agents')
+  await waitFor(() => expect([count(fetch, BOARD), count(fetch, LIST)]).toEqual([2, 2]))
 })

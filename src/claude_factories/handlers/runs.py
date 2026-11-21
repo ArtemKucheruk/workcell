@@ -20,16 +20,18 @@ from ..adapters.git import Git
 from ..domain.errors import Conflict, DomainError, Failed, Invalid, NotFound
 from ..dto.runs import LogOut, RunNextOut, RunStarted, StopOut
 from ..lib.account_choice import is_low, rank, refusal, when
+from ..lib.factory_compile import slug as skill_slug
 from ..lib.rate_limits import latest
 from ..lib.run_log import last_result, log_items
 from ..lib.slug import slug
 from ..repositories.claude_accounts import ClaudeAccountsRepo
+from ..repositories.factories import FactoriesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
 from ..repositories.usage import UsageRepo
-from .factory import factory_hint, factory_state
+from .factory import commit_hint, factory_hint, factory_state, skill_committed
 from .transcripts import collect
 from .usage import label
 
@@ -108,14 +110,16 @@ def open_blockers(tasks: TasksRepo, task_id: int) -> str:
     return ", ".join(f"#{b['id']}" for b in tasks.blockers(task_id) if b["status"] != "done")
 
 
-def refuse_if_running(runs: RunsRepo, settings: SettingsRepo, task_id: int):
+def refuse_if_running(runs: RunsRepo, settings: SettingsRepo, task_id: int | None):
     """096, §4.4: the task's own running run first (Q1), then the global cap, max_concurrent_runs. Each detail
-    names the runs in the way and the fix. Start and Request changes share it (Q4)."""
-    if run := runs.running(task_id):
+    names the runs in the way and the fix. Start and Request changes share it (Q4). 102: an automation run
+    (`task_id` None) has only the cap (Q5), and the cap counts and names automation runs too (Q7)."""
+    if task_id is not None and (run := runs.running(task_id)):
         raise Conflict(f"run #{run['id']} is already running on #{task_id}; wait for it or stop it")
     active, cap = runs.running_tasks(), settings.max_concurrent_runs()
     if len(active) >= cap:  # Q3: a lowered cap stops nothing; new starts wait until the count drops under it
-        listed = ", ".join(f"#{r['id']} on #{r['task_id']}" for r in active)
+        listed = ", ".join(f"#{r['id']} on " + (f"#{r['task_id']}" if r["kind"] == "factory"
+                                                else f"automation {r['name'] or '(deleted)'}") for r in active)
         raise Conflict(f"{len(active)} run{'' if len(active) == 1 else 's'} active ({listed}); the limit is {cap}."
                        " Wait, stop one, or raise it in Settings")
 
@@ -218,11 +222,7 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str, account_id:
     with CHECKOUT_LOCK:
         trust_project(account["config_dir"], task["path"])
     session_id = str(uuid.uuid4())
-    allowed = ALLOWED_TOOLS + test_rules(task["test_cmd"] or "")
-    args = ["-p", PROMPT.format(task_id=task_id), "--session-id", session_id,
-            "--output-format", "stream-json", "--verbose", "--forward-subagent-text",
-            "--permission-mode", "acceptEdits", "--permission-prompts", "none",
-            "--allowedTools", *allowed, "--disallowedTools", *DISALLOWED_TOOLS]
+    args = run_args(PROMPT.format(task_id=task_id), session_id, task["test_cmd"])
     runs_dir = config.data_dir() / "runs"
     runs_dir.mkdir(exist_ok=True)
     with tx() as conn:
@@ -241,9 +241,26 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str, account_id:
         runs.set_log_path(run_id, str(log_path))
         if tasks.start(task_id, now):  # Q9: an in_progress task keeps its status and stage
             tasks.add_event(task_id, "app", "backlog", "in_progress", None, now)
+    spawn(tx, claude, run_id, args, wt, env, log_path)
+    return RunStarted(run_id=run_id, session_id=session_id, worktree=os.path.relpath(wt, task["path"]),
+                      account_id=account["id"], account=label(account["email"], account["config_dir"]))
+
+
+def run_args(prompt: str, session_id: str, test_cmd: str | None) -> list[str]:
+    """§4.4: claude's arguments for a headless run of `prompt`. 102 Q10: a task run and an automation run get the
+    same tool lists."""
+    return ["-p", prompt, "--session-id", session_id,
+            "--output-format", "stream-json", "--verbose", "--forward-subagent-text",
+            "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+            "--allowedTools", *ALLOWED_TOOLS, *test_rules(test_cmd or ""), "--disallowedTools", *DISALLOWED_TOOLS]
+
+
+def spawn(tx, claude: Claude, run_id: int, args: list[str], wt: str, env: dict, log_path: Path) -> None:
+    """The spawn after the row commits, then its pid and the exit thread. Q11: a spawn that raises OSError fails
+    the row (a running row with no process would block every run) and is a 500."""
     try:
         proc = claude.spawn(args, wt, env, str(log_path))
-    except OSError as e:  # Q11: a running row with no process would block every run
+    except OSError as e:
         error = f"can't start claude: {e}"
         with tx() as conn:
             RunsRepo(conn).fail(run_id, error)
@@ -251,7 +268,68 @@ def start(tx, git: Git, claude: Claude, task_id: int, base_url: str, account_id:
     with tx() as conn:
         RunsRepo(conn).set_pid(run_id, proc.pid)
     threading.Thread(target=finish, args=(tx, run_id, proc, log_path), daemon=True).start()
-    return RunStarted(run_id=run_id, session_id=session_id, worktree=os.path.relpath(wt, task["path"]),
+
+
+def drop_worktree(git: Git, repo: str, branch: str) -> None:
+    """102 Q6: a refused automation run's fresh worktree, then its branch (`-d`), so failed attempts leave nothing
+    behind. Best effort: their failures are ignored and the refusal stands."""
+    for step in (git.wt_remove, git.delete_branch):
+        try:
+            step(repo, branch)
+        except (DomainError, OSError):
+            pass
+
+
+def start_automation(tx, git: Git, claude: Claude, factory_id: int, base_url: str,
+                     account_id: int | None = None) -> RunStarted:
+    """102, MVP §4.4: Run now on an automation. AC10's order: 404, a workflow's 409 (Q8), the cap, the compiled
+    skill committed on the default branch (AC9), a fresh worktree and branch from it named by the session id's
+    first 8 characters (Q3; wt refusals as for tasks), the ignored files, then the account and auth as start
+    does. A refusal after the worktree is made drops it (Q6). Then the row, under the write lock with the cap
+    checked again, and `/<slug>` spawned headless in the worktree (Q2: no argument). No task, no event."""
+    with tx() as conn:
+        auto = FactoriesRepo(conn).for_run(factory_id)
+    if auto is None:
+        raise NotFound(f"Factory #{factory_id} not found")
+    if auto["kind"] != "automation":
+        raise Conflict(f"{auto['name']} is a workflow; run it on a task from the board")
+    with tx() as conn:
+        refuse_if_running(RunsRepo(conn), SettingsRepo(conn), None)
+    skill, repo, branch = skill_slug(auto["name"]), auto["path"], auto["default_branch"]
+    if not skill_committed(git, repo, branch, skill):
+        raise Conflict(f"automation {auto['name']} isn't committed on {branch}: open it, Files → Write to repo,"
+                       f" then on {branch} run {commit_hint(skill)}")
+    session_id = str(uuid.uuid4())
+    name = f"automation-{skill}-{session_id[:8]}"
+    run_branch = f"automation/{skill}-{session_id[:8]}"
+    with CHECKOUT_LOCK:
+        exclude_worktrees(git, repo)
+        wt = git.wt_create(repo, run_branch, os.path.join(repo, ".claude", "worktrees", name), branch)
+    try:
+        git.wt_copy_ignored(wt, branch)
+        backend_port, frontend_port = free_ports()
+        base = stripped_env() | {"FCTL_URL": base_url.rstrip("/"),
+                                 "FCTL_BACKEND_PORT": str(backend_port), "FCTL_FRONTEND_PORT": str(frontend_port)}
+        account, info, env = choose_account(tx, claude, wt, base, account_id)
+        with CHECKOUT_LOCK:
+            trust_project(account["config_dir"], repo)
+        runs_dir = config.data_dir() / "runs"
+        runs_dir.mkdir(exist_ok=True)
+        with tx() as conn:
+            runs = RunsRepo(conn)
+            now = TasksRepo(conn).lock()
+            refuse_if_running(runs, SettingsRepo(conn), None)  # 096 Q1: again under the write lock
+            run_id = runs.add(None, session_id, now, account["id"], "automation", factory_id, wt)
+            if isinstance(email := info.get("email"), str) and email:  # 095 AC11
+                ClaudeAccountsRepo(conn).set_email(account["id"], email)
+                account = dict(account) | {"email": email}
+            log_path = runs_dir / f"{run_id}.jsonl"
+            runs.set_log_path(run_id, str(log_path))
+    except DomainError:
+        drop_worktree(git, repo, run_branch)
+        raise
+    spawn(tx, claude, run_id, run_args(f"/{skill}", session_id, auto["test_cmd"]), wt, env, log_path)
+    return RunStarted(run_id=run_id, session_id=session_id, worktree=os.path.relpath(wt, repo),
                       account_id=account["id"], account=label(account["email"], account["config_dir"]))
 
 

@@ -34,6 +34,14 @@ def run_task(task_id: int, request: Request, git: GitAdapter, claude: ClaudeAdap
     return handler.start(transaction, git, claude, task_id, agent_url(request), body and body.account_id)
 
 
+@router.post("/api/factories/{factory_id}/run", status_code=202)
+def run_automation(factory_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter,
+                   body: RunBody | None = None) -> RunStarted:
+    """102: Run now on an automation; the body as a task run's (no body, {}, or a null account_id is Auto)."""
+    return handler.start_automation(transaction, git, claude, factory_id, agent_url(request),
+                                    body and body.account_id)
+
+
 @router.post("/api/projects/{project_id}/run-next", status_code=202)
 def run_next(project_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunNextOut:
     return handler.run_next(transaction, git, claude, project_id, agent_url(request))
