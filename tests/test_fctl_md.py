@@ -158,6 +158,31 @@ def test_run_account_section():  # 097 AC33
         assert text in run, text
 
 
+def test_task_retry_docs(client):  # 106 AC10, AC11
+    assert "task retry" in COMMANDS
+    headings = client.get("/api/docs/fctl").json()["headings"]
+    assert {"id": "fctl-task-retry", "text": "fctl task retry", "level": 2} in headings
+    retry = section("task retry")
+    for text in ("fctl task retry <id> [--account <id|email>]", "fctl: #12 never ran; use fctl run 12",
+                 "fctl: run #41 is running on #12; wait for it or stop it", "[fctl run](#fctl-run)",
+                 "me. A run can't call it"):
+        assert text in retry, text
+    assert "`fctl task retry`" in SECTIONS["fctl-url-and-fctl-home"]
+    api = (REPO / "docs" / "data-model-and-api.md").read_text()
+    [line] = [line for line in api.splitlines() if line.startswith("POST /api/tasks/12/run ")]
+    assert "fctl task retry 12" in line
+    doc = (REPO / "docs" / "claude-code.md").read_text()
+    commands = doc[doc.index("### 7.2 Commands"):doc.index("### 7.3")]
+    [row] = [line for line in commands.splitlines()
+             if line.startswith("| `fctl task retry <id> [--account <id\\|email>]` | me |")]
+    assert "`GET /api/tasks/{id}`" in row and "`POST /api/tasks/{id}/run`" in row
+
+
+def test_task_retry_not_allowed_to_agents():  # 106 AC12
+    from claude_factories.handlers.runs import ALLOWED_TOOLS
+    assert not any("retry" in rule or "task" in rule for rule in ALLOWED_TOOLS)
+
+
 def test_seed_section_and_home():  # 038 AC37; the parametrized tests above check its labels and sh example
     assert "seed" in COMMANDS
     assert "fctl seed" in section("seed")

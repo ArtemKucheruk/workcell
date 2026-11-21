@@ -603,7 +603,7 @@ DELETE /api/tasks/12                                              (board Delete)
   # on disk, the worktree, branch, run logs, and transcript copies stay
   # 409 {"detail":"run #41 active"} while the task's own run is running · 404 {"detail":"Task #99 not found"}
 
-POST /api/tasks/12/run                                            (Run, Retry, fctl run 12)
+POST /api/tasks/12/run                                            (Run, Retry, fctl run 12, fctl task retry 12)
 → no body, {}, or {"account_id":null}   Auto (097, MVP §4.3)
 → {"account_id":2}                      run in account 2, even when it is low or limited (Run menu, fctl run --account)
 ← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login",

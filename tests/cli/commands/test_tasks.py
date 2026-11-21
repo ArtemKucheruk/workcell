@@ -229,6 +229,89 @@ def test_task_block_refused(server, monkeypatch, capsys, argv, status, detail): 
     assert capsys.readouterr() == ("", f"fctl: {status} {detail}\n")
 
 
+# --- 106: fctl task retry ------------------------------------------------------------------------
+
+def task_with(run):
+    return reply({"id": 12, "title": "T", "status": "in_progress", "run": run})
+
+
+RETRIED = RUN | {"run_id": 42}
+
+
+@pytest.mark.parametrize("status", ["failed", "stopped"])
+def test_task_retry(server, tmp_path, monkeypatch, capsys, status):  # 106 AC1, AC2, AC9
+    nowhere = tmp_path / "nowhere"  # outside any git repo: no project lookup
+    nowhere.mkdir()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    monkeypatch.chdir(nowhere)
+    server.replies = [task_with({"id": 41, "status": status}), reply(RETRIED, 202)]
+    main(["task", "retry", "12"])
+    assert requests(server) == [("GET", "/api/tasks/12", None), ("POST", "/api/tasks/12/run", None)]
+    assert capsys.readouterr().out == f"Run #42 on #12 as b@y → {os.environ['FCTL_URL']}/tasks/12\n"
+
+
+def test_task_retry_account_id(server, tmp_path, monkeypatch):  # 106 AC3
+    monkeypatch.chdir(tmp_path)
+    server.replies = [task_with({"id": 41, "status": "failed"}), reply(RETRIED, 202)]
+    main(["task", "retry", "12", "--account", "2"])
+    assert requests(server) == [("GET", "/api/tasks/12", None), ("POST", "/api/tasks/12/run", {"account_id": 2})]
+
+
+def test_task_retry_account_email(server, tmp_path, monkeypatch, capsys):  # 106 AC4, Q3
+    monkeypatch.chdir(tmp_path)
+    accounts = reply([{"id": 1, "email": "a@x"}, {"id": 2, "email": "b@y"}])
+    server.replies = [task_with({"id": 41, "status": "failed"}), accounts, reply(RETRIED, 202)]
+    main(["task", "retry", "12", "--account", "B@y"])
+    assert requests(server) == [("GET", "/api/tasks/12", None), ("GET", "/api/auth/accounts", None),
+                                ("POST", "/api/tasks/12/run", {"account_id": 2})]
+    capsys.readouterr()
+    server.requests.clear()
+    server.replies = [task_with({"id": 41, "status": "failed"}), reply([{"id": 1, "email": "a@x"}])]
+    with pytest.raises(SystemExit) as e:
+        main(["task", "retry", "12", "--account", "b@y"])
+    assert e.value.code == 1
+    assert capsys.readouterr().err == "fctl: no Claude account b@y\n"
+    assert [m for m, _, _ in requests(server)] == ["GET", "GET"]
+
+
+@pytest.mark.parametrize("run, err", [
+    (None, "fctl: #12 never ran; use fctl run 12\n"),  # AC5
+    ({"id": 41, "status": "running"}, "fctl: run #41 is running on #12; wait for it or stop it\n"),  # AC6
+])
+def test_task_retry_nothing_to_retry(server, tmp_path, monkeypatch, capsys, run, err):  # 106 AC5, AC6
+    monkeypatch.chdir(tmp_path)
+    server.replies = [task_with(run)]
+    with pytest.raises(SystemExit) as e:
+        main(["task", "retry", "12", "--account", "b@y"])  # Q3: refused before any accounts lookup
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", err)
+    assert requests(server) == [("GET", "/api/tasks/12", None)]
+
+
+@pytest.mark.parametrize("detail", [
+    "#15 is blocked by #12, #14; finish those first or remove the dependency",
+    "#12 is in review",
+    "2 runs active (#41 on #12, #42 on #14); the limit is 2. Wait, stop one, or raise it in Settings",
+])
+def test_task_retry_refused(server, tmp_path, monkeypatch, capsys, detail):  # 106 AC7
+    monkeypatch.chdir(tmp_path)
+    server.replies = [task_with({"id": 41, "status": "failed"}), reply({"detail": detail}, 409)]
+    with pytest.raises(SystemExit) as e:
+        main(["task", "retry", "12"])
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", f"fctl: 409 {detail}\n")
+
+
+def test_task_retry_unknown_task(server, tmp_path, monkeypatch, capsys):  # 106 AC8
+    monkeypatch.chdir(tmp_path)
+    server.replies = [reply({"detail": "Task #99 not found"}, 404)]
+    with pytest.raises(SystemExit) as e:
+        main(["task", "retry", "99"])
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", "fctl: 404 Task #99 not found\n")
+    assert requests(server) == [("GET", "/api/tasks/99", None)]
+
+
 # --- 032: fctl export, fctl import -------------------------------------------------------------
 
 ZIP = b"PK\x05\x06" + b"\x00" * 18  # an empty zip's bytes
