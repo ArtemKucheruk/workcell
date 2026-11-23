@@ -7,7 +7,7 @@ from .commands.projects import connect, context, context_set, import_factory
 from .commands.review import approve, rework
 from .commands.runs import automation_run, run
 from .commands.submit import diff, submit
-from .commands.tasks import export, import_bundle, task_add, task_block, task_delete, task_ids
+from .commands.tasks import export, import_bundle, task_add, task_block, task_delete, task_ids, task_retry
 from .output import fail
 
 SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
@@ -138,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("id", type=int, help="the task that waits")
         p.add_argument("--by", type=int, required=True, help="the task it waits on")
         p.set_defaults(func=task_block, method=method)
+    p = task_commands.add_parser("retry", help="start a new run on a task whose latest run failed or was stopped")
+    p.add_argument("id", type=int, help="the task")
+    p.add_argument("--account", metavar="ID|EMAIL",
+                   help="the Claude account to run in, by id or email (default: Auto)")
+    p.set_defaults(func=task_retry)
     p = task_commands.add_parser("delete", help="delete a task and its runs, rounds, and records from the app")
     p.add_argument("id", type=int, help="the task")
     p.add_argument("--yes", action="store_true", help="don't ask first; needed off a terminal")

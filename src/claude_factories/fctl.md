@@ -59,7 +59,7 @@ folder and `factory.db` when they're missing. `fctl service` keeps the services'
 hashes, the commit each service serves) in `service.json`. Every other command works through the API
 and never opens the data dir.
 
-The links `fctl` prints (`fctl connect`, `fctl task add`, `fctl run`, `fctl submit`) start with
+The links `fctl` prints (`fctl connect`, `fctl task add`, `fctl task retry`, `fctl run`, `fctl submit`) start with
 `FCTL_URL`, the backend, which answers only `/api/` calls. The pages are on the frontend server:
 open the same path on `http://127.0.0.1:3000`.
 
@@ -1259,6 +1259,62 @@ me.
 
 ```sh
 fctl task unblock 15 --by 12
+```
+
+## fctl task retry
+
+Starts a new run on a task whose latest run failed or was stopped: my **Retry** (task page header,
+stalled board card). Reads the latest run with `GET /api/tasks/{id}`, then calls the same
+`POST /api/tasks/{id}/run` as Retry and [fctl run](#fctl-run).
+
+**Synopsis**
+
+```
+fctl task retry <id> [--account <id|email>]
+```
+
+Task ids are global, so it works from any directory, outside a git repo too.
+
+**Arguments and flags**
+
+- `<id>`: the task to retry.
+- `--account <id|email>`: the Claude account to run in, by its id or its email, as
+  [fctl run](#fctl-run) takes it. Without the flag, no body is sent and the app picks with **Auto**.
+
+**Stdin**
+
+none
+
+**Output**
+
+The same line as [fctl run](#fctl-run):
+
+```
+Run #42 on #12 as b@y → http://127.0.0.1:4545/tasks/12
+```
+
+**Exit codes and errors**
+
+- `fctl: #12 never ran; use fctl run 12`: the task has no run to retry. Nothing is posted, exit `1`.
+- `fctl: run #41 is running on #12; wait for it or stop it`: its latest run is still running.
+  Nothing is posted, exit `1`.
+- `fctl: 404 Task #99 not found`, exit `1`.
+- `fctl: no Claude account b@y`: no account has that email; no run is started, exit `1`.
+- Every refusal of `POST /api/tasks/{id}/run` prints as given, as [fctl run](#fctl-run) lists them:
+  blocked, the run cap, accounts, and `fctl: 409 #12 is in review` or `fctl: 409 #12 is done`,
+  exit `1`.
+
+See [Exit codes and errors](#exit-codes-and-errors) for the rest.
+
+**Called by**
+
+me. A run can't call it: agents can't call `fctl run`, `fctl task retry`, `approve`, or `rework`.
+
+**Example**
+
+```sh
+fctl task retry 12
+fctl task retry 12 --account b@y
 ```
 
 ## fctl task delete

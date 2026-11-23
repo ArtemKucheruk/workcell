@@ -678,7 +678,7 @@ DELETE /api/tasks/14                                              (board Delete,
   # on disk, the worktree, branch, run logs, and transcript copies stay
   # 409 {"detail":"run #41 active"} while the task's own run is running · 404 {"detail":"Task #99 not found"}
 
-POST /api/tasks/12/run                                            (Run, Retry, fctl run 12)
+POST /api/tasks/12/run                                            (Run, Retry, fctl run 12, fctl task retry 12)
 → no body, {}, or {"account_id":null}   Auto (097, MVP §4.3)
 → {"account_id":2}                      run in account 2, even when it is low or limited (Run menu, fctl run --account)
 ← 202 {"run_id":41,"session_id":"6f1c2e0a-…","worktree":".claude/worktrees/12-rate-limit-login",
@@ -757,13 +757,16 @@ GET  /api/tasks/12/transcripts                                    (task page Age
   # ordered by run_id, started_at, id
 
 GET  /api/transcripts/5[?full=1]                                  (transcript page)
-← 200 {…the same fields, "task_id":12, "project_id":3, "project":"api-server", "workspace_id":2,
-       "workspace":"personal",
+← 200 {…the same fields, "task_id":12, "factory_id":null, "factory":null, "project_id":3, "project":"api-server",
+       "workspace_id":2, "workspace":"personal",
        "messages":[{"role":"assistant","at":"…","blocks":[{"type":"text","text_html":"<p>…</p>"},
                      {"type":"thinking","text":"…"},{"type":"tool_use","name":"Bash","input":"{\n  \"command\": \"pytest -q\"\n}"}]},
                    {"role":"user","at":"…","blocks":[{"type":"tool_result","text":"3 passed","is_error":false,"truncated":false}]}]}
   # without full=1, each tool result is cut at 4096 characters with "truncated":true
   # project and workspace: its task's, as they are now (the breadcrumb); never the copy's path
+  # 103: an automation run's transcript has "task_id":null, "factory_id":7, "factory":"Security audit" (the
+  #   automation's name now), and the automation's project and workspace; a task's has factory_id and factory
+  #   null. Once its automation is deleted (the run's factory_id NULL) it has no project: 404 Transcript #5 not found
 
 GET  /api/transcripts/5/raw                                       (Download) → the copied .jsonl as an attachment
 ← 404 {"detail":"Transcript #99 not found"}
@@ -854,14 +857,17 @@ POST /api/tasks/12/pr/merge                                       (Merge PR, 093
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
 `/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=&branch=` ·
 `/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
-`/projects/{id}/factories/{fid}` · `/projects/{id}/scheduler` · `/projects/{id}/settings` ·
+`/projects/{id}/factories/{fid}` · `/projects/{id}/factories/{fid}/runs?run=` · `/projects/{id}/scheduler` ·
+`/projects/{id}/settings` ·
 `/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` · `/usage` ·
 `/docs/fctl` · `/settings`. Any other path outside `/api` gets the SPA's not-found page.
 `/agents` loads `GET /api/pages/agents`. `/usage` loads `GET /api/usage?days=7`, then `?days=30` when picked. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
 `GET /api/pages/workspaces/{id}`, as `/workspaces/{id}` does. `/projects/{id}/factories` loads
 `GET /api/projects/{id}/factories` and `GET /api/factory-templates` (§6.1), plus `GET /api/pages/projects/{id}` for
 its header, and the designer at
-`/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1). `/projects/{id}/context` loads
+`/projects/{id}/factories/{fid}` loads `GET /api/factories/{fid}` (§6.1). An automation's runs page,
+`/projects/{id}/factories/{fid}/runs` (103; `?run=` the open run), polls `GET /api/pages/factories/{fid}/runs`
+every 3 s, and the open run's log `GET /api/runs/{id}/log` (§6.2) while it runs. `/projects/{id}/context` loads
 `GET /api/projects/{id}/context` for the pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1),
 plus `GET /api/pages/projects/{id}` for its header, once each. `/projects/{id}/scheduler` loads
 `GET /api/projects/{id}/schedules` every 3 s, and `GET /api/projects/{id}/factories` and `GET /api/pages/projects/{id}`
@@ -1068,6 +1074,23 @@ GET  /api/pages/agents                                            (/agents, poll
   #   orchestrator), as the run log writes it without the "<who> · " prefix; null with none
   # recent: the last 20 runs that aren't running, ended_at newest first with nulls last, then id
   #   descending; error is null unless failed · transcripts: this run's rows in `transcripts`
+
+GET  /api/pages/factories/7/runs                                  (/projects/{id}/factories/7/runs, polled)
+← 200 {"automation":{"id":7,"name":"Security audit","project_id":3,"project":"api-server","workspace_id":2,
+         "workspace":"personal"},
+       "runs":[{"id":43,"status":"failed","trigger":"manual","started_at":"2026-10-21T09:00:00Z",
+         "ended_at":"2026-10-21T09:04:12Z","error":"claude exited with code 1","account":"b@y",
+         "transcripts":[{…GET /api/tasks/{id}/transcripts' fields, "run_id":43…}]}],
+       "runs_enabled":true,"runs_active":1,"max_concurrent_runs":2,"accounts":[…],"auto":{"account_id":1,"label":"a@x"}}
+← 404 {"detail":"Factory #99 not found"}
+← 404 {"detail":"default is a workflow; its runs are on its tasks"}
+  # 103: the automation's runs (runs.factory_id), started_at newest first, then id descending; no task runs,
+  #   no other automation's · automation: its names as they are now, for the breadcrumb
+  # status: running, succeeded, failed, or stopped · trigger: manual or schedule · error: null unless failed ·
+  #   account: the run's account label (its email, else its config dir's last component), null with none or
+  #   once that account is deleted · transcripts: the run's rows, by started_at then id, [] with none
+  # runs_enabled, runs_active, max_concurrent_runs, accounts, auto: as GET /api/pages/projects/{id} builds
+  #   them; no claude call beyond the login check's 60 s cache · every run in one response (no paging)
 
 GET  /api/usage?days=7                                            (/usage, loaded once per period)
 ← 200 {"accounts":[{"id":1,"label":"artem@example.com","active":true,"recorded_at":"2026-11-13T09:12:00Z",

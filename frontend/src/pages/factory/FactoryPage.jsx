@@ -11,7 +11,7 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 import { getFactory, saveFactory } from '../../api/factories.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
@@ -189,6 +189,12 @@ function Designer({ factory }) {
             {dirty ? 'Unsaved changes' : ''}
           </p>
           {error && <ErrorMessage error={error} />}
+          {/* 103 AC24, Q14: an automation's runs page; leaving with unsaved changes doesn't ask, like the breadcrumb */}
+          {factory.kind === 'automation' && (
+            <Link to={`/projects/${factory.project_id}/factories/${factory.id}/runs`} className={`${button} hover:no-underline`}>
+              Runs
+            </Link>
+          )}
           {/* 052 FE1: the stored graph's compiled files, before Save */}
           <button type="button" onClick={() => setShowFiles(true)} className={button}>
             Files

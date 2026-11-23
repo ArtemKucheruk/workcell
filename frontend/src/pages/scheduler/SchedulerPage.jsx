@@ -265,7 +265,7 @@ function SchedulerSkeleton() {
 }
 
 /**
- * docs/ui.md §8 item 17. Q12: the schedules poll every 3 s; the header's board view-model and the factories load once,
+ * docs/ui.md §8 item 18. Q12: the schedules poll every 3 s; the header's board view-model and the factories load once,
  * and again after each action (`tick`). An action's refusal shows in the page's red alert, emptied as the next starts.
  */
 function Scheduler({ id }) {

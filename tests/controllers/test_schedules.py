@@ -220,8 +220,8 @@ def test_docs():  # AC32
     sidebar = between(ui, "### 8.4 Sidebar", "### 8.5 ")
     assert sidebar.index("Workflows") < sidebar.index("Scheduler") < sidebar.index("Settings")
     assert "scheduling is a later page" not in ui
-    assert "17. **Scheduler** (`/projects/{id}/scheduler`" in ui and "### 8.11 Scheduler" in ui
-    assert "(Board, Task detail, Reviews, Agents, Scheduler)" in ui
+    assert "18. **Scheduler** (`/projects/{id}/scheduler`" in ui and "### 8.12 Scheduler" in ui
+    assert "(Board, Task detail, Reviews, Agents, Automation runs, Scheduler)" in ui
     assert "`in 5m`" in ui and "`tomorrow`" in ui
     api = doc("data-model-and-api.md")
     assert "CREATE TABLE schedules (" in api

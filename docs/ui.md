@@ -47,7 +47,7 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
 - Then the selected workspace's projects. Each project is a disclosure button that opens
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
   `warning` pill shown when above 0), **Context**, **Workflows** (`/projects/{id}/factories`, item 14), **Scheduler**
-  (`/projects/{id}/scheduler`, item 17), and **Settings**, and the current page's project opens by itself with its current link marked. **Workflows** is also
+  (`/projects/{id}/scheduler`, item 18), and **Settings**, and the current page's project opens by itself with its current link marked. **Workflows** is also
   marked in the factory designer.
 - Each project row, at its right, and the workspace switcher, beside it, have a `⋯` button
   (`Actions for <project>`, `Actions for workspace <name>`) that opens a native popover menu.
@@ -108,7 +108,10 @@ page, the agent's label on the transcript page, and `Code` on the code page, whi
 `#id`. The `›` separators are hidden from screen readers. Its names come from the page's own
 view-model, as the project and workspace are now. The factory designer opens with
 `workspace › project › Workflows › <name>` instead, Workflows linking to `/projects/{id}/factories` and the
-factory's name the current page. The other pages have no breadcrumb: the sidebar and the project header cover
+factory's name the current page. An automation's runs page (103) has the same trail,
+`workspace › project › Workflows › <automation>`, the automation's name the current page. A transcript of an
+automation run reads `workspace › project › Workflows › <automation> › <label>`, the automation linking to its
+runs page with that run open. The other pages have no breadcrumb: the sidebar and the project header cover
 them.
 
 Loading, failures, times, and motion are the same on every page:
@@ -118,7 +121,7 @@ Loading, failures, times, and motion are the same on every page:
   `Loading…`, with no headings, links, or buttons. Reloads (after an action, on a new round,
   file, or **Show all**) keep the last view until the new one arrives. A failed first load is
   the red alert.
-- On the pages polled every 3 s (Board, Task detail, Reviews, Agents, Scheduler), a failed poll over a page that
+- On the pages polled every 3 s (Board, Task detail, Reviews, Agents, Automation runs, Scheduler), a failed poll over a page that
   has loaded leaves the page as it was and shows a muted `Offline — retrying` banner, fixed at
   the bottom of the content column, without the error's detail. It is a polite status, shown
   once while the failures last, and the next good poll removes it. A 404 is still the
@@ -340,6 +343,10 @@ Loading, failures, times, and motion are the same on every page:
    - Header: the breadcrumb, whose `#id` links to the task, then the agent's label,
      `run #N`, model, turns, tokens, duration, and **Download raw**
      (`GET /api/transcripts/{id}/raw`).
+   - 103: an automation run's transcript (`task_id` null) has the breadcrumb
+     `workspace › project › Workflows › <automation> › <label>`: Workflows links to
+     `/projects/{id}/factories`, and the automation to `/projects/{id}/factories/{fid}/runs?run={run_id}`.
+     A transcript whose automation was deleted is the not-found page.
    - Each message's role and blocks: text as rendered markdown, a tool call's name and its
      input as text, a tool result as text, and thinking in a closed `<details>`.
    - Tool results over 4096 characters arrive cut; **Show all** reloads with `?full=1`.
@@ -460,7 +467,7 @@ Loading, failures, times, and motion are the same on every page:
       or a design's **Write to repo** wrote. Each design has a kind, fixed at creation: a
       **workflow** (the factory loop, run on board tasks) or an **automation** (run on the repo
       itself, with no task, e.g. Security audit; **Run now** starts one by hand, and the Scheduler
-      page, item 17, runs it on a schedule).
+      page, item 18, runs it on a schedule).
     - The list loads `GET /api/pages/projects/{id}` (the project header),
       `GET /api/projects/{id}/factories`, and `GET /api/factory-templates` once each, with no
       polling. The list loads again after each of its actions. The title reads
@@ -501,11 +508,15 @@ Loading, failures, times, and motion are the same on every page:
       (`role="alert"`) under the header, emptied as the next Run now starts. A start shows the
       polite status `Started run #43 as b@y.` with an **Open Agents** link to `/agents`, and the
       page data reloads.
+    - 103: after Run now and its `▾`, each automation row has a **Runs** link (`Runs of <name>`) to
+      its runs page, `/projects/{id}/factories/{fid}/runs` (item 17). Workflow rows have none.
     - The designer is the same for both kinds. It loads `GET /api/factories/{fid}` once, with no
       polling, and is a wide page. A factory of another project at this URL is the not-found
       page. The title reads `<name> · <project>`. The breadcrumb, then an `h1` with the name, the
       kind beside it as muted text (`Workflow` or `Automation`), and at its right a
-      `role="status"` reading `Unsaved changes` while unsaved, **Files**, and **Save**.
+      `role="status"` reading `Unsaved changes` while unsaved, **Files**, and **Save**. 103: an
+      automation's header has a **Runs** link to its runs page before **Files**; a workflow's has
+      none. Like the breadcrumb, it leaves without asking while unsaved.
     - The palette (left) lists **Agents** (Spec writer, Builder, Reviewer, Approver, Custom agent)
       and **Conditions** (All reviews PASS, Any review CHANGES, Rounds used < N, Decision
       APPROVE). An item drags onto the flow, or a click (Enter, Space) adds it at the center. A new
@@ -592,7 +603,34 @@ Loading, failures, times, and motion are the same on every page:
     - **Limited runs**: `run #N` · `#id title` link · account label · ended time, latest first, or
       `No limited runs.`
     - A section with nothing in the period says `No usage in this period.`
-17. **Scheduler** (`/projects/{id}/scheduler`; wireframe §8.11, 104)
+17. **Automation runs** (`/projects/{id}/factories/{fid}/runs`, a run open at `?run={run_id}`;
+    wireframe §8.11)
+    - 103: loads `GET /api/pages/factories/{fid}/runs` (`docs/data-model-and-api.md §6.4`) and
+      polls it every 3 s, with the skeleton, the red alert for a failed first load, and the offline
+      banner. A 404 (an unknown id, or a workflow) is the not-found page, and so is an automation
+      of another project at this URL, as in the designer. Not a wide page; the sidebar marks the
+      project's **Workflows** link as current. The title reads `<name> runs · <project>`.
+    - The breadcrumb `workspace › project › Workflows › <name>`, then the title row: an `h1` with
+      the name, and one **Run now** with its **Choose account** `▾`, always shown. They work as on
+      the Workflows page (item 14): no body is Auto, a menu account sends `{"account_id"}`, and
+      they are disabled with the title `Not signed in — runs disabled` or `2 of 2 runs active`. A
+      start opens the new run (`?run=`), shows the polite status `Started run #44 as b@y.`, and
+      reloads the page data.
+    - The runs, newest start first: `run #43` (which opens it), the status pill (`● running`, or
+      the outlined `succeeded` in success, `failed` in danger, `stopped` muted, each with its
+      word), the trigger as text (`manual` or `schedule`), the start as a relative time with the
+      local `YYYY-MM-DD HH:MM` in its `title`, the duration (an ended run from start to end; a
+      running one to now, so each poll ticks it; `—` otherwise), the account label (`—` with
+      none), and a failed run's error as text. With none, `No runs yet.` under the title row.
+    - **Stop** (`Stop run #43`) sits only on a running run's row, and works as on the Agents page
+      (item 15): its spinner, no confirm, a 200 reloads at once, and a refusal is the red alert
+      while the page stays. Run now and Stop empty the alert as they start.
+    - The open run (`?run=`) is marked `aria-current="true"`. Under the list, its run log, the task
+      page's (item 4), opened: fetched every 3 s while the run runs, and once more when a poll
+      shows it ended. Then its transcripts: the agent's label linking to `/transcripts/{id}`, then
+      its stats, or `No transcripts yet.` Without `?run=`, or with a run that isn't listed, no log
+      shows.
+18. **Scheduler** (`/projects/{id}/scheduler`; wireframe §8.12, 104)
     - Loads `GET /api/pages/projects/{id}` (the project header and the accounts),
       `GET /api/projects/{id}/schedules`, and `GET /api/projects/{id}/factories`. The schedules poll every 3 s;
       the other two load once, and again after each action. Skeleton first, the red alert on a failed first load,
@@ -822,16 +860,17 @@ Workflows                                                           [+ New workf
  nightly     12 nodes    yesterday     [Rename] [Delete]
 Automations                                                       [+ New automation]
  Not signed in — runs disabled                     (muted, only when Run now is off)
- Security audit  7 nodes  1h ago    [Run now][▾] [Rename] [Delete]
+ Security audit  7 nodes  1h ago    [Run now][▾] [Runs] [Rename] [Delete]
 h2 sections; each + New offers its kind's templates (Standard / Security audit checked)
 [Run now]: POST /api/factories/{fid}/run, Auto · [▾]: Choose account, the task page's Run menu
 a refusal: the red alert under the header · a start: "Started run #43 as b@y. Open Agents" (polite)
-with no automations: "No automations yet."
+with no automations: "No automations yet." · [Runs] (Runs of <name>): the automation's runs page (§8.11)
 
 /projects/3/factories/7  (wide)
 personal › api-server › Workflows › default
 default  Workflow                                      Unsaved changes   [Files] [Save]
          ↑ the kind, muted text (Workflow or Automation)
+an automation's header: Security audit  Automation        [Runs] [Files] [Save]   (Runs: its runs page)
 ┌ [« Palette] ────┬─ dotted background ───────────────────────────────┬─ Node ─────────────────┐
 │ Agents          │ ┌─────────┐   ┌───────────────┐      ┌───────────┐ │ Name                   │
 │  Spec writer    │ │ Start   ●──►● spec-writer   ●──×──►● builder   │ │ [builder_____________] │
@@ -987,7 +1026,26 @@ no snapshot: "no usage data yet, run a task" in the card · nothing in the perio
 no limited runs: "No limited runs." · bars: plain divs, aria-hidden; every number is also text
 ```
 
-### 8.11 Scheduler
+### 8.11 Automation runs
+```
+/projects/3/factories/7/runs?run=43
+personal › api-server › Workflows › Security audit
+Security audit                                                       [Run now][▾]
+Started run #44 as b@y.                                           (polite, after a start)
+ run #44  ● running   manual    just now   0m 12s   —                         [Stop]
+▌run #43  failed      manual    1h ago     4m 12s   b@y   claude exited with code 1
+ run #42  succeeded   schedule  yesterday  3m 05s   a@x
+▸ Run log · run #43                                                  (open, the task page's)
+  … the run's log lines …
+Transcripts · run #43
+ orchestrator · claude-opus-4-1 · 38 turns · in 412 · cache 1,830,211 · out 20,977 · 3m 50s
+▌ = the open run (aria-current="true") · run #N sets ?run=N · [Stop]: running rows only
+pills: ● running accent, succeeded success, failed danger, stopped muted, each with its word
+no runs: "No runs yet." · no transcripts: "No transcripts yet." · no ?run=: no log
+[Run now][▾]: disabled with "Not signed in — runs disabled" or "2 of 2 runs active"
+```
+
+### 8.12 Scheduler
 ```
 api-server · personal
 Scheduler                                                               [+ Schedule automation]

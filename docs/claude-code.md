@@ -35,6 +35,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]` (stdin: description, with `--description -`) | me | `POST /api/projects/{id}/tasks` with `description_md` and `blocked_by` (+ `/run`) |
 | `fctl task block <id> --by <id>` | me | `PUT /api/tasks/{id}/blocked-by/{blocker}` → prints every blocker with its status |
 | `fctl task unblock <id> --by <id>` | me | `DELETE /api/tasks/{id}/blocked-by/{blocker}` → prints the blockers left |
+| `fctl task retry <id> [--account <id\|email>]` | me | `GET /api/tasks/{id}` (refuses a task that never ran or is running) then `POST /api/tasks/{id}/run` (`{"account_id"}` with `--account`, else Auto) |
 | `fctl task delete <id> [--yes]` | me | `DELETE /api/tasks/{id}` (after `GET /api/tasks/{id}` for the title) |
 | `fctl run <id> [--account <id\|email>]` / `fctl run next` | me | `POST /api/tasks/{id}/run` (`{"account_id"}` with `--account`, else Auto), `/api/projects/{id}/run-next` (always Auto) |
 | `fctl automation run <id> [--account <id\|email>]` | me | `POST /api/factories/{id}/run` (`{"account_id"}` with `--account`, else Auto): the automation's `/<slug>`, headless in a fresh worktree, no task (102) |
@@ -199,7 +200,7 @@ Rules the templates keep:
 
 **Scheduling an automation.** (104) Create the Security audit as an automation on the Workflows page, Write to
 repo, and commit its `.claude/skills/<slug>/` on the default branch. Then give it a schedule on the project's
-Scheduler page (`docs/ui.md §8` item 17): a preset or a 5-field cron, read in the server's local time, and an
+Scheduler page (`docs/ui.md §8` item 18): a preset or a 5-field cron, read in the server's local time, and an
 account (Auto by default). The backend's scheduler starts it as **Run now** would, with `trigger = 'schedule'`
 (`docs/MVP.md §4.3`). A time it can't start (still running, the run cap, a refusal) is skipped, and the page
 shows why.

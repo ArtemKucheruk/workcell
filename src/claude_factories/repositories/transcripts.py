@@ -45,11 +45,23 @@ class TranscriptsRepo:
             " JOIN runs r ON r.id = t.run_id WHERE t.task_id = ? ORDER BY t.run_id, t.started_at, t.id", (task_id,),
         ).fetchall()
 
-    def get(self, transcript_id: int) -> sqlite3.Row | None:
-        """047 Q3: with its task's project and workspace as they are now, for the breadcrumb."""
+    def for_factory(self, factory_id: int) -> list[sqlite3.Row]:
+        """103 AC3: the transcripts of the automation's runs, each with its run_id, by started_at then id."""
         return self.conn.execute(
-            f"SELECT x.*, p.id AS project_id, p.name AS project, w.id AS workspace_id, w.name AS workspace"
-            f" FROM (SELECT {LISTED}, task_id, path FROM transcripts WHERE id = ?) x JOIN tasks t ON t.id = x.task_id"
-            " JOIN projects p ON p.id = t.project_id JOIN workspaces w ON w.id = p.workspace_id",
+            f"SELECT {LISTED} FROM transcripts WHERE run_id IN (SELECT id FROM runs WHERE factory_id = ?)"
+            " ORDER BY started_at, id", (factory_id,),
+        ).fetchall()
+
+    def get(self, transcript_id: int) -> sqlite3.Row | None:
+        """047 Q3: with its task's project and workspace as they are now, for the breadcrumb. 103 AC8: an
+        automation run's transcript (task_id NULL) takes its automation's project, with `factory_id` and `factory`
+        (NULL for a task's); Q9: once the automation is deleted it has no project, so None."""
+        return self.conn.execute(
+            f"SELECT x.*, f.id AS factory_id, f.name AS factory, p.id AS project_id, p.name AS project,"
+            " w.id AS workspace_id, w.name AS workspace"
+            f" FROM (SELECT {LISTED}, task_id, path FROM transcripts WHERE id = ?) x"
+            " LEFT JOIN runs r ON r.id = x.run_id LEFT JOIN tasks t ON t.id = x.task_id"
+            " LEFT JOIN factories f ON f.id = r.factory_id AND x.task_id IS NULL"
+            " JOIN projects p ON p.id = COALESCE(t.project_id, f.project_id) JOIN workspaces w ON w.id = p.workspace_id",
             (transcript_id,),
         ).fetchone()

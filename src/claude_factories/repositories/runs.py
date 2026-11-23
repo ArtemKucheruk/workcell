@@ -142,6 +142,16 @@ class RunsRepo:
             "SELECT id, status, log_path FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1", (task_id,)
         ).fetchone()
 
+    def for_factory(self, factory_id: int) -> list[sqlite3.Row]:
+        """103 AC1, AC2: the automation's runs, started_at newest first then id, each with its account's email and
+        config_dir (NULL for none or a deleted one)."""
+        return self.conn.execute(
+            "SELECT r.id, r.status, r.trigger, r.started_at, r.ended_at, r.error, a.email, a.config_dir"
+            " FROM runs r LEFT JOIN claude_accounts a ON a.id = r.account_id"
+            " WHERE r.factory_id = ? ORDER BY r.started_at DESC, r.id DESC",
+            (factory_id,),
+        ).fetchall()
+
     def started_at(self, project_id: int) -> dict[int, str]:
         """014: run id → started_at for every run of the project's tasks."""
         return dict(self.conn.execute(

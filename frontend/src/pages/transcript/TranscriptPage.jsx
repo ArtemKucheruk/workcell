@@ -76,6 +76,18 @@ function TranscriptSkeleton() {
 }
 
 /**
+ * 047 Q2: a task transcript's `#id` links to its task. 103 AC25, Q9: an automation's (no task_id) is `Workflows ›
+ * <automation>`, the name linking to its runs page with this run open.
+ */
+const owner = (t) =>
+  t.task_id == null
+    ? [
+        { label: 'Workflows', to: `/projects/${t.project_id}/factories` },
+        { label: t.factory, to: `/projects/${t.project_id}/factories/${t.factory_id}/runs?run=${t.run_id}` },
+      ]
+    : [{ label: `#${t.task_id}`, to: `/tasks/${t.task_id}` }]
+
+/**
  * docs/ui.md §8 item 8: one agent's transcript. Fetched once, no poll: a copy only changes when a run ends.
  * Q9: "Show all" refetches with ?full=1, after which every tool result is whole. 047 Q2: the breadcrumb's `#id` is the link
  * to its task, and its last item is the agent's label.
@@ -98,7 +110,7 @@ export function TranscriptPage() {
   return (
     <>
       <header className="mb-6 grid gap-2">
-        <Breadcrumbs items={[...projectTrail(t), { label: `#${t.task_id}`, to: `/tasks/${t.task_id}` }, { label }]} />
+        <Breadcrumbs items={[...projectTrail(t), ...owner(t), { label }]} />
         <h1 className="wrap-anywhere">{label}</h1>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span>{`run #${t.run_id}`}</span>

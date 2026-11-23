@@ -183,6 +183,14 @@ def task(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Run
     }
 
 
+@router.get("/api/pages/factories/{factory_id}/runs")
+def automation_runs(factory_id: int, factories: Factories, runs: Runs, transcripts: Transcripts,
+                    claude: ClaudeAdapter, accounts: ClaudeAccounts, settings: Settings,
+                    usage: Usage) -> dto.AutomationRunsPage:
+    """103: an automation's runs, polled every 3 s (Q8). No git; claude only through claude_login's cache."""
+    return handler.automation_runs(factories, runs, transcripts, claude, accounts, settings, usage, factory_id)
+
+
 @router.get("/api/pages/tasks/{task_id}/flow")
 def task_flow(task_id: int, tasks: Tasks, rounds: Rounds, reviews: Reviews, runs: Runs, transcripts: Transcripts,
               factories: Factories, n: str = Query("latest", alias="round")) -> dto.TaskFlow:

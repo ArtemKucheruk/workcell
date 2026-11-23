@@ -206,6 +206,13 @@ test('104 AC23: Scheduler is the current page on /projects/3/scheduler, and no o
   expect(linksOf('api-server').getByRole('link', { name: 'Scheduler' }).className).toMatch(accent)
 })
 
+test('103 AC26: on an automation\'s runs page Workflows is the current link, and no other is', async () => {
+  await open('/projects/3/factories/7/runs')
+  const links = linksOf('api-server').getAllByRole('link')
+  expect(links.filter((a) => a.getAttribute('aria-current') === 'page').map((a) => a.textContent)).toEqual(['Workflows'])
+  expect(linksOf('api-server').getByRole('link', { name: 'Workflows' }).className).toMatch(accent)
+})
+
 test("042 FE35, 043 FE15: Reviews shows the project's review count above 0 as a warning pill, and no number at 0", async () => {
   const counted = { id: 2, name: 'personal', projects: [{ ...project(3, 'api-server'), review: 2 }, project(7, 'web')] }
   await open('/', body(null, [counted]))
