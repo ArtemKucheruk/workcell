@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS runs (
   account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL,  -- 096 Q5: its account, NULL = the active one
   factory_id INTEGER REFERENCES factories(id) ON DELETE SET NULL,  -- 102: the automation; NULL for a task run or once deleted
   kind TEXT NOT NULL DEFAULT 'factory' CHECK (kind IN ('factory','automation')),  -- 102: a task run, or an automation's
-  trigger TEXT NOT NULL DEFAULT 'manual' CHECK (trigger IN ('manual','schedule')),  -- 102 Q17: schedule is the scheduler's
+  trigger TEXT NOT NULL DEFAULT 'manual' CHECK (trigger IN ('manual','schedule')),  -- 104: schedule for the scheduler's runs
   worktree_path TEXT,                     -- 102 Q4: an automation run's own worktree; a task run uses tasks.worktree_path
   CHECK ((kind = 'factory') = (task_id IS NOT NULL)));
 -- 096: one running run per task; settings.max_concurrent_runs caps them all. db.init() drops the old global one_active_run
@@ -154,6 +154,17 @@ CREATE TABLE IF NOT EXISTS context_items (  -- 057: a project's context cards an
   content_md TEXT NOT NULL DEFAULT '',    -- '' for a group
   source_path TEXT,                       -- the file or folder it was read from, else NULL
   position REAL NOT NULL,                 -- order within its parent's list
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+
+CREATE TABLE IF NOT EXISTS schedules (   -- 104: an automation's one schedule; IF NOT EXISTS covers old DBs
+  id INTEGER PRIMARY KEY,
+  factory_id INTEGER NOT NULL UNIQUE REFERENCES factories(id) ON DELETE CASCADE,  -- removed with the automation
+  cron TEXT NOT NULL,                     -- 5 fields, read in the server's local time (lib/cron.py)
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),  -- 0 = paused
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL,  -- NULL = Auto
+  next_run_at TEXT,                       -- UTC; NULL while paused
+  last_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,  -- the last run it started
+  last_skip TEXT, last_skip_at TEXT,      -- the latest skip's reason and time; a started run clears both
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS settings (     -- 096 Q2: the app's one settings row, edited on the Settings page

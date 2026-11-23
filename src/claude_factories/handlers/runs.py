@@ -281,12 +281,13 @@ def drop_worktree(git: Git, repo: str, branch: str) -> None:
 
 
 def start_automation(tx, git: Git, claude: Claude, factory_id: int, base_url: str,
-                     account_id: int | None = None) -> RunStarted:
+                     account_id: int | None = None, trigger: str = "manual") -> RunStarted:
     """102, MVP §4.4: Run now on an automation. AC10's order: 404, a workflow's 409 (Q8), the cap, the compiled
     skill committed on the default branch (AC9), a fresh worktree and branch from it named by the session id's
     first 8 characters (Q3; wt refusals as for tasks), the ignored files, then the account and auth as start
     does. A refusal after the worktree is made drops it (Q6). Then the row, under the write lock with the cap
-    checked again, and `/<slug>` spawned headless in the worktree (Q2: no argument). No task, no event."""
+    checked again, and `/<slug>` spawned headless in the worktree (Q2: no argument). No task, no event.
+    104: the scheduler starts it the same way, with `trigger="schedule"` on the row."""
     with tx() as conn:
         auto = FactoriesRepo(conn).for_run(factory_id)
     if auto is None:
@@ -319,7 +320,7 @@ def start_automation(tx, git: Git, claude: Claude, factory_id: int, base_url: st
             runs = RunsRepo(conn)
             now = TasksRepo(conn).lock()
             refuse_if_running(runs, SettingsRepo(conn), None)  # 096 Q1: again under the write lock
-            run_id = runs.add(None, session_id, now, account["id"], "automation", factory_id, wt)
+            run_id = runs.add(None, session_id, now, account["id"], "automation", factory_id, wt, trigger)
             if isinstance(email := info.get("email"), str) and email:  # 095 AC11
                 ClaudeAccountsRepo(conn).set_email(account["id"], email)
                 account = dict(account) | {"email": email}

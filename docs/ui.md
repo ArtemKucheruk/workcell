@@ -46,8 +46,8 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
-  `warning` pill shown when above 0), **Context**, **Workflows** (`/projects/{id}/factories`, item 14), and
-  **Settings**, and the current page's project opens by itself with its current link marked. **Workflows** is also
+  `warning` pill shown when above 0), **Context**, **Workflows** (`/projects/{id}/factories`, item 14), **Scheduler**
+  (`/projects/{id}/scheduler`, item 17), and **Settings**, and the current page's project opens by itself with its current link marked. **Workflows** is also
   marked in the factory designer.
 - Each project row, at its right, and the workspace switcher, beside it, have a `⋯` button
   (`Actions for <project>`, `Actions for workspace <name>`) that opens a native popover menu.
@@ -118,14 +118,15 @@ Loading, failures, times, and motion are the same on every page:
   `Loading…`, with no headings, links, or buttons. Reloads (after an action, on a new round,
   file, or **Show all**) keep the last view until the new one arrives. A failed first load is
   the red alert.
-- On the pages polled every 3 s (Board, Task detail, Reviews, Agents), a failed poll over a page that
+- On the pages polled every 3 s (Board, Task detail, Reviews, Agents, Scheduler), a failed poll over a page that
   has loaded leaves the page as it was and shows a muted `Offline — retrying` banner, fixed at
   the bottom of the content column, without the error's detail. It is a polite status, shown
   once while the failures last, and the next good poll removes it. A 404 is still the
   not-found page, and refusals of actions stay red alerts.
 - Last activity, a running run's start, the status history, the review timeline, and a factory's
   last update read as relative times: `just now`, `5m ago`, `3h ago`, then by calendar day `yesterday` and `4d ago`,
-  and the date (`2026-10-13`) from a week back. The full local `YYYY-MM-DD HH:MM` is in the
+  and the date (`2026-10-13`) from a week back. A future time (a schedule's next run, 104) reads forward the same
+  way: `in <1m`, `in 5m`, `in 3h`, then `tomorrow` and `in 4d`, then the date. The full local `YYYY-MM-DD HH:MM` is in the
   `title`, and the ISO time in `<time dateTime>`. They are worked out as the page renders, so
   the 3 s polls keep them current. Every other time is the absolute `YYYY-MM-DD HH:MM`.
 - **Run**, **Retry**, **Run next**, **Stop**, **Comment**, **Submit review**, and **Log in**
@@ -458,8 +459,8 @@ Loading, failures, times, and motion are the same on every page:
       (`docs/data-model-and-api.md §6.1`). Runs still use the `.claude/` files that Create factory
       or a design's **Write to repo** wrote. Each design has a kind, fixed at creation: a
       **workflow** (the factory loop, run on board tasks) or an **automation** (run on the repo
-      itself, with no task, e.g. Security audit; **Run now** starts one by hand, and scheduling is a
-      later page).
+      itself, with no task, e.g. Security audit; **Run now** starts one by hand, and the Scheduler
+      page, item 17, runs it on a schedule).
     - The list loads `GET /api/pages/projects/{id}` (the project header),
       `GET /api/projects/{id}/factories`, and `GET /api/factory-templates` once each, with no
       polling. The list loads again after each of its actions. The title reads
@@ -591,6 +592,27 @@ Loading, failures, times, and motion are the same on every page:
     - **Limited runs**: `run #N` · `#id title` link · account label · ended time, latest first, or
       `No limited runs.`
     - A section with nothing in the period says `No usage in this period.`
+17. **Scheduler** (`/projects/{id}/scheduler`; wireframe §8.11, 104)
+    - Loads `GET /api/pages/projects/{id}` (the project header and the accounts),
+      `GET /api/projects/{id}/schedules`, and `GET /api/projects/{id}/factories`. The schedules poll every 3 s;
+      the other two load once, and again after each action. Skeleton first, the red alert on a failed first load,
+      `Offline — retrying` after a failed poll. Not a wide page. The title reads `<project> · Scheduler`, `h1`
+      `Scheduler`.
+    - One row per schedule, by automation name: the automation's name, linking to its runs page
+      (`/projects/{id}/factories/{fid}/runs`); the schedule in words (`Daily at 09:00`, `Hourly at :05`,
+      `Weekly on Monday at 09:00`, `Custom: */15 9-17 * * 1-5`); the next run as a relative future time, or
+      `Paused`; the last run it started as `run #43` (linking to `…/runs?run=43`) with its status as text and
+      its start, or `No runs yet`; the latest skip as `Skipped 5m ago: <reason>`; and the account, or `Auto`.
+    - **Pause** / **Resume** (`Pause <name>`, `Resume <name>`) sends `PATCH /api/schedules/{id}`
+      `{"enabled": …}`; **Edit** opens the form with the automation fixed; **Delete** opens the shared delete
+      dialog (`This removes the schedule. The automation and its runs stay.`). Refusals are the page's red alert.
+    - **+ Schedule automation** opens a popover form: **Automation** (the project's automations with no schedule),
+      **Repeat** (Hourly, Daily at + a time, Weekly on + a weekday, Monday first, + a time, or Custom cron + its
+      text), and **Account** (`Auto` first, the default, then each account). A refusal shows inside the form,
+      which keeps its values. With every automation scheduled the button is disabled, titled
+      `Every automation has a schedule`.
+    - With none: `No scheduled automations.`, plus `Create an automation on Workflows first.` when the project has
+      no automation, Workflows linking to `/projects/{id}/factories`.
 
 ### 8.1 Board
 ```
@@ -706,6 +728,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │     Reviews          (2) │  ← waiting on me or escalated, when above 0: a warning pill
 │     Context              │
 │     Workflows            │  ← /projects/{id}/factories: workflows and automations
+│     Scheduler            │  ← /projects/{id}/scheduler: the automations' schedules
 │     Settings             │
 │ ▸ web                  ⋯ │
 │                          │
@@ -962,4 +985,28 @@ Limited runs
 run #40 · #12 Rate-limit login endpoint · work · 2026-11-12 23:00
 no snapshot: "no usage data yet, run a task" in the card · nothing in the period: "No usage in this period."
 no limited runs: "No limited runs." · bars: plain divs, aria-hidden; every number is also text
+```
+
+### 8.11 Scheduler
+```
+api-server · personal
+Scheduler                                                               [+ Schedule automation]
+Automation      Schedule                    Next run   Last run                      Account
+Security audit  Weekly on Monday at 09:00   in 5m      run #43 succeeded 5m ago      Auto     [Pause] [Edit] [Delete]
+Test coverage   Custom: */15 9-17 * * 1-5   Paused     No runs yet                   b@y      [Resume] [Edit] [Delete]
+                                                       Skipped 1h ago: run #41 of Test coverage is still running
+names link to /projects/{id}/factories/{fid}/runs · run #43 to …/runs?run=43 · Next run's title: local YYYY-MM-DD HH:MM
+
++ Schedule automation / Edit (a popover)
+┌ Schedule automation ──────────────┐
+│ Automation [Nightly          ▾]   │  ← Edit: the schedule's automation, disabled
+│ Repeat     [Weekly on … at   ▾]   │  ← Hourly · Daily at · Weekly on … at · Custom cron
+│ Weekday    [Monday           ▾]   │  ← Weekly only; Daily shows only Time, Custom a Cron field
+│ Time       [09:00]                │
+│ Account    [Auto             ▾]   │
+│ [Create]                          │  ← Edit: [Save]
+│ cron 0 0 30 2 * never runs        │  ← a refusal, inside; the fields keep their values
+└───────────────────────────────────┘
+none: "No scheduled automations." · no automation: "Create an automation on Workflows first." (links Workflows)
+all scheduled: [+ Schedule automation] disabled, title "Every automation has a schedule"
 ```

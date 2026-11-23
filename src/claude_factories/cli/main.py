@@ -34,7 +34,7 @@ def serve(args):
     from ..server.app import create_app
 
     print(f"Claude Factories → http://{args.host}:{args.port} (data: {data_dir()})", flush=True)
-    uvicorn.run(create_app(), host=args.host, port=args.port)
+    uvicorn.run(create_app(port=args.port), host=args.host, port=args.port)  # 104 Q4: the scheduler's FCTL_URL
 
 
 def seed(args):

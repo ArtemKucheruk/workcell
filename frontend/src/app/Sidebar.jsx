@@ -167,6 +167,7 @@ const pages = (project) => [
   [`/projects/${project.id}/context`, 'Context'],
   // 051 FE6: no `end`, so it stays current inside a factory's designer. 101: workflows and automations, same route
   [`/projects/${project.id}/factories`, 'Workflows', false],
+  [`/projects/${project.id}/scheduler`, 'Scheduler'], // 104 AC23: after Workflows
   [`/projects/${project.id}/settings`, 'Settings'],
 ]
 

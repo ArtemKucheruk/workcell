@@ -44,16 +44,23 @@ class RunsRepo:
     def exists(self, run_id: int) -> bool:
         return self.conn.execute("SELECT 1 FROM runs WHERE id = ?", (run_id,)).fetchone() is not None
 
+    def running_for_factory(self, factory_id: int) -> sqlite3.Row | None:
+        """104 AC16: a running run of the automation, manual or scheduled; its lowest id."""
+        return self.conn.execute(
+            "SELECT id FROM runs WHERE factory_id = ? AND status = 'running' ORDER BY id LIMIT 1", (factory_id,)
+        ).fetchone()
+
     def add(self, task_id: int | None, session_id: str, now: str, account_id: int | None = None,
-            kind: str = "factory", factory_id: int | None = None, worktree_path: str | None = None) -> int:
+            kind: str = "factory", factory_id: int | None = None, worktree_path: str | None = None,
+            trigger: str = "manual") -> int:
         """A running row with no log path yet, in account `account_id` (096 Q5). Raises IntegrityError if
         one_run_per_task refuses it (the task already has a running run). 102: an automation run is kind
-        `automation` with no task, its automation's `factory_id`, and its own `worktree_path`; trigger stays
-        manual (Q17)."""
+        `automation` with no task, its automation's `factory_id`, and its own `worktree_path`. 104: `trigger` is
+        `schedule` for the scheduler's runs."""
         return self.conn.execute(
             "INSERT INTO runs (task_id, session_id, status, log_path, started_at, account_id, kind, factory_id,"
-            " worktree_path) VALUES (?, ?, 'running', '', ?, ?, ?, ?, ?) RETURNING id",
-            (task_id, session_id, now, account_id, kind, factory_id, worktree_path),
+            " worktree_path, trigger) VALUES (?, ?, 'running', '', ?, ?, ?, ?, ?, ?) RETURNING id",
+            (task_id, session_id, now, account_id, kind, factory_id, worktree_path, trigger),
         ).fetchone()[0]
 
     def imported(self, task_id: int, session_id: str, started_at: str, ended_at: str | None) -> int:

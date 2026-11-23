@@ -20,9 +20,28 @@ function shown(props) {
   return out
 }
 
+const iso = (local) => new Date(`${local.replace(' ', 'T')}+09:00`).toISOString()
+
+test('104 AC31: a future relative time is in <1m, in Nm, in Nh, tomorrow, in Nd, then the local date', () => {
+  const cases = [
+    ['2026-10-20 12:00:30', 'in <1m'],
+    ['2026-10-20 12:05:00', 'in 5m'],
+    ['2026-10-20 12:59:59', 'in 59m'],
+    ['2026-10-20 13:00:00', 'in 1h'],
+    ['2026-10-21 11:30:00', 'in 23h'],
+    ['2026-10-21 12:00:00', 'tomorrow'],
+    ['2026-10-22 00:30:00', 'in 2d'],
+    ['2026-10-26 23:59:00', 'in 6d'],
+    ['2026-10-27 00:00:00', '2026-10-27'],
+  ]
+  expect(cases.map(([local]) => shown({ iso: iso(local), relative: true }))).toEqual(
+    cases.map(([local, text]) => [text, iso(local), local.slice(0, 16)]),
+  )
+})
+
 test('046 FE1: relative is just now, Nm ago, Nh ago, yesterday, Nd ago, then the local date, with the local time in title', () => {
   const cases = [
-    ['2026-10-20 12:00:30', 'just now'], // the future
+    ['2026-10-20 12:00:00', 'just now'],
     ['2026-10-20 11:59:31', 'just now'],
     ['2026-10-20 11:55:00', '5m ago'],
     ['2026-10-20 11:00:00', '1h ago'],
@@ -32,7 +51,6 @@ test('046 FE1: relative is just now, Nm ago, Nh ago, yesterday, Nd ago, then the
     ['2026-10-14 09:00:00', '6d ago'],
     ['2026-10-13 23:59:00', '2026-10-13'],
   ]
-  const iso = (local) => new Date(`${local.replace(' ', 'T')}+09:00`).toISOString()
   expect(cases.map(([local]) => shown({ iso: iso(local), relative: true }))).toEqual(
     cases.map(([local, text]) => [text, iso(local), local.slice(0, 16)]),
   )

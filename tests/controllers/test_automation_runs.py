@@ -411,7 +411,8 @@ def test_docs():  # AC31
         assert text in pages, text
     mvp = section("MVP.md", "### 4.4")
     assert "An automation's run (102)" in mvp and 'claude -p "/security-audit"' in mvp
-    assert "Starting an automation by hand is in already" in section("MVP.md", "## 9.")
+    # 104 AC32: Scheduled runs moved from Later to MVP, so §9 now lists Run now beside it
+    assert "**Run now** on an automation" in section("MVP.md", "## 9.")
     ui = section("ui.md", "## 8.")
     for text in ("Not signed in — runs disabled", "2 of 2 runs active", "Started run #43 as b@y.", "deleted automation",
                  "automation  Security audit"):
