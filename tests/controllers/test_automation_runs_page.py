@@ -109,7 +109,7 @@ def test_unknown(client, project):  # AC6
 def test_docs():  # AC28
     ui = section("ui.md", "## 8.")
     for text in ("17. **Automation runs**", "### 8.11 Automation runs", "Runs of <name>", "before **Files**",
-                 "Workflows › <automation>", "Agents, Automation runs)", "Workflows › <automation> › <label>",
+                 "Workflows › <automation>", "Agents, Automation runs, Scheduler)", "Workflows › <automation> › <label>",
                  "Started run #44 as b@y."):
         assert text in ui, text
     pages = section("data-model-and-api.md", "### 6.4")

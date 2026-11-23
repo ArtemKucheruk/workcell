@@ -55,7 +55,7 @@ CREATE TABLE runs (
   account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL,  -- the account it ran in, chosen at start (Auto or my pick, 097); NULL = the active one
   factory_id INTEGER REFERENCES factories(id) ON DELETE SET NULL,  -- an automation run's automation; NULL for a task run, or once it's deleted
   kind TEXT NOT NULL DEFAULT 'factory' CHECK (kind IN ('factory','automation')),  -- a task run (/factory <id>), or an automation's (/<slug>)
-  trigger TEXT NOT NULL DEFAULT 'manual' CHECK (trigger IN ('manual','schedule')),  -- manual for every run today; schedule is the scheduler's (§9)
+  trigger TEXT NOT NULL DEFAULT 'manual' CHECK (trigger IN ('manual','schedule')),  -- manual for Run now and task runs; schedule for the scheduler's runs (104, MVP §4.3)
   worktree_path TEXT,                     -- an automation run's own fresh worktree; a task run's is tasks.worktree_path
   CHECK ((kind = 'factory') = (task_id IS NOT NULL)));  -- a factory run has a task, an automation run none
 -- one running run per task; settings.max_concurrent_runs caps them all (Pro limits). Replaced the global one_active_run
@@ -165,6 +165,17 @@ CREATE TABLE context_items (              -- a project's context cards and group
   position REAL NOT NULL,                 -- order within its parent's list
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 
+CREATE TABLE schedules (                  -- an automation's one schedule (104, §6.1), on the Scheduler page
+  id INTEGER PRIMARY KEY,
+  factory_id INTEGER NOT NULL UNIQUE REFERENCES factories(id) ON DELETE CASCADE,  -- the automation; removed with it
+  cron TEXT NOT NULL,                     -- 5 fields, normalized, read in the server's local time (MVP §4.3)
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),  -- 0 = paused
+  account_id INTEGER REFERENCES claude_accounts(id) ON DELETE SET NULL,  -- NULL = Auto
+  next_run_at TEXT,                       -- UTC ISO; NULL while paused
+  last_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,  -- the last run it started
+  last_skip TEXT, last_skip_at TEXT,      -- the latest skipped time's reason and when; a started run clears both
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+
 CREATE TABLE settings (                   -- the app's one settings row (Settings page, /api/settings)
   id INTEGER PRIMARY KEY CHECK (id = 1),
   max_concurrent_runs INTEGER NOT NULL DEFAULT 2 CHECK (max_concurrent_runs >= 1));  -- runs at once, all projects
@@ -195,7 +206,10 @@ start by Auto or by me, MVP §4.3), whose config dir its env, takeover command, 
 from before the column, or a disconnected account) means the active one. A run has 0–n
 transcripts. An automation (a factory of kind `automation`) has 0–n runs of kind `automation`, with no task and
 each in its own worktree; any number of them may run at once, under the same cap, which counts every kind. Deleting
-the automation, or its project, sets their `factory_id` to NULL and keeps the runs. A round has
+the automation, or its project, sets their `factory_id` to NULL and keeps the runs. An automation has 0–1 schedules
+(`schedules`, created by its `CREATE TABLE IF NOT EXISTS` on old databases), removed with the automation or its
+project; a workflow has none. Deleting a schedule keeps the automation and its runs, and deleting its Claude account
+makes it Auto. A round has
 1–n files, 0–4 verdicts, and 0–n comments. A task has 0–n decisions and 0–n events. The
 review page's timeline is a union of events, rounds, verdicts, decisions, and comments,
 ordered by `created_at`.
@@ -477,6 +491,44 @@ POST /api/factories/7/write                                       (Files → Wri
 <Factory> = {"id":7,"project_id":3,"project":"api-server","workspace_id":2,"workspace":"personal",
              "name":"default","kind":"workflow","graph":<Graph>,"created_at":"…","updated_at":"…"}
              # project and workspace: the names as they are now (for the breadcrumb)
+
+GET  /api/projects/3/schedules                                    (the Scheduler page, polled every 3 s)
+← 200 [<Schedule>…]                                               # by automation name, then id
+  # 404 {"detail":"Project #99 not found"}
+
+POST /api/projects/3/schedules                                    (+ Schedule automation)
+→ {"factory_id":9,"cron":"0 9 * * 1","account_id":2}              # account_id left out or null = Auto
+← 201 <Schedule>                                                  # enabled, next_run_at the cron's next time from now
+  # checked in this order, and none writes a row:
+  # 404 as the project's other endpoints, for an unknown project
+  # 404 {"detail":"Factory #9 not found"}   (unknown, or another project's)
+  # 409 {"detail":"Review loop is a workflow; only automations can be scheduled"}
+  # 409 {"detail":"Security audit already has a schedule; edit it instead"}
+  # 422 {"detail":"cron needs 5 fields (minute hour day month weekday), got 4"}, or another cron reason:
+  #   "cron minute 61 is out of range 0–59", "cron hour \"x\" isn't a number, range, list, or step",
+  #   "cron 0 0 30 2 * never runs" (nothing matches within 8 years)
+  # 422 {"detail":"no Claude account #99"}
+
+PATCH /api/schedules/4                                            (Pause / Resume, Edit → Save)
+→ {"cron":"30 8 * * 1","enabled":false,"account_id":null}         # any of them; one left out stays, null account_id = Auto
+← 200 <Schedule>
+  # enabled false → next_run_at null; enabled true on a paused one, or a new cron on an enabled one → the next
+  #   time from now; otherwise next_run_at stays
+  # 422 cron reasons as POST, 422 {"detail":"no Claude account #99"}: nothing changes
+  # 404 {"detail":"schedule #9 not found"}
+
+DELETE /api/schedules/4                                           (Delete)
+← 204, empty body · 404 {"detail":"schedule #9 not found"}       # the automation and its runs stay
+
+<Schedule> = {"id":4,"factory_id":9,"automation":"Security audit","cron":"0 9 * * 1",
+              "summary":"Weekly on Monday at 09:00","enabled":true,"account_id":2,"account":"b@y",
+              "next_run_at":"2026-11-23T09:00:00Z","last_run":{"id":43,"status":"succeeded","started_at":"…"},
+              "last_skip":"run #43 of Security audit is still running","last_skip_at":"2026-11-16T09:00:00Z"}
+  # cron: 5 fields (minute hour day month weekday; *, n, a-b, lists, /step on * or a-b; weekday 0 and 7 Sunday),
+  #   normalized to single spaces, read in the server's local time (MVP §4.3)
+  # summary: "Hourly at :05", "Daily at 09:00", "Weekly on Monday at 09:00", else "Custom: <cron>"
+  # account: the account's label, null for Auto · next_run_at: UTC, null while paused
+  # last_run: the last run this schedule started, with its status now, or null · last_skip: the latest skip, or null
 ```
 
 **Derived titles and descriptions.** An upload or a path read takes a card's title from the source text of the
@@ -805,7 +857,8 @@ POST /api/tasks/12/pr/merge                                       (Merge PR, 093
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
 `/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=&branch=` ·
 `/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
-`/projects/{id}/factories/{fid}` · `/projects/{id}/factories/{fid}/runs?run=` · `/projects/{id}/settings` ·
+`/projects/{id}/factories/{fid}` · `/projects/{id}/factories/{fid}/runs?run=` · `/projects/{id}/scheduler` ·
+`/projects/{id}/settings` ·
 `/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` · `/usage` ·
 `/docs/fctl` · `/settings`. Any other path outside `/api` gets the SPA's not-found page.
 `/agents` loads `GET /api/pages/agents`. `/usage` loads `GET /api/usage?days=7`, then `?days=30` when picked. `/transcripts/{id}` loads `GET /api/transcripts/{id}` (§6.2), and `/workspaces/{id}/settings` loads
@@ -816,7 +869,9 @@ its header, and the designer at
 `/projects/{id}/factories/{fid}/runs` (103; `?run=` the open run), polls `GET /api/pages/factories/{fid}/runs`
 every 3 s, and the open run's log `GET /api/runs/{id}/log` (§6.2) while it runs. `/projects/{id}/context` loads
 `GET /api/projects/{id}/context` for the pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1),
-plus `GET /api/pages/projects/{id}` for its header, once each.
+plus `GET /api/pages/projects/{id}` for its header, once each. `/projects/{id}/scheduler` loads
+`GET /api/projects/{id}/schedules` every 3 s, and `GET /api/projects/{id}/factories` and `GET /api/pages/projects/{id}`
+(its header and the accounts) once and after each action (§6.1).
 
 Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
 rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.

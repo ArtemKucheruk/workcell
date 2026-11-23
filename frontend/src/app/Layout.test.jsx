@@ -291,6 +291,7 @@ test('042 FE36: on Reviews, Context, and Settings the sidebar selects the projec
     ['/projects/3/reviews?tab=closed', 'Reviews'],
     ['/projects/3/context', 'Context'],
     ['/projects/3/settings', 'Settings'],
+    ['/projects/3/scheduler', 'Scheduler'], // 104 AC23
   ]) {
     localStorage.setItem('sidebar.workspace', '5')
     mockFetch({ 'GET /api/pages/sidebar': [200, sidebarBody] })
@@ -300,7 +301,7 @@ test('042 FE36: on Reviews, Context, and Settings the sidebar selects the projec
     const button = sidebar().getByRole('button', { name: 'api' })
     expect(button.getAttribute('aria-expanded')).toBe('true')
     const links = within(document.getElementById(button.getAttribute('aria-controls'))).getAllByRole('link')
-    expect(links.map((a) => a.textContent)).toEqual(['Board', 'Code', 'Reviews', 'Context', 'Workflows', 'Settings'])
+    expect(links.map((a) => a.textContent)).toEqual(['Board', 'Code', 'Reviews', 'Context', 'Workflows', 'Scheduler', 'Settings'])
     for (const link of links) {
       const on = link.textContent === current
       expect([link.textContent, link.getAttribute('aria-current'), accent.test(link.className)]).toEqual([
@@ -333,7 +334,7 @@ test('051 FE7: on the Factories list and a designer the sidebar selects project 
 
 test('042 FE37: Reviews, Context, and Settings keep main at mx-auto max-w-6xl', () => {
   mockFetch({})
-  for (const path of ['/projects/3/reviews', '/projects/3/context', '/projects/3/settings']) {
+  for (const path of ['/projects/3/reviews', '/projects/3/context', '/projects/3/settings', '/projects/3/scheduler']) {
     const { unmount } = renderAt(path)
     expect(screen.getByRole('main').className.split(/\s+/)).toEqual(expect.arrayContaining(['mx-auto', 'max-w-6xl']))
     unmount()

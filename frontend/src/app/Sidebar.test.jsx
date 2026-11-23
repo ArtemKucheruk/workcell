@@ -166,7 +166,7 @@ test('FE10 (Q8): Cancel or Esc hides the field and returns focus to + New worksp
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('FE11, 042 FE34, 051 FE6, 101 AC10: each project is a disclosure button for Board, Code, Reviews, Context, Workflows, and Settings', async () => {
+test('FE11, 042 FE34, 051 FE6, 101 AC10, 104 AC23: each project is a disclosure button for Board, Code, Reviews, Context, Workflows, Scheduler, and Settings', async () => {
   await open('/')
   const button = projectButton('api-server')
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -181,6 +181,7 @@ test('FE11, 042 FE34, 051 FE6, 101 AC10: each project is a disclosure button for
     ['Reviews', '/projects/3/reviews'],
     ['Context', '/projects/3/context'],
     ['Workflows', '/projects/3/factories'],
+    ['Scheduler', '/projects/3/scheduler'],
     ['Settings', '/projects/3/settings'],
   ])
   fireEvent.click(button)
@@ -196,6 +197,13 @@ test('051 FE6, 101 AC10: Workflows is the current page on the list and in a fact
     expect(linksOf('api-server').getByRole('link', { name: 'Workflows' }).className).toMatch(accent)
     unmount()
   }
+})
+
+test('104 AC23: Scheduler is the current page on /projects/3/scheduler, and no other link is', async () => {
+  await open('/projects/3/scheduler')
+  const links = linksOf('api-server').getAllByRole('link')
+  expect(links.filter((a) => a.getAttribute('aria-current') === 'page').map((a) => a.textContent)).toEqual(['Scheduler'])
+  expect(linksOf('api-server').getByRole('link', { name: 'Scheduler' }).className).toMatch(accent)
 })
 
 test('103 AC26: on an automation\'s runs page Workflows is the current link, and no other is', async () => {

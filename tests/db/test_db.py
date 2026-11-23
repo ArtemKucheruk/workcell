@@ -36,7 +36,7 @@ def test_schema_has_every_table_and_index():  # AC10
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
               "decisions", "events", "transcripts", "factories", "claude_accounts",
-              "context_items", "task_deps", "settings"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094, 096
+              "context_items", "task_deps", "settings", "schedules"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094, 096, 104
     assert {("table", t) for t in tables} <= rows
     assert {("index", "one_run_per_task"), ("index", "one_active_account")} <= rows
 
@@ -564,3 +564,63 @@ def test_old_db_rebuilds_runs():  # 102 AC2
     with closing(db.connect()) as conn:
         assert conn.execute("SELECT name, sql FROM sqlite_master ORDER BY name").fetchall() == schema
         assert conn.execute("SELECT COUNT(*) FROM runs").fetchone() == (2,)
+
+
+# --- 104: schedules ------------------------------------------------------------------------------------------
+
+SCHEDULE_COLUMNS = [  # (name, type, notnull, default)
+    ("id", "INTEGER", 0, None), ("factory_id", "INTEGER", 1, None), ("cron", "TEXT", 1, None),
+    ("enabled", "INTEGER", 1, "1"), ("account_id", "INTEGER", 0, None), ("next_run_at", "TEXT", 0, None),
+    ("last_run_id", "INTEGER", 0, None), ("last_skip", "TEXT", 0, None), ("last_skip_at", "TEXT", 0, None),
+    ("created_at", "TEXT", 1, None), ("updated_at", "TEXT", 1, None),
+]
+SCHEDULE_ROW = ("INSERT INTO schedules (factory_id, cron, account_id, last_run_id, next_run_at, created_at, updated_at)"
+                f" VALUES (?, '0 9 * * *', ?, ?, '{NOW}', '{NOW}', '{NOW}')")
+
+
+def assert_schedules_table():
+    with closing(db.connect()) as conn:
+        columns = conn.execute("PRAGMA table_info(schedules)").fetchall()
+        assert [(name, kind, notnull, default) for _, name, kind, notnull, default, _ in columns] == SCHEDULE_COLUMNS
+        fks = {(fk[2], fk[3], fk[4], fk[6]) for fk in conn.execute("PRAGMA foreign_key_list(schedules)")}
+        assert fks == {("factories", "factory_id", "id", "CASCADE"), ("claude_accounts", "account_id", "id", "SET NULL"),
+                       ("runs", "last_run_id", "id", "SET NULL")}
+        unique = [i for i in conn.execute("PRAGMA index_list(schedules)") if i[2]]
+        assert [[c[2] for c in conn.execute(f"PRAGMA index_info({i[1]})")] for i in unique] == [["factory_id"]]
+
+
+def test_fresh_db_schedules():  # 104 AC7
+    db.init()
+    assert_schedules_table()
+    with closing(db.connect()) as conn, conn:
+        seed_project(conn)  # factory 1
+        conn.execute(FACTORY_ROW, ("Test coverage",))  # factory 2
+        conn.execute("INSERT INTO claude_accounts (id, config_dir, created_at) VALUES (5, '/a5', ?)", (NOW,))
+        conn.execute(RUN_ROW, (None, NOW, "automation", 1))  # run 1
+        conn.execute(SCHEDULE_ROW, (1, 5, 1))
+        conn.execute(SCHEDULE_ROW, (2, None, None))
+        assert conn.execute("SELECT enabled FROM schedules ORDER BY id").fetchall() == [(1,), (1,)]  # default 1
+        with pytest.raises(sqlite3.IntegrityError):  # one per automation
+            conn.execute(SCHEDULE_ROW, (1, None, None))
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("UPDATE schedules SET enabled = 2")
+        conn.execute("DELETE FROM claude_accounts WHERE id = 5")  # Auto from now on
+        conn.execute("DELETE FROM runs WHERE id = 1")
+        assert conn.execute("SELECT factory_id, account_id, last_run_id FROM schedules ORDER BY id").fetchall() == [
+            (1, None, None), (2, None, None)]
+        conn.execute("DELETE FROM factories WHERE id = 1")
+        assert conn.execute("SELECT factory_id FROM schedules").fetchall() == [(2,)]
+
+
+def test_old_db_gets_schedules():  # 104 AC7: a factory.db made before this task
+    db.init()
+    with closing(db.connect()) as conn, conn:
+        conn.execute("DROP TABLE schedules")
+        seed_project(conn)
+    db.init()
+    assert_schedules_table()
+    with closing(db.connect()) as conn, conn:
+        conn.execute(SCHEDULE_ROW, (1, None, None))
+    db.init()  # a second init keeps it
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT factory_id FROM schedules").fetchall() == [(1,)]

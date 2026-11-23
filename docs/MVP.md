@@ -145,15 +145,15 @@ A design's kind is fixed when it is created (101): a **workflow** is the factory
 **automation** runs on the repo itself, with no task (Security audit, Test coverage). The Workflows page lists
 each kind in its own section with its own **+ New**: + New automation offers the templates built for repo runs
 (Security audit, Test coverage), + New workflow the rest, Standard checked. The designer is the same for both and
-shows the kind beside the name. An automation runs by hand with **Run now** on its row (102, §4.4); scheduling it
-comes later (§9).
+shows the kind beside the name. An automation runs by hand with **Run now** on its row (102, §4.4), or on a
+schedule set on the project's Scheduler page (104, §4.3).
 
 The templates (088; graphs in `docs/data-model-and-api.md §6.1`, agents in `docs/claude-code.md §7.3`):
 - **Standard** (the default): the default loop. Spec, build, then security, UX, UI, and code reviews; up to 2
   rounds; the approver decides.
 - **Bug fix**: reproduce the bug as a failing test, fix its root cause, then code and security reviews.
 - **Security audit**: audit dependencies, secrets, and code; write `SECURITY-AUDIT.md` and fix what is safe;
-  security review. Built for scheduled runs (the cron recipe is in §7.3; the app has no scheduler).
+  security review. Built for scheduled runs: give it a schedule on the Scheduler page.
 - **ML experiment**: check the data and baseline, run the experiment, and gate it on eval metrics against the
   baseline.
 - **Test coverage**: find risky untested code and pin its behavior with tests, leaving production code unchanged.
@@ -349,6 +349,24 @@ interactive sessions.
   cap, `max_concurrent_runs` (default 2, editable on Settings), limits how many runs go at once
   (§4.4).
 
+**The scheduler runs inside the backend.** (104) An automation can have one schedule, a 5-field cron set on the
+Scheduler page (`schedules`, `docs/data-model-and-api.md §5.1`). No crontab, no second process.
+- A daemon thread started with the app ticks each minute. Each tick starts every enabled schedule whose
+  `next_run_at` has come, through the same path as **Run now** (§4.4), on the schedule's account (Auto when none),
+  with `trigger = 'schedule'`.
+- The tick first claims the time by moving `next_run_at` to the next match, so two ticks never start it twice, and a
+  Pause or edit made during the start is kept. Ticks run one after another, so a slow start delays the next tick.
+- When the start can't happen, the time is skipped: the automation's previous run is still running (`run #43 of
+  Security audit is still running`), the run cap is hit, or the start is refused (not on subscription auth, all
+  accounts near their limits, the chosen account logged out, the skill not committed on main, a wt or spawn
+  failure). The reason and its time are stored in `last_skip` and `last_skip_at`, only the latest one, and the
+  Scheduler page shows them. A started run clears them.
+- Times missed while the app was down are not caught up: on start, after the runs sweep, each enabled schedule
+  gets its next time from now, with no run and no skip.
+- The cron is read in the server's local time, the backend process's `TZ` (in Docker usually UTC), as the reset
+  times in refusals are. There is no setting for it. Stored times stay UTC. A wall time that doesn't exist that day
+  (the spring-forward gap) is skipped; one that happens twice (fall-back) runs at the first.
+
 **Agents call the app through the `fctl` CLI.**
 - Not curl. Escaping markdown and multi-KB diffs as JSON inside Bash is fragile, and every
   prompt would have to repeat URLs and headers. Capturing a diff that includes untracked
@@ -501,8 +519,8 @@ claude -p "/security-audit" --session-id 1a2b3c4d-…  …    # the same flags a
   doesn't exist yet. Two runs of one automation run side by side; only the cap limits them, and it counts both
   kinds. A refusal after the worktree is made removes it again (`wt remove`, then `git branch -d`), so failed
   attempts leave nothing behind. After the run, the worktree and branch stay.
-- The run row has no task: `kind = 'automation'`, `factory_id`, `trigger = 'manual'`, and its own
-  `worktree_path`, where the transcripts are collected from. No task moves and no event is written. The log,
+- The run row has no task: `kind = 'automation'`, `factory_id`, `trigger = 'manual'` (or `trigger = 'schedule'`
+  when the scheduler started it, §4.3), and its own `worktree_path`, where the transcripts are collected from. No task moves and no event is written. The log,
   usage snapshot, failed-run error, Stop, and the startup sweep work as for a task run.
 - The prompt is `/<slug>` with no argument. The compiled SKILL.md is still the task orchestrator, which expects a
   task id; a task-free automation template is a follow-up.
@@ -654,6 +672,8 @@ Rules:
   workflow or an automation.
 - Tasks, the board with drag and drop, Run / Run next / Stop / Retry, and run logs.
 - **Run now** on an automation: a headless run on the repo, with no task (§4.4).
+- Scheduled runs: an automation's schedule on the Scheduler page, started by the backend's scheduler with
+  `trigger = 'schedule'` (104, §4.3).
 - Subscription-only runs with the auth check (§4.3), one per task, up to a global cap at once.
 - Headless runs in worktrees, rework on Request changes, and takeover by
   `claude --resume`.
@@ -680,11 +700,7 @@ Rules:
 - Factory template upgrades with a 3-way merge.
 - `fctl export` of a task to markdown, search, labels, and priorities.
 - Worktree browsing on the code page.
-- Scheduled runs (cron checkup agents, other codebase automations). What they run are automations, the designs of
-  kind `automation` made on the Workflows page (§3.2); scheduling them moves to its own Scheduler page, and its
-  runs get `trigger = 'schedule'`. Starting an automation by hand is in already (102: **Run now**, `fctl
-  automation run`), as a run of kind `automation` beside `factory` on the Agents page (§4.4). Its own runs page,
-  and Create PR from an automation's branch, come with it.
+- `fctl` schedule commands, notifications for skipped scheduled times, and Create PR from an automation's branch.
 
 ---
 

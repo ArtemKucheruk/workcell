@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from claude_factories import db
+from claude_factories.handlers import schedules
 from claude_factories.handlers.pages import LOGIN
 from claude_factories.server.app import create_app
 
@@ -83,6 +84,8 @@ def isolated(tmp_path, monkeypatch):
     for name in ("FAKE_WT_FAIL", "FAKE_WT_HANG", "FAKE_WT_PATH", "FAKE_WT_COPY", "WORKTRUNK_CONFIG_PATH"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    # 104 Q10: no scheduler thread, so a minute boundary never fires a real tick; test_scheduler runs the real loop
+    monkeypatch.setattr(schedules, "start_loop", lambda *args, **kwargs: None)
     gitconfig = tmp_path / "gitconfig"
     gitconfig.write_text("")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(gitconfig))

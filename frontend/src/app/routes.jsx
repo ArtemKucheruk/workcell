@@ -11,6 +11,7 @@ import { FctlDocsPage } from '../pages/docs/FctlDocsPage.jsx'
 import { ProjectSettingsPage } from '../pages/project-settings/ProjectSettingsPage.jsx'
 import { ReviewPage } from '../pages/review/ReviewPage.jsx'
 import { ReviewsPage } from '../pages/reviews/ReviewsPage.jsx'
+import { SchedulerPage } from '../pages/scheduler/SchedulerPage.jsx'
 import { SettingsPage } from '../pages/settings/SettingsPage.jsx'
 import { TaskPage } from '../pages/task/TaskPage.jsx'
 import { TranscriptPage } from '../pages/transcript/TranscriptPage.jsx'
@@ -39,6 +40,7 @@ export const routes = [
       { path: '/projects/:id/factories', element: <FactoriesPage /> }, // 051: a list, not wide
       { path: '/projects/:id/factories/:fid', element: <FactoryPage />, handle: { wide: true } },
       { path: '/projects/:id/factories/:fid/runs', element: <AutomationRunsPage /> }, // 103: a list, not wide
+      { path: '/projects/:id/scheduler', element: <SchedulerPage /> }, // 104: a list, not wide
       { path: '/tasks/:id', element: <TaskPage /> },
       { path: '/tasks/:id/review', element: <ReviewPage />, handle: { wide: true } },
       { path: '/transcripts/:id', element: <TranscriptPage /> },

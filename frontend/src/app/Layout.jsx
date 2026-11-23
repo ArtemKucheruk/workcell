@@ -15,8 +15,8 @@ function routeIds(pathname) {
   const transcript = id(/^\/transcripts\/(\d+)\/?$/)
   return {
     query: task ? { task } : transcript ? { transcript } : undefined,
-    // 051 FE7; 103 AC26: an automation's runs page too
-    project: id(/^\/projects\/(\d+)(?:\/(?:code|reviews|context|settings|factories(?:\/\d+(?:\/runs)?)?))?\/?$/),
+    // 051 FE7; 103 AC26: an automation's runs page too; 104: the scheduler
+    project: id(/^\/projects\/(\d+)(?:\/(?:code|reviews|context|settings|scheduler|factories(?:\/\d+(?:\/runs)?)?))?\/?$/),
     workspace: id(/^\/workspaces\/(\d+)(?:\/settings)?\/?$/), // 049 FE24
   }
 }

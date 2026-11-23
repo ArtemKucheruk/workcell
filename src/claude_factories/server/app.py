@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from .. import db
 from ..controllers import (bundles, context_items, factories, factory, pages_api, projects, pull_requests, reviews,
-                           rounds, runs, tasks, transcripts, usage, workspaces)
+                           rounds, runs, schedules, tasks, transcripts, usage, workspaces)
 from ..domain.errors import Conflict, DomainError, Failed, Invalid, NotFound, TooLarge
 
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -54,13 +54,16 @@ async def domain_error(request: Request, exc: DomainError):
     return await http_exception_handler(request, HTTPException(STATUS[type(exc)], exc.detail))
 
 
-def create_app() -> FastAPI:
+def create_app(port: int = 4545) -> FastAPI:
+    """104 Q4: `port` is the one `fctl serve` listens on, kept for the scheduler's FCTL_URL, which has no request to
+    read it from. 104 AC21, AC22: schedules after runs, so its lifespan starts after the runs sweep and stops first."""
     app = FastAPI(title="Claude Factories", lifespan=lifespan)
+    app.state.port = port
     app.middleware("http")(local_safety)
     app.add_exception_handler(RequestValidationError, validation_error)
     app.add_exception_handler(UnicodeEncodeError, unencodable)
     app.add_exception_handler(DomainError, domain_error)
     for module in (workspaces, projects, context_items, factory, factories, tasks, rounds, reviews, pull_requests, runs,
-                   transcripts, bundles, usage, pages_api):
+                   schedules, transcripts, bundles, usage, pages_api):
         app.include_router(module.router)
     return app

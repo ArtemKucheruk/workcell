@@ -198,17 +198,12 @@ Rules the templates keep:
   auditor reads files and names the tools it didn't run. The same goes for an ML eval command
   that isn't the test command.
 
-**Scheduling the security audit.** The app has no scheduler, and every task run starts
-`/factory <id>` (an automation runs only by hand, with **Run now**), so a scheduled task runs whichever design was
-written to the repo as
-`factory`. Write the Security audit design under the name `factory`, commit it on the default
-branch, then add a crontab line:
-```
-0 6 * * 1 cd /path/to/repo && fctl task add "Security audit" --run
-```
-It needs `fctl serve` running, `fctl` on cron's `PATH`, and a free slot under the run cap
-(`max_concurrent_runs` on Settings, else 409 `2 runs active (…); the limit is 2. …`). A
-scheduler in the app, and picking the factory per task, are follow-ups.
+**Scheduling an automation.** (104) Create the Security audit as an automation on the Workflows page, Write to
+repo, and commit its `.claude/skills/<slug>/` on the default branch. Then give it a schedule on the project's
+Scheduler page (`docs/ui.md §8` item 18): a preset or a 5-field cron, read in the server's local time, and an
+account (Auto by default). The backend's scheduler starts it as **Run now** would, with `trigger = 'schedule'`
+(`docs/MVP.md §4.3`). A time it can't start (still running, the run cap, a refusal) is skipped, and the page
+shows why.
 
 **Compiling a design.** `GET /api/factories/{id}/files`, its zip, and Write to repo (`docs/data-model-and-api.md
 §6.1`) compile the factory's stored graph in `lib/factory_compile.py`. The default graph compiles byte for byte to

@@ -92,6 +92,12 @@ def test_serve_runs_create_app(uvicorn_calls):  # 034 AC4
     app = uvicorn_calls[0]["app"]
     assert isinstance(app, FastAPI)
     assert "get" in app.openapi()["paths"]["/api/workspaces"]
+    assert app.state.port == 4545
+
+
+def test_serve_passes_port(uvicorn_calls):  # 104 Q4: the scheduler's FCTL_URL port
+    main(["serve", "--port", "5000"])
+    assert (uvicorn_calls[0]["port"], uvicorn_calls[0]["app"].state.port) == (5000, 5000)
 
 
 # --- fctl setup (015) ----------------------------------------------------------------
