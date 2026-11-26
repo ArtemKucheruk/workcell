@@ -1648,6 +1648,10 @@ For a task from `/factory-submit`, which has no worktree, only the commit line:
 git add -A && git commit -m 'Fix open redirect after login'
 ```
 
+For a task imported from Plane whose project has *Mark done in Plane* on (109), a failure to mark the
+item done doesn't undo the approve: the exit code stays `0`, and after the usual output a line goes to
+stderr, e.g. `Approved, but Plane wasn't updated: Plane refused the API key: check it in project Settings`.
+
 **Exit codes and errors**
 
 - `fctl: 409 #12 is not in review` and `fctl: 404 #12 has no rounds`, exit `1`.

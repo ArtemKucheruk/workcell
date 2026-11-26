@@ -321,6 +321,9 @@ Loading, failures, times, and motion are the same on every page:
      Approve sends it as its `body_md`, blank or not. A success closes and resets the
      popover; a refusal shows its detail inside it and keeps what was typed. Approve's note
      says to commit and merge with Create PR and Merge PR, or by hand.
+   - After Approve, a non-null `plane_warning` (109: the task came from Plane and marking its item
+     done failed) shows under the header as text with a ⚠ icon in `text-warning`, in a polite live
+     region that keeps it through the refetch. The approve itself stands.
    - The PR controls of item 4 sit on the title row before **Review changes** (093).
    - On a done task, **Commit it yourself** stays, for doing it by hand: `Done. Commit and merge
      with the buttons above, or run these in a terminal.`, then the commit commands (§3.7) with a
@@ -477,6 +480,22 @@ Loading, failures, times, and motion are the same on every page:
       tasks whose issue closed alone. There are no tombstones: deleting an imported task and
       syncing again brings it back as a new task. Create PR's body for such a task ends with
       `Closes #<n>`, so GitHub closes the issue when the PR merges.
+    - **Plane** (109), after GitHub issues, optional: nothing is sent to Plane until Sync now or an
+      approve. One form: **API URL** (prefilled from `project.plane_api_url`, else
+      `https://api.plane.so`; change it for self-hosted), **Workspace slug**, **Project ID**, the
+      **API key**, a *Mark done in Plane* checkbox, and **Save**, which sends
+      `PATCH /api/projects/{id}` with the four settings (and the key only when one was typed); a
+      polite `Saved.` follows and the page reloads, and a refusal shows as an alert with the typed
+      text kept. The key is write-only: the page only knows `plane_key_set`. Not set, it is an empty
+      password input; set, the form says `API key: set` with **Replace** (an empty password input
+      that Save sends) and **Clear** (`{"plane_api_key": ""}`). **Sync now** sends
+      `POST /api/projects/{id}/plane/sync`, disabled until the URL, slug, and project ID are saved
+      and a key is set, and while pending. On 200 a polite live region (cleared when a sync starts)
+      says `Synced Plane: <new> new, <updated> updated, <skipped> skipped` and the page reloads; a
+      refusal's detail shows as an alert in the section. Backlog and unstarted work items become
+      Backlog tasks (name, `description_stripped` plus a `Plane work item: <IDENT>-<n>` line), with
+      GitHub issues' rerun rules. With Mark done on, approving such a task sets its item to the
+      project's first completed state; a failure shows on the Review page (item 5) as a warning.
     - **Move** to another workspace (`PATCH /api/projects/{id}`).
     - **Danger zone**, the last section: **Delete project** (filled `danger`) opens the
       sidebar's project delete dialog (§8.4). On 204 the app goes to `/workspaces/{id}`.

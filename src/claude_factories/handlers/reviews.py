@@ -6,6 +6,7 @@ import shlex
 
 from ..adapters.claude import Claude
 from ..adapters.git import Git
+from ..adapters.plane import Plane
 from ..domain.enums import Reviewer, Stage, Status
 from ..domain.errors import Conflict, DomainError, Invalid, NotFound
 from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, CommentBody, DecisionBody, IdOut,
@@ -16,6 +17,7 @@ from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
+from . import plane as plane_handler
 from . import runs as runs_handler
 from .rounds import find_round
 
@@ -93,12 +95,16 @@ def decide(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task, now
     tasks.add_event(task_id, "me", Status.REVIEW, status, stage, now)
 
 
-def approve(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, task_id: int, body: ApproveBody) -> ApproveOut:
+def approve(tx, plane: Plane, task_id: int, body: ApproveBody) -> ApproveOut:
     """§3.7: my APPROVE → done, and the commands I can run myself. Approving runs no git; 093's Create PR and
-    Merge PR do, only when I click them."""
-    now, task = locked_task(tasks, task_id)
-    decide(tasks, rounds, reviews, task, now, "APPROVE", body.body_md, Status.DONE, None)
-    return ApproveOut(status=Status.DONE, commit_hint=commit_hint(task))
+    Merge PR do, only when I click them. 109 AC13: the approve commits first, then a Plane import's item is marked
+    done outside any transaction; its failure is `plane_warning`, never an undo (AC14)."""
+    with tx() as conn:
+        tasks = TasksRepo(conn)
+        now, task = locked_task(tasks, task_id)
+        decide(tasks, RoundsRepo(conn), ReviewsRepo(conn), task, now, "APPROVE", body.body_md, Status.DONE, None)
+        hint = commit_hint(task)
+    return ApproveOut(status=Status.DONE, commit_hint=hint, plane_warning=plane_handler.mark_done(tx, plane, task))
 
 
 def request_changes(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,

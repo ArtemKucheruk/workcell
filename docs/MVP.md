@@ -574,6 +574,14 @@ Single user and no auth still need these, because the API can start processes th
   entries' declared sizes may sum to `MAX_UNPACKED` (500 MB) at most, else `413`. It unpacks into
   a temp folder that is removed afterwards. Export leaves transcripts out unless asked
   (`?transcripts=1`), since they can hold paths, env, and secrets.
+- Plane sync (109) is the one outbound call the backend makes itself: only to the project's saved
+  Plane API URL (http or https, no `user:pass@`), only on Settings' **Sync now** and on approving a
+  task imported from Plane with *Mark done in Plane* on. Redirects aren't followed, so the key
+  can't be forwarded to another host. The API key is stored in plaintext in the app DB
+  (`projects.plane_api_key`), like the rest of `factory.db`, and is write-only: no API response or
+  page view-model returns it (only `plane_key_set`), it isn't logged or put in any error detail,
+  and task bundles (`fctl export`) don't carry it. It travels only as the `X-API-Key` header; with
+  an `http://` URL to a non-local host that header goes in the clear.
 - Transcript text is shown escaped. Text blocks go through `lib/markdown.render` with raw HTML
   off, and the SPA inserts only their `*_html`. Tool inputs, tool results, and thinking are
   plain text. `/api/transcripts/{id}/raw` serves only files that resolve inside
@@ -684,6 +692,10 @@ Rules:
   and Create PR / Merge PR (§3.7).
 - GitHub issues sync (108): project Settings' **Sync now** imports the repo's open issues (optionally one
   label's) as Backlog tasks through `gh issue list`, and Create PR's body says `Closes #<n>` for them.
+- Plane sync (109): project Settings' **Sync now** imports a Plane project's backlog and unstarted work
+  items (plane.so or self-hosted, REST API v1) as Backlog tasks with the same rerun rules, and, when *Mark
+  done in Plane* is on, approving such a task sets its item to the project's first completed state. No
+  webhooks, periodic sync, pushing tasks to Plane, or `fctl` command; the key isn't in an OS keychain.
 - `/factory-submit` for changes made without the factory.
 - Dashboard, project code page with README landing and a branch picker.
 - The local safety measures in §4.5.

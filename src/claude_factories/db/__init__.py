@@ -43,9 +43,13 @@ def init() -> None:
         if "context_md" not in columns:
             conn.execute("ALTER TABLE projects ADD COLUMN context_md TEXT NOT NULL DEFAULT ''")
         # 058 Q10: the same for the last factory/ sync; 108 AC1: GitHub issues sync's label
-        for column in ("factory_mark", "factory_error", "github_label"):
+        # 109 AC1: Plane sync's settings
+        for column in ("factory_mark", "factory_error", "github_label", "plane_api_url", "plane_workspace",
+                       "plane_project_id", "plane_api_key"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
+        if "plane_mark_done" not in columns:
+            conn.execute("ALTER TABLE projects ADD COLUMN plane_mark_done INTEGER NOT NULL DEFAULT 0")
         # 031: the same for tasks.import_key; ALTER can't add UNIQUE, so an index enforces it
         if "import_key" not in {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}:
             conn.execute("ALTER TABLE tasks ADD COLUMN import_key TEXT")

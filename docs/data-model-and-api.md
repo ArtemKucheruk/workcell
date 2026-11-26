@@ -22,8 +22,16 @@ CREATE TABLE projects (
   factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync,
                                           --   NULL when neither file is there
   factory_error TEXT,                     -- that sync's refusal detail, shown on the board; NULL when it worked
-  github_label TEXT);                     -- 108: GitHub issues sync's label filter, trimmed; NULL = every open
+  github_label TEXT,                      -- 108: GitHub issues sync's label filter, trimmed; NULL = every open
                                           --   issue. db.init() adds it (ALTER TABLE projects ADD COLUMN)
+  plane_api_url TEXT,                     -- 109: Plane sync's API URL, http(s), no trailing /; NULL shows as
+                                          --   https://api.plane.so in the UI only
+  plane_workspace TEXT,                   -- 109: the Plane workspace slug
+  plane_project_id TEXT,                  -- 109: the Plane project's ID
+  plane_api_key TEXT,                     -- 109: the Plane API key, plaintext; write-only: never returned (only
+                                          --   plane_key_set), logged, or exported
+  plane_mark_done INTEGER NOT NULL DEFAULT 0);  -- 109: 1 = approving a plane: task marks its item done in Plane.
+                                          --   db.init() adds all five (ALTER TABLE projects ADD COLUMN)
 
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12
@@ -38,7 +46,8 @@ CREATE TABLE tasks (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
   import_key TEXT UNIQUE,                 -- factory:<job id> for a job fctl import-factory brought in,
                                           --   github:<owner>/<repo>#<n> for a GitHub issue Sync now brought in
-                                          --   (108), else NULL
+                                          --   (108), plane:<slug>/<project id>/<work item id> for a Plane work
+                                          --   item (109), else NULL
   pr_url TEXT,                            -- 093: the task's GitHub PR, set by Create PR (§6.3) or an imported
                                           --   job's `pr` that names a /pull/N; NULL until then. db.init() adds it
   module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL);  -- 112: its module, one of its project's; NULL =
@@ -277,14 +286,26 @@ PATCH /api/projects/3                                             (Settings, sid
 → {"name":"api-server"}
 → {"test_cmd":"pytest -q"}
 → {"github_label":"bug"}                                          (108: Settings, GitHub issues' Label Save)
-→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q", "github_label": "bug"},
+→ {"plane_api_url":"https://api.plane.so","plane_workspace":"acme","plane_project_id":"…","plane_api_key":"…",
+   "plane_mark_done":true}                                        (109: Settings, Plane's Save; {"plane_api_key":""}
+                                                                   is its Clear)
+→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q", "github_label": "bug",
+  "plane_api_url", "plane_workspace", "plane_project_id", "plane_api_key" (str), "plane_mark_done" (bool)},
   applied together
-← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q","github_label":"bug"}
+← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q","github_label":"bug",
+       "plane_api_url":"https://api.plane.so","plane_workspace":"acme","plane_project_id":"…","plane_mark_done":true,
+       "plane_key_set":true}
   # the project after the update; id, workspace_id: int; name: str; test_cmd, github_label: str | null
+  # 109: plane_api_url, plane_workspace, plane_project_id: str | null; plane_mark_done, plane_key_set: bool. Never
+  #   plane_api_key itself: it is write-only. Leaving plane_api_key out keeps the stored key; "" clears it
   # name is trimmed: 422 {"detail":"name must not be blank"} if nothing is left
-  # test_cmd and github_label are trimmed, and blank stores NULL, returned as null
-  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd, github_label"} for {} (or only unknown keys)
-  # 422 FastAPI's list detail: any of the four sent as null or the wrong type, or workspace_id out of SQLite's range
+  # test_cmd, github_label, and the four plane_* strings are trimmed, and blank stores NULL, returned as null;
+  #   plane_api_url also loses its trailing /
+  # 422 {"detail":"plane_api_url must be an http(s) URL like https://api.plane.so"}: not http:// or https:// with a
+  #   host, or with user:pass@, a query, or a fragment; nothing written
+  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd, github_label, plane_api_url, plane_workspace,
+  #   plane_project_id, plane_api_key, plane_mark_done"} for {} (or only unknown keys)
+  # 422 FastAPI's list detail: any field sent as null or the wrong type, or workspace_id out of SQLite's range
   # 404 {"detail":"Not Found"} for an unknown project or workspace_id (unchanged), with nothing written
   # allowed in any state, also while a run is going (no 409)
   # fctl connect, rerun in the repo, sets the name back to the directory's, and the test command when it passes one
@@ -317,6 +338,27 @@ POST /api/projects/12/github-issues/sync                          (108: Settings
   #     app on your host)"
   # 409 gh issue list's first stderr line · "github:o/r#2 is imported in project #4" (checked for every issue
   #     before the first write) · 500 "gh issue list printed no JSON: …". Every refusal writes nothing
+
+POST /api/projects/12/plane/sync                                  (109: Settings, Plane's Sync now; no fctl)
+→ {}
+← 200 {"new":2,"updated":1,"skipped":5}                           # the SPA shows "Synced Plane: 2 new, …"
+  # Plane's REST API v1 at the saved plane_api_url only, each request with X-API-Key: <key> (30 s timeout, no
+  #   redirects followed): GET /api/v1/workspaces/<slug>/projects/<pid>/ (its identifier), …/states/ (id → group),
+  #   and …/work-items/?per_page=100 (…/issues/ when work-items/ is a 404, on older servers), following
+  #   next_cursor while next_page_results is true. ponytail: 50 pages a list at most
+  # items whose state's group is backlog or unstarted are imported in ascending sequence_id (started, completed,
+  #   cancelled, and triage ones count toward nothing), each keyed on import_key plane:<slug>/<pid>/<item id> with
+  #   108's upsert: title = name, trimmed; description_md = description_stripped right-stripped, a blank line, then
+  #   "Plane work item: <IDENT>-<sequence_id>" (only that line when it's empty); new, updated, and skipped as 108's
+  # the project is read in one transaction and the tasks are written in another: no write lock during HTTP
+  # 404 {"detail":"Project #99 not found"}
+  # 409 "Plane sync needs the API URL, workspace slug, project ID and API key: fill them in project Settings"
+  #   · "Plane refused the API key: check it in project Settings" (401, 403) · "Plane has no workspace <slug> or
+  #   project <pid>: check them in project Settings" (404 on the project) · "Plane's rate limit was hit: try again
+  #   in a minute" (429) · "can't reach <url>: check the API URL in project Settings" (unreachable, timeout) ·
+  #   "plane:acme/<pid>/<id> is imported in project #4" (checked before the first write)
+  # 500 "Plane answered <status> to <path>" (any other status, or a body that isn't JSON). Every refusal writes
+  #   nothing, and no detail names the key
 
 POST /api/projects/connect                                        (fctl connect)
 → {"path":"/path/to/code/api-server","workspace":"personal","name":"api-server",
@@ -883,7 +925,14 @@ POST /api/tasks/12/request-changes                                (Request chang
 
 POST /api/tasks/12/approve                                        (Approve, fctl approve)
 → {"body_md":""}
-← 200 {"status":"done","commit_hint":"cd .claude/worktrees/12-rate-limit-login && git add -A && …"}
+← 200 {"status":"done","commit_hint":"cd .claude/worktrees/12-rate-limit-login && git add -A && …","plane_warning":null}
+  # 109: the approve commits first. Then, outside any transaction, a task whose import_key is
+  #   plane:<slug>/<pid>/<item> in a project with plane_mark_done on reads …/states/ and PATCHes
+  #   …/work-items/<item>/ (…/issues/<item>/ on older servers) with {"state": <id>} of the first state (lowest
+  #   sequence, else list order) in group completed, using the key's slug and project and the saved URL and key.
+  #   plane_warning is null then, and for every other task. A failure (any Plane sync refusal, the settings
+  #   missing, or "Plane project has no completed state") never undoes the approve: 200, status done,
+  #   plane_warning "Approved, but Plane wasn't updated: <detail>". fctl approve prints it on stderr
 
 POST /api/tasks/12/pr                                             (Create PR, 093; no fctl command)
 ← 200 {"number":71,"url":"https://github.com/o/r/pull/71","reused":false}
@@ -1043,7 +1092,9 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 Run now and its Run menu.
                                                 108: project.github_label, github_repo (owner/repo of a github.com
                                                 remote_url, else null), and github_hint (why Sync now is off;
-                                                null with github_repo), from the stored remote_url alone
+                                                null with github_repo), from the stored remote_url alone.
+                                                109: project.plane_api_url, plane_workspace, plane_project_id,
+                                                plane_mark_done (bool), and plane_key_set (bool), never the key
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);

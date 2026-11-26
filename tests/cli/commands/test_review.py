@@ -33,3 +33,14 @@ def test_approve_refused(server, capsys):  # 009 AC26
         main(["approve", "12"])
     assert e.value.code == 1
     assert capsys.readouterr().err == "fctl: 409 #12 is not in review\n"
+
+
+def test_approve_plane_warning(server, capsys):  # 109 AC15
+    warning = "Approved, but Plane wasn't updated: Plane project has no completed state"
+    server.reply = reply({"status": "done", "commit_hint": "git add -A", "plane_warning": warning})
+    main(["approve", "12"])
+    out = capsys.readouterr()
+    assert (out.out, out.err) == ("#12: done\ngit add -A\n", warning + "\n")
+    server.reply = reply({"status": "done", "commit_hint": "git add -A", "plane_warning": None})
+    main(["approve", "12"])
+    assert capsys.readouterr().err == ""

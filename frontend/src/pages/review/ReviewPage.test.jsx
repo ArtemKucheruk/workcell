@@ -628,6 +628,36 @@ test('047 FE12, AC30: Approve sends the summary (blank as ""), reloads, hides th
   }
 })
 
+test("109 AC20: Approve's non-null plane_warning shows with a warning icon in a polite live region that survives the refetch", async () => {
+  const warning = "Approved, but Plane wasn't updated: Plane refused the API key: check it in project Settings"
+  const { fetch, responses } = await open(reviewPage(), '/tasks/12/review', {
+    [`POST ${APPROVE}`]: [200, { status: 'done', commit_hint: HINT, plane_warning: warning }],
+  })
+  responses[`GET ${PAGE}`] = [200, reviewPage({ status: 'done', stage: null, commit_hint: HINT })]
+  const popover = reviewChanges()
+  fireEvent.click(radio(popover, 'Approve'))
+  fireEvent.click(submitReview(popover))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  const line = await screen.findByText(warning)
+  expect(line.closest('[aria-live]').getAttribute('aria-live')).toBe('polite')
+  const icon = line.querySelector('[aria-hidden="true"]')
+  expect(icon.textContent).toBe('⚠')
+  expect(line.className).toMatch(/(^|\s)text-warning(\s|$)/)
+  expect(await screen.findByRole('heading', { name: 'Commit it yourself' })).toBeTruthy() // the refetched page
+  expect(screen.getByText(warning)).toBe(line)
+})
+
+test('109 AC20: a null plane_warning shows nothing', async () => {
+  const { fetch } = await open(reviewPage(), '/tasks/12/review', {
+    [`POST ${APPROVE}`]: [200, { status: 'done', commit_hint: HINT, plane_warning: null }],
+  })
+  const popover = reviewChanges()
+  fireEvent.click(radio(popover, 'Approve'))
+  fireEvent.click(submitReview(popover))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(screen.queryByText(/Plane wasn't updated/)).toBeNull()
+})
+
 test('047 FE13, AC32: Request changes sends the summary, reloads, hides the popover, and empties it', async () => {
   const { fetch } = await open(reviewPage(), '/tasks/12/review', {
     [`POST ${CHANGES}`]: [202, { status: 'in_progress', stage: 'build', run_id: 41 }],
