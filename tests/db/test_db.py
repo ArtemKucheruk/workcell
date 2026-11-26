@@ -36,7 +36,8 @@ def test_schema_has_every_table_and_index():  # AC10
         rows = set(conn.execute("SELECT type, name FROM sqlite_master"))
     tables = {"workspaces", "projects", "tasks", "runs", "rounds", "round_files", "verdicts", "comments",
               "decisions", "events", "transcripts", "factories", "claude_accounts",
-              "context_items", "task_deps", "settings", "schedules"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094, 096, 104
+              "context_items", "task_deps", "settings", "schedules",
+              "modules"}  # 030 AC15, 051 BE1, 056, 057 BE1, 094, 096, 104, 112 AC1
     assert {("table", t) for t in tables} <= rows
     assert {("index", "one_run_per_task"), ("index", "one_active_account")} <= rows
 
@@ -339,6 +340,38 @@ INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_
     with closing(db.connect()) as conn:
         assert [c[1] for c in conn.execute("PRAGMA table_info(tasks)")].count("pr_url") == 1
         assert conn.execute("SELECT id, pr_url FROM tasks").fetchall() == [(1, None), (2, None)]
+
+
+def test_fresh_db_modules():  # 112 AC1
+    start_app()
+    with closing(db.connect()) as conn:
+        columns = conn.execute("PRAGMA table_info(modules)").fetchall()
+        assert [(name, kind, notnull, default) for _, name, kind, notnull, default, _ in columns] == [
+            ("id", "INTEGER", 0, None), ("project_id", "INTEGER", 1, None), ("name", "TEXT", 1, None),
+            ("description_md", "TEXT", 1, "''"), ("created_at", "TEXT", 1, None)]
+        [fk] = conn.execute("PRAGMA foreign_key_list(modules)").fetchall()
+        assert (fk[2], fk[3], fk[4], fk[6]) == ("projects", "project_id", "id", "CASCADE")
+        [sql_text] = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'modules_name'").fetchone()
+        assert "UNIQUE INDEX" in sql_text and "(project_id, name COLLATE NOCASE)" in sql_text
+        assert "module_id" in [c[1] for c in conn.execute("PRAGMA table_info(tasks)")]
+        fks = [(f[2], f[3], f[4], f[6]) for f in conn.execute("PRAGMA foreign_key_list(tasks)")]
+        assert ("modules", "module_id", "id", "SET NULL") in fks
+
+
+def test_old_db_gets_module_id():  # 112 AC2
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033 + BEFORE_096 + f"INSERT INTO tasks (id, project_id, title, status, position,"
+                                        f" created_at, updated_at) VALUES (1, 1, 'a', 'backlog', 1, '{NOW}', '{NOW}');")
+    db.init()
+    with closing(db.connect()) as conn:
+        assert conn.execute("SELECT id, module_id FROM tasks").fetchall() == [(1, None)]
+        fks = [(f[2], f[3], f[4], f[6]) for f in conn.execute("PRAGMA foreign_key_list(tasks)")]
+        assert ("modules", "module_id", "id", "SET NULL") in fks
+    db.init()  # a second init skips the ALTER
+    with closing(db.connect()) as conn:
+        assert [c[1] for c in conn.execute("PRAGMA table_info(tasks)")].count("module_id") == 1
 
 
 FACTORY_COLUMNS = [("id", "INTEGER", 0), ("project_id", "INTEGER", 1), ("name", "TEXT", 1), ("graph", "TEXT", 1),

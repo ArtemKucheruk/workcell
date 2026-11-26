@@ -166,6 +166,7 @@ const pages = (project) => [
     </>,
   ],
   [`/projects/${project.id}/context`, 'Context'],
+  [`/projects/${project.id}/modules`, 'Modules'], // 112 AC15: right after Context
   // 051 FE6: no `end`, so it stays current inside a factory's designer. 101: workflows and automations, same route
   [`/projects/${project.id}/factories`, 'Workflows', false],
   [`/projects/${project.id}/scheduler`, 'Scheduler'], // 104 AC23: after Workflows

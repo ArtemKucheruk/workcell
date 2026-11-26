@@ -130,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--description", metavar="TEXT", help='its markdown description; "-" reads it from stdin')
     p.add_argument("--blocked-by", metavar="IDS", type=task_ids,
                    help="the tasks it waits on, comma-separated, e.g. 12,14")
+    p.add_argument("--module", metavar="NAME", help="the project's module it belongs to, e.g. frontend")
     p.add_argument("--run", action="store_true", help="then start a factory run on it")
     p.set_defaults(func=task_add)
     for name, method, help_text in (("block", "PUT", "make a task wait on another task of its project"),

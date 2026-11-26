@@ -169,6 +169,7 @@ def test_list_fresh_task(client, project):  # AC11
         "id": task_id, "title": "Export CSV", "status": "backlog", "stage": None, "round": None,
         "verdicts": None, "additions": None, "deletions": None, "run": None,
         "blocked": False, "blocked_by": [], "blocks": [],  # 094 AC8
+        "module": None,  # 112 AC14
     }]
 
 
@@ -221,7 +222,7 @@ def test_get_fresh_task(client, project):  # AC16
     assert r.status_code == 200
     assert r.json() == {"id": task_id, "title": "Export CSV", "status": "backlog", "stage": None,
                         "branch": None, "rounds": [], "decisions": [], "run": None,
-                        "blocked": False, "blocked_by": [], "blocks": []}  # 094 AC8
+                        "blocked": False, "blocked_by": [], "blocks": [], "module": None}  # 094 AC8, 112 AC14
 
 
 def test_get_rounds(client, project):  # AC17
@@ -402,7 +403,7 @@ def test_patch_unknown_task(client):  # AC34
 
 # --- PATCH title / description_md (048: the board's Edit) ------------------------------
 
-MIXED = "send exactly one of: spec_md, stage, status with position, or title and/or description_md"
+MIXED = "send exactly one of: spec_md, stage, status with position, title and/or description_md, or module_id"
 # §5.1: the tables a task owns, plus tasks itself
 OWNED = ("tasks", "runs", "rounds", "round_files", "verdicts", "comments", "decisions", "events", "transcripts")
 

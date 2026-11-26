@@ -52,7 +52,8 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
-  `warning` pill shown when above 0), **Context**, **Workflows** (`/projects/{id}/factories`, item 14), **Scheduler**
+  `warning` pill shown when above 0), **Context**, **Modules** (`/projects/{id}/modules`, item 19), **Workflows**
+  (`/projects/{id}/factories`, item 14), **Scheduler**
   (`/projects/{id}/scheduler`, item 18), and **Settings**, and the current page's project opens by itself with its current link marked. **Workflows** is also
   marked in the factory designer.
 - Each project row, at its right, and the workspace switcher, beside it, have a `⋯` button
@@ -181,7 +182,11 @@ Loading, failures, times, and motion are the same on every page:
    disabled with that text as their `title`; under the cap neither shows, and the line updates with the
    3 s poll. **+ New task**
    opens its form in a native popover, which Esc or a click outside closes, and a created task
-   closes it. Clicking a card opens the task detail.
+   closes it. Its **Module** select (the shared Select) offers **No module**, the default, then the
+   project's modules (`GET /api/projects/{id}/modules`, loaded once); the pick goes out as `module_id`, null
+   for No module (112). Clicking a card opens the task detail.
+   - A card whose task has a module shows its name as a small pill (text on the `raised` token, not a color);
+     a card with none shows no pill (112).
    - Cards move by drag and drop (native HTML5, no library). While a card is dragged it dims,
      the column under the pointer gets an `accent` ring, and an `accent` line marks the gap the
      drop takes. No line shows where the drop would leave the card where it is.
@@ -225,8 +230,13 @@ Loading, failures, times, and motion are the same on every page:
      status (`run #N <status>`, and for a running run its start as a relative time:
      `run #41 running · started 5m ago`), and beside Run or Retry the hint for why runs are
      off. The row wraps on narrow screens. Under it, the status line: the status pill and
-     stage, branch, Review, and an **Export** button. 108: a task imported from a GitHub issue
-     (`task.issue_url`) shows an `Issue #12` link to the issue beside the branch.
+     stage, the module pill when the task has a module (112), branch, Review, and an **Export** button.
+     108: a task imported from a GitHub issue (`task.issue_url`) shows an `Issue #12` link to the issue
+     beside the branch.
+   - 112: under the status line, a labelled **Module** select (the shared Select): **No module**, then the
+     project's modules (`GET /api/projects/{id}/modules`, loaded once). A change sends
+     `PATCH /api/tasks/{id}` `{"module_id": …}` (null for No module) and reloads the page; a refusal shows
+     beside it.
    - 097: the run status names the run's Claude account after its status, `run #41 failed · b@y:
      limited on b@y, resets at 16:00` (nothing for a run with no account). Run and Retry use Auto
      (MVP §4.3). Beside them, when there are accounts, a small `▾` button named **Choose account**
@@ -673,6 +683,22 @@ Loading, failures, times, and motion are the same on every page:
       `Every automation has a schedule`.
     - With none: `No scheduled automations.`, plus `Create an automation on Workflows first.` when the project has
       no automation, Workflows linking to `/projects/{id}/factories`.
+19. **Modules** (`/projects/{id}/modules`, 112)
+    - Loads `GET /api/pages/projects/{id}` (the project header) and `GET /api/projects/{id}/modules`, once and
+      again after each action; never polled. Skeleton first; a 404 from either is the not-found page, any other
+      failed first load the red alert. Not a wide page. The title reads `<project> · Modules`, `h1` the project
+      header's.
+    - One row per module, by name: its name, its description (plain text, muted), and its counts as
+      `2 backlog · 1 in progress · 0 review · 7 done`; then a **No module** row with the project's tasks that have
+      no module, counted the same way. With no modules, `No modules yet.` above the No module row.
+    - **+ New module** opens a popover form with **Name** and **Description**; **Create** sends
+      `POST /api/projects/{id}/modules`, closes the form, and reloads the list. A refusal (409 for a taken name,
+      422 for a bad one) shows inside the form, which keeps what was typed.
+    - Each row's **Edit** (`Edit <name>`) swaps the row for a form with Name and Description and **Save** /
+      **Cancel**; Save sends `PATCH /api/modules/{id}` and reloads, a refusal shows inline, and Esc or Cancel
+      leaves it unchanged. **Delete** (`Delete <name>`) opens the shared delete dialog, `Delete module <name>?`,
+      saying its tasks stay, without a module; Delete sends `DELETE /api/modules/{id}` and reloads, so the
+      counts move to **No module**.
 
 ### 8.1 Board
 ```
@@ -787,6 +813,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │     Code                 │
 │     Reviews          (2) │  ← waiting on me or escalated, when above 0: a warning pill
 │     Context              │
+│     Modules              │  ← /projects/{id}/modules: the project's units of work (112)
 │     Workflows            │  ← /projects/{id}/factories: workflows and automations
 │     Scheduler            │  ← /projects/{id}/scheduler: the automations' schedules
 │     Settings             │

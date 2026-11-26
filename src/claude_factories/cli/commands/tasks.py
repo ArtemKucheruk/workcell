@@ -17,6 +17,18 @@ def task_ids(text: str) -> list[int]:
     return [int(p) for p in parts]
 
 
+def module_id(project: dict, name: str) -> int:
+    """112 AC23, AC24, Q11: the project's module named `name`, trimmed and in any case; an unknown name fails, before
+    any task is posted, with the known names in the API's order."""
+    modules = api("GET", f"/api/projects/{project['id']}/modules")["modules"]
+    wanted = name.strip().casefold()
+    for m in modules:
+        if m["name"].casefold() == wanted:
+            return m["id"]
+    known = ", ".join(m["name"] for m in modules) or "none"
+    fail(f"no module {name.strip()} in {project['name']}; known: {known}")
+
+
 def task_add(args):
     body = {"title": args.title}
     if args.description is not None:  # Q2: "-" always means stdin
@@ -27,6 +39,8 @@ def task_add(args):
     if args.blocked_by is not None:  # 094 AC17
         body["blocked_by"] = args.blocked_by
     project = project_at(main_checkout())
+    if args.module is not None:
+        body["module_id"] = module_id(project, args.module)
     task = api("POST", f"/api/projects/{project['id']}/tasks", body)
     # flush: a refused run's stderr line must come after this one, also when stdout is a pipe
     print(f"Added #{task['id']} to {project['name']} → {base_url()}/projects/{project['id']}", flush=True)

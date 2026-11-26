@@ -162,7 +162,8 @@ def context_md(reviews: ReviewsRepo, task, found: list, feedback=None, project_m
             add(f"### {c['author']}{where}", c["body_md"])
 
     status = task["status"] + (f" · {task['stage']}" if task["stage"] else "")
-    add(f"# #{task['id']} {task['title']}", f"Status: {status}")
+    module = f"\nModule: {task['module']}" if task["module"] else ""  # 112 AC25: only with one
+    add(f"# #{task['id']} {task['title']}", f"Status: {status}{module}")
     add("## Description", task["description_md"])
     add("## Spec", "_No spec yet._" if task["spec_md"] is None else task["spec_md"])
     for r in found:

@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, computed_field
 
 from .factories import Graph
+from .modules import ModuleRef
 from .rounds import RoundSummary
 from .tasks import Dep, TaskItem
 from .transcripts import TranscriptOut
@@ -301,6 +302,7 @@ class PageTask(BaseModel):
     description_html: str
     spec_md: str | None
     spec_html: str
+    module: ModuleRef | None  # 112 AC14: the review page's task carries it too, as a PageTask
 
 
 class Posted(BaseModel):
