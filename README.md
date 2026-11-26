@@ -89,7 +89,7 @@ not one to use on the host. The app rejects requests whose `Host` isn't `127.0.0
 
 To use the app on a repo:
 
-1. `fctl setup` installs the `/factory-connect` and `/factory-submit` skills.
+1. `fctl setup` installs the `/factory-connect`, `/factory-submit`, and `fctl` skills.
 2. In the repo, run `/factory-connect <workspace>` in Claude Code, or
    `fctl connect --workspace W --test-cmd "<cmd>"`.
 3. Project Settings → **Create factory**, then commit `.claude/` on the default branch.
