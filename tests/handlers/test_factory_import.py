@@ -800,9 +800,9 @@ def test_no_folder_and_symlinks(client, tmp_path, repo, project, two):  # AC37
 # --- Docs, skill, ignore ---------------------------------------------------------------
 
 
-def test_gitignore():  # AC42
+def test_gitignore():  # AC42; 114 AC9: this repo's own factory/ is gone, so its lines are too
     lines = (ROOT / ".gitignore").read_text().splitlines()
-    assert "factory/jobs/" in lines and "factory/board.json" in lines
+    assert "factory/jobs/" not in lines and "factory/board.json" not in lines
 
 
 def test_docs():  # AC44

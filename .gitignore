@@ -3,6 +3,10 @@ __pycache__/
 .pytest_cache/
 dist/
 frontend/node_modules/
+.env
 compose.override.yaml
-factory/jobs/
-factory/board.json
+.fctl/
+.claude/worktrees/
+*.db
+# 114: the retired file-based bootstrap factory; keeps old local copies of its job logs out
+/factory/

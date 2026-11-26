@@ -57,13 +57,13 @@ test('FE4: a project with only id and name and no factory: the h1 is the name, w
 })
 
 test('FE5: each project page has one h1, api · personal, and Factory: ready ✓ in main', async () => {
-  const project = { ...PROJECT, path: '/Users/me/api', default_branch: 'main', remote_url: null, test_cmd: 'pytest -q' }
+  const project = { ...PROJECT, path: '/home/me/api', default_branch: 'main', remote_url: null, test_cmd: 'pytest -q' }
   const board = {
     project, factory: 'ready', hint: null, can_run: true, workspaces: [{ id: 2, name: 'personal', projects: 1 }],
     columns: { backlog: [], in_progress: [], review: [], done: [] },
   }
   const code = {
-    project: { id: 3, name: 'api', path: '/Users/me/api' }, error: null, branch: 'main', tree: { 'a.py': { path: 'a.py' } },
+    project: { id: 3, name: 'api', path: '/home/me/api' }, error: null, branch: 'main', tree: { 'a.py': { path: 'a.py' } },
     shown: '', view: { note: 'No README.md in this project.' }, lang: null, readme_html: null,
   }
   mockFetch({

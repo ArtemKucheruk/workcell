@@ -2,6 +2,7 @@
 name = "claude-factories"
 version = "0.1.0"
 description = "A local software factory for Claude Code"
+license = "MIT"
 authors = [
     { name = "ArtemKucheruk", email = "a.o.kucheruk@gmail.com" }
 ]

@@ -16,7 +16,7 @@ services:
     volumes:
       # Mount every root that holds a connected project at its host path, because projects
       # store the host paths from `fctl connect`. One line per root.
-      - /Users/me/code:/Users/me/code
+      - /path/to/code:/path/to/code
 
   frontend:
     ports:

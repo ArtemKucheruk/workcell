@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { expectOfflineBanner, expectSkeleton, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 import { optionLabels, pick as pickOption } from '../../test/select.js'
 
-const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal' }
+const PROJECT = { id: 3, name: 'api', path: '/home/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal' }
 const WORKSPACES = [{ id: 2, name: 'personal', projects: 1 }, { id: 4, name: 'work', projects: 0 }]
 const BOARD = '/api/pages/projects/3'
 const HINT = "factory isn't committed on main: Create factory on the project board, then commit it on main"
@@ -144,7 +144,7 @@ test('FE6: the header holds the project header, + New task, Run next, and the hi
   expect(head.getByText(HINT)).toBeTruthy()
   const main = screen.getByRole('main')
   const inMain = within(main)
-  expect(main.textContent).not.toContain('/Users/me/api')
+  expect(main.textContent).not.toContain('/home/me/api')
   expect(inMain.queryByRole('link', { name: 'Code' })).toBeNull()
   expect(inMain.queryByRole('button', { name: 'Create factory' })).toBeNull()
   expect(inMain.queryByRole('checkbox', { name: 'Overwrite existing files' })).toBeNull()

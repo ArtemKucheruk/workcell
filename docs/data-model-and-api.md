@@ -319,11 +319,11 @@ POST /api/projects/12/github-issues/sync                          (108: Settings
   #     before the first write) · 500 "gh issue list printed no JSON: …". Every refusal writes nothing
 
 POST /api/projects/connect                                        (fctl connect)
-→ {"path":"/Users/artem/code/api-server","workspace":"personal","name":"api-server",
+→ {"path":"/path/to/code/api-server","workspace":"personal","name":"api-server",
    "remote_url":"git@github.com:artem/api-server.git","default_branch":"main","test_cmd":"pytest -q"}
 ← 200 {"id":3,"created":true,"url":"http://127.0.0.1:4545/projects/3"}
 
-GET  /api/projects?path=/Users/artem/code/api-server             (fctl resolves cwd → project)
+GET  /api/projects?path=/path/to/code/api-server             (fctl resolves cwd → project)
 ← 200 {"id":3,"name":"api-server","default_branch":"main","factory":"ready"}   # none|uncommitted|legacy|ready
 
 POST /api/projects/3/factory                                      (Create factory button)
@@ -384,20 +384,20 @@ POST /api/projects/3/context/items/upload?name=api.md[&parent_id=7]    (Upload f
   # details carry no file name: the SPA prefixes it. The name never touches the filesystem
 
 POST /api/projects/3/context/items/from-path                      (Add from path)
-→ {"path":"/Users/me/notes","parent_id":null}                      # parent_id optional, default null
+→ {"path":"/path/to/notes","parent_id":null}                      # parent_id optional, default null
 ← 201 [<ContextItem>…]
   # a file → [its card]; a folder → [the group, then one card per *.md / *.markdown / *.txt regular file directly
   #   in it, by name]. The group's title is the folder's name, description "", source_path the folder. Each card's
   #   source_path is its file's path, its title and description derived (below)
   # 422 {"detail":"path must be absolute"}
-  # 404 {"detail":"no file or folder at /Users/me/nope"}
-  # 422 {"detail":"/Users/me/a.pdf: only .md, .markdown, and .txt files"}  a file path with another extension
-  # 422 {"detail":"/Users/me/notes/a.md: not UTF-8"}                         alone or in a folder
-  # 413 {"detail":"/Users/me/notes/a.md: card over 16 KB"}                   alone or in a folder
-  # 422 {"detail":"/Users/me/notes: no .md, .markdown, or .txt files"}
-  # 413 {"detail":"/Users/me/notes: 51 files; the limit is 50"}             counts only the files it would take
+  # 404 {"detail":"no file or folder at /path/to/nope"}
+  # 422 {"detail":"/path/to/a.pdf: only .md, .markdown, and .txt files"}  a file path with another extension
+  # 422 {"detail":"/path/to/notes/a.md: not UTF-8"}                         alone or in a folder
+  # 413 {"detail":"/path/to/notes/a.md: card over 16 KB"}                   alone or in a folder
+  # 422 {"detail":"/path/to/notes: no .md, .markdown, or .txt files"}
+  # 413 {"detail":"/path/to/notes: 51 files; the limit is 50"}             counts only the files it would take
   # 422 {"detail":"groups are one level deep"}                               a folder with a parent_id
-  # 422 {"detail":"/Users/me/notes/a.md: Permission denied"}                 any other OS error reading it
+  # 422 {"detail":"/path/to/notes/a.md: Permission denied"}                 any other OS error reading it
   # parent_id, 64 KB, and 404 refusals as POST above; one transaction, so every 4xx writes nothing
 
 PATCH /api/context/items/5                                        (Edit, Move to group, Move out of group)
@@ -420,9 +420,9 @@ POST /api/context/items/5/reload                                  (Reload from p
 ← 200 <ContextItem>: content_md (and content_html) read again from source_path; title and description kept;
       updated_at now
   # 422 {"detail":"only a card read from a path can be reloaded"}   source_path null, or a group
-  # 404 {"detail":"no file at /Users/me/notes/a.md"}
-  # 422 {"detail":"/Users/me/notes/a.md: not UTF-8"}
-  # 413 {"detail":"/Users/me/notes/a.md: card over 16 KB"}
+  # 404 {"detail":"no file at /path/to/notes/a.md"}
+  # 422 {"detail":"/path/to/notes/a.md: not UTF-8"}
+  # 413 {"detail":"/path/to/notes/a.md: card over 16 KB"}
   # 413 {"detail":"project context over 64 KB"}
   # 404 {"detail":"Context item #99 not found"}
 
@@ -548,7 +548,7 @@ POST /api/factories/7/write                                       (Files → Wri
   # POST /api/projects/{id}/factory's writer and shape; written and skipped in the files' order, and the hint
   #   names .claude/skills/{factory slug}. It doesn't set factory_version
   # 404, 409 no test command, and 422 compile refusals as above, then the path checks, before any write:
-  # 409 {"detail":"/Users/artem/code/api-server is not a directory"}
+  # 409 {"detail":"/path/to/code/api-server is not a directory"}
   # 409 {"detail":".claude/agents/spec-writer.md resolves outside the project"}
   # 409 {"detail":".claude/skills is a symlink"}   (any component from .claude down; Create factory too)
 

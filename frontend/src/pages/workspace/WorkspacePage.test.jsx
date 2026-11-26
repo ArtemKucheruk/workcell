@@ -4,9 +4,9 @@ import { button, field } from '../../components/styles.js'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECTS = [
-  { id: 3, name: 'api', path: '/Users/me/api', backlog: 2, in_progress: 1, review: 0, done: 7,
+  { id: 3, name: 'api', path: '/home/me/api', backlog: 2, in_progress: 1, review: 0, done: 7,
     last_activity: '2026-10-18T09:05:00Z', factory: 'ready' },
-  { id: 4, name: 'web', path: '/Users/me/web', backlog: 0, in_progress: 0, review: 1, done: 0,
+  { id: 4, name: 'web', path: '/home/me/web', backlog: 0, in_progress: 0, review: 1, done: 0,
     last_activity: '2026-10-01T00:00:00Z', factory: 'none' },
 ]
 const workspace = (id, name, projects = []) => [200, { workspace: { id, name }, projects }]
@@ -32,8 +32,8 @@ test('AC27, 046 FE7: /workspaces/2 shows the name, title, and one row per projec
   await waitFor(() => expect(document.title).toBe('personal · Claude Factories')) // the title is set in an effect, after the heading renders
   const rows = screen.getAllByRole('row').slice(1)
   expect(rows.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))).toEqual([
-    ['api', '/Users/me/api', '2', '1', '0', '7', 'ready', '2d ago'],
-    ['web', '/Users/me/web', '0', '0', '1', '0', 'none', '2026-10-01'],
+    ['api', '/home/me/api', '2', '1', '0', '7', 'ready', '2d ago'],
+    ['web', '/home/me/web', '0', '0', '1', '0', 'none', '2026-10-01'],
   ])
   expect(rows.map((tr) => within(tr).getByRole('link').getAttribute('href'))).toEqual(['/projects/3', '/projects/4'])
   expect(rows[0].querySelector('time').getAttribute('datetime')).toBe('2026-10-18T09:05:00Z')

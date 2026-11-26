@@ -5,7 +5,7 @@ import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
 import { openSelect, pick } from '../../test/select.js'
 
 const PROJECT = {
-  id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
+  id: 3, name: 'api', path: '/home/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
   remote_url: 'git@github.com:me/api.git', test_cmd: 'pytest -q', github_label: null, github_repo: 'me/api',
   github_hint: null,
 }
@@ -79,7 +79,7 @@ test('049 FE16 (042 FE26): Repository opens with a Name and Test command form wi
   expect(save.closest('form')).toBe(nameBox().closest('form'))
   expect(testBox().closest('form')).toBe(nameBox().closest('form'))
   expect(facts()).toEqual([
-    ['Path', '/Users/me/api'],
+    ['Path', '/home/me/api'],
     ['Remote', 'git@github.com:me/api.git'],
     ['Default branch', 'main'],
   ])
@@ -92,7 +92,7 @@ test('049 FE16 (042 FE26): Repository opens with a Name and Test command form wi
   await open(board({ project: { ...PROJECT, remote_url: null, test_cmd: null } }))
   expect(testBox().value).toBe('')
   expect(facts()).toEqual([
-    ['Path', '/Users/me/api'],
+    ['Path', '/home/me/api'],
     ['Remote', 'none'],
     ['Default branch', 'main'],
   ])

@@ -7,7 +7,7 @@ const PAGE = '/api/pages/tasks/12'
 const LOG = (id, after) => `/api/runs/${id}/log?after=${after}`
 const HINT = "factory isn't committed on main: Create factory on the project board, then commit it on main"
 const ACTIVE = [409, { detail: 'run #41 active' }]
-const WORKTREE = '/Users/me/api/.claude/worktrees/12-rate-limit-login'
+const WORKTREE = '/home/me/api/.claude/worktrees/12-rate-limit-login'
 const PENDING = { security: 'pending', ux: 'pending', ui: 'pending', code: 'pending' }
 
 /** 020's PageTask, with 047's workspace: the spec's fixture task. */
