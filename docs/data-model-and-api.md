@@ -21,7 +21,9 @@ CREATE TABLE projects (
   context_md TEXT NOT NULL DEFAULT '',    -- project context: stack and conventions, atop fctl show
   factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync,
                                           --   NULL when neither file is there
-  factory_error TEXT);                    -- that sync's refusal detail, shown on the board; NULL when it worked
+  factory_error TEXT,                     -- that sync's refusal detail, shown on the board; NULL when it worked
+  github_label TEXT);                     -- 108: GitHub issues sync's label filter, trimmed; NULL = every open
+                                          --   issue. db.init() adds it (ALTER TABLE projects ADD COLUMN)
 
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12
@@ -34,9 +36,21 @@ CREATE TABLE tasks (
   position REAL NOT NULL,                 -- order within column; Run next = lowest backlog
   branch TEXT, worktree_path TEXT,        -- NULL for standalone (/factory-submit) tasks
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
-  import_key TEXT UNIQUE,                 -- factory:<job id> for a job fctl import-factory brought in, else NULL
-  pr_url TEXT);                           -- 093: the task's GitHub PR, set by Create PR (§6.3) or an imported
+  import_key TEXT UNIQUE,                 -- factory:<job id> for a job fctl import-factory brought in,
+                                          --   github:<owner>/<repo>#<n> for a GitHub issue Sync now brought in
+                                          --   (108), else NULL
+  pr_url TEXT,                            -- 093: the task's GitHub PR, set by Create PR (§6.3) or an imported
                                           --   job's `pr` that names a /pull/N; NULL until then. db.init() adds it
+  module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL);  -- 112: its module, one of its project's; NULL =
+                                          --   none, the default. db.init() adds it (ALTER) to old databases
+
+CREATE TABLE modules (                    -- 112: a project's units of work (§6.1), e.g. frontend, on the Modules page
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,                     -- trimmed, 1–40 ASCII letters, digits, - or _
+  description_md TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL);
+CREATE UNIQUE INDEX modules_name ON modules(project_id, name COLLATE NOCASE);  -- unique per project, in any case
 
 CREATE TABLE task_deps (                  -- task_id waits on blocked_by_id, a task of the same project
   task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -196,7 +210,8 @@ its stream-json log for `rate_limit_event`s and upsert one `usage_snapshots` row
 run's own account. No valid event, or a run with no `account_id`, writes no row.
 
 Relations: workspace 1–n project 1–n task. A project has 0–n factories and 0–n context items, removed with it
-(ON DELETE CASCADE). A task waits on 0–n tasks of its own project (`task_deps`, no self links, no cycles); it is
+(ON DELETE CASCADE). It also has 0–n modules (112), removed with it too; a task has 0–1 modules, one of its own
+project's, and deleting the module keeps its tasks and sets their `module_id` to NULL. A task waits on 0–n tasks of its own project (`task_deps`, no self links, no cycles); it is
 **blocked** while any of them isn't `done` and **ready** otherwise. Blocked is worked out on read, never stored, so
 a blocker moving to done readies its dependents without writing them. Deleting a task, or its project, drops its
 links on both sides. A context item of kind group holds 0–n items one level deep, removed with it.
@@ -261,13 +276,15 @@ PATCH /api/projects/3                                             (Settings, sid
 → {"workspace_id":4}                                              (move to another workspace)
 → {"name":"api-server"}
 → {"test_cmd":"pytest -q"}
-→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q"}, applied together
-← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q"}   # the project after the update
-                                                                              # id, workspace_id: int; name: str; test_cmd: str | null
+→ {"github_label":"bug"}                                          (108: Settings, GitHub issues' Label Save)
+→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q", "github_label": "bug"},
+  applied together
+← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q","github_label":"bug"}
+  # the project after the update; id, workspace_id: int; name: str; test_cmd, github_label: str | null
   # name is trimmed: 422 {"detail":"name must not be blank"} if nothing is left
-  # test_cmd is trimmed, and blank stores NULL, returned as "test_cmd": null
-  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd"} for {} (or only unknown keys)
-  # 422 FastAPI's list detail: any of the three sent as null or the wrong type, or workspace_id out of SQLite's range
+  # test_cmd and github_label are trimmed, and blank stores NULL, returned as null
+  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd, github_label"} for {} (or only unknown keys)
+  # 422 FastAPI's list detail: any of the four sent as null or the wrong type, or workspace_id out of SQLite's range
   # 404 {"detail":"Not Found"} for an unknown project or workspace_id (unchanged), with nothing written
   # allowed in any state, also while a run is going (no 409)
   # fctl connect, rerun in the repo, sets the name back to the directory's, and the test command when it passes one
@@ -279,6 +296,27 @@ DELETE /api/projects/3                                            (sidebar Delet
   # on disk, the repo, its worktrees and branches, run logs, and transcript copies stay
   # 409 {"detail":"run #41 active"} while one of its tasks has a running run
   # 404 {"detail":"Project #99 not found"}
+
+POST /api/projects/12/github-issues/sync                          (108: Settings, GitHub issues' Sync now; no fctl)
+→ {}
+← 200 {"new":2,"updated":1,"skipped":5}                           # the SPA shows "Synced GitHub issues: 2 new, …"
+  # gh issue list --repo <owner/repo> --state open --json number,title,body,url --limit 200 [--label <github_label>]
+  #   through my gh login (the saved label only). ponytail: only the 200 newest open issues per sync, no paging
+  # each issue is a task keyed on import_key github:<owner>/<repo>#<n>, added in ascending number. New: Backlog's
+  #   bottom with one app event (created · backlog); title = the issue's, description_md = its body right-stripped,
+  #   a blank line, then "GitHub issue: <url>" (only that line for an empty body). A Backlog task never started (no
+  #   run, no round) gets a changed title or description rewritten (updated; no event, position kept). Started tasks
+  #   and unchanged ones count as skipped. Issues no longer listed (closed, relabeled) leave their tasks alone; a
+  #   deleted task's issue comes back as a new task
+  # the project is read in one transaction and the tasks are written in another: no write lock while gh runs
+  # 404 {"detail":"Project #99 not found"}
+  # 409, before any gh call: "<path> has no origin remote; add one with git remote add origin …" · "origin isn't
+  #     on GitHub (<host>); GitHub issues sync needs a github.com origin" (origin read raw, as Create PR's)
+  # 409 "gh is not installed: install GitHub CLI, then run gh auth login" · "gh is not logged in: run gh auth
+  #     login. <gh's line>"; under Docker both end " (the backend image has no gh login; sync issues from the
+  #     app on your host)"
+  # 409 gh issue list's first stderr line · "github:o/r#2 is imported in project #4" (checked for every issue
+  #     before the first write) · 500 "gh issue list printed no JSON: …". Every refusal writes nothing
 
 POST /api/projects/connect                                        (fctl connect)
 → {"path":"/Users/artem/code/api-server","workspace":"personal","name":"api-server",
@@ -387,6 +425,32 @@ POST /api/context/items/5/reload                                  (Reload from p
   # 413 {"detail":"/Users/me/notes/a.md: card over 16 KB"}
   # 413 {"detail":"project context over 64 KB"}
   # 404 {"detail":"Context item #99 not found"}
+
+GET  /api/projects/3/modules                                      (Modules page, + New task, task page, fctl task add --module)
+← 200 {"modules":[<Module>…],"no_module":{"backlog":1,"in_progress":0,"review":0,"done":4}}
+  # 112: modules by name in any case, then id; no_module counts the project's tasks with no module
+  # <Module> = {"id":5,"name":"frontend","description_md":"The SPA",
+  #             "counts":{"backlog":2,"in_progress":1,"review":0,"done":7}}   its tasks by status
+  # 404 {"detail":"Project #3 not found"}
+
+POST /api/projects/3/modules                                      (+ New module)
+→ {"name":"frontend","description_md":"The SPA"}                  description_md optional, default ""
+← 201 <Module>
+  # the name is trimmed; 422 {"detail":"a module name is 1 to 40 ASCII letters, digits, - or _, e.g. frontend or
+  #   api_v2"} if what is left is blank, longer, or has any other character
+  # 409 {"detail":"module frontend already exists"}   the same name in any case in this project (another
+  #   project's is fine) · 404 {"detail":"Project #3 not found"}; none adds a row
+
+PATCH /api/modules/5                                              (Modules page Edit)
+→ {"name":"web"} | {"description_md":"…"} | both
+← 200 <Module>
+  # the name's 422 and 409 as for POST; a new case of its own name is no clash
+  # 422 {"detail":"send at least one of: name, description_md"}; a null or a non-string → 422 (FastAPI's list)
+  # 404 {"detail":"Module #5 not found"}
+
+DELETE /api/modules/5                                             (Modules page Delete)
+← 204, empty body; its tasks stay, their module_id set to NULL (ON DELETE SET NULL)
+  # 404 {"detail":"Module #5 not found"}
   # every 4xx writes nothing
 
 POST /api/projects/3/import-factory      (Settings: Sync factory/, fctl import-factory, fctl connect, /factory approve)
@@ -621,21 +685,26 @@ GET  /api/projects/3/tasks
 ← 200 [{"id":12,"title":"Rate-limit login endpoint","status":"review","stage":"human_review",
         "round":2,"verdicts":{"security":"PASS","ux":"PASS","ui":"PASS","code":"PASS"},
         "additions":126,"deletions":9,"run":null,
-        "blocked":false,"blocked_by":[{"id":9,"title":"Add Redis","status":"done"}],"blocks":[15]}]
-  # every task carries <Deps>' blocked, blocked_by, and blocks (below)
+        "blocked":false,"blocked_by":[{"id":9,"title":"Add Redis","status":"done"}],"blocks":[15],
+        "module":{"id":5,"name":"backend"}}]
+  # every task carries <Deps>' blocked, blocked_by, and blocks (below), and 112's module {id, name} or null
 
 POST /api/projects/3/tasks                                        (+ New task, fctl task add)
-→ {"title":"Rate-limit login endpoint","description_md":"Max 5 failed logins/min per IP.","blocked_by":[9]}
+→ {"title":"Rate-limit login endpoint","description_md":"Max 5 failed logins/min per IP.","blocked_by":[9],
+   "module_id":5}
 ← 201 {"id":12,"status":"backlog"}
   # optional "submit": {...} creates round 1 and puts the task straight in review (§7.4)
   # optional "blocked_by": the tasks it waits on, each stored once; one refused as in PUT blocked-by below
   #   (422 "no task #99", "#30 is in another project; …") adds no task
+  # optional "module_id" (112): one of this project's modules; omitted or null = none. 422 {"detail":"no module
+  #   #99"} · {"detail":"module #7 is in another project; pick one of this project's modules"} adds no task
 
 GET  /api/tasks/12                                                (fctl round, task page)
 ← 200 {"id":12,"status":"in_progress","stage":"agent_review","branch":"factory/12-rate-limit-login",
        "rounds":[{"n":1,"trigger":"initial","files":4,"additions":118,"deletions":9,
                   "verdicts":{"security":"CHANGES","ux":"PASS","ui":"pending","code":"PASS"}}],
-       "decisions":[],"run":{"id":41,"status":"running"},"blocked":false,"blocked_by":[],"blocks":[]}
+       "decisions":[],"run":{"id":41,"status":"running"},"blocked":false,"blocked_by":[],"blocks":[],
+       "module":{"id":5,"name":"backend"}}                       # module: null with none (112)
 
 PUT  /api/tasks/15/blocked-by/12                                  (task page Add, fctl task block)
 ← 200 <Deps> {"id":15,"blocked":true,"blocked_by":[{"id":12,"title":"Rate-limit login endpoint",
@@ -658,15 +727,19 @@ GET  /api/tasks/12/context?round=1 | ?feedback=1                  (fctl show) �
   #   Under the heading, the pinned context_md, then the context cards (§6.1) by position: a top-level card or
   #   group as "### <title>", a group's cards right after it as "#### <title>", each with its content_md. Blank
   #   bodies are left out; with a blank context_md and no cards there is no "## Project context"
+  # 112: a task with a module gets "Module: <name>" on the line after "Status: …"; one without, no such line
 
 PATCH /api/tasks/12                                               (fctl spec / fctl stage / board drag)
 → {"spec_md":"## Acceptance criteria\n- 6th failed login within 60s → 429\n…"}
 → {"stage":"agent_review"}
 → {"status":"backlog","position":1.5}
 → {"title":"Export CSV v2","description_md":"Columns: *id, title*"}                    (board Edit)
+→ {"module_id":5} | {"module_id":null}                                                (task page Module)
 ← 200 {"id":12,"status":"in_progress","stage":"agent_review"}     # 409 if manual move during a run
-  # one group per request; a mix → 422 "send exactly one of: spec_md, stage, status with position, or title
-  #   and/or description_md"
+  # one group per request; a mix → 422 "send exactly one of: spec_md, stage, status with position, title
+  #   and/or description_md, or module_id"
+  # module_id (112): one of the task's project's modules, or null to clear it; 422 "no module #99" or "module #7
+  #   is in another project; pick one of this project's modules" leaves the task as it was. No event
   # Edit: title, description_md, or both, in any status and during a run; status and stage stay, so no event
   # the title is trimmed, 422 {"detail":"title must not be blank"} if that leaves nothing; description_md is
   #   stored as sent, "" clears it; null or a non-string → 422 (FastAPI's list detail)
@@ -827,6 +900,8 @@ POST /api/tasks/12/pr                                             (Create PR, 09
   # 409 "gh is not installed: install GitHub CLI, then run gh auth login" · "gh is not logged in: run gh
   #     auth login. <gh's line>"; under Docker both end " (the backend image has no gh login; create the PR
   #     from your host)"
+  # 108: the body of a task whose import_key is github:<o/r>#<n> ends with a paragraph "Closes #<n>" (or
+  #     "Closes <o/r>#<n>" when the PR's repo differs, compared case-insensitively), so GitHub closes the issue on merge
   # 409 "nothing to commit: #12's branch has no changes beyond main" · "git push was rejected: ! [rejected] …"
   #     · gh pr create's first stderr line (the commit and push stay; pr_url stays NULL)
   # 500 "<git|gh> timed out: <command>": 60 s for local git, 120 s for push, fetch, and gh
@@ -856,7 +931,7 @@ POST /api/tasks/12/pr/merge                                       (Merge PR, 093
 ### 6.4 SPA routes and page data
 The frontend server (§4.1) serves the SPA routes: `/` dashboard · `/workspaces/{id}` ·
 `/workspaces/{id}/settings` · `/projects/{id}` board · `/projects/{id}/code?path=&branch=` ·
-`/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/factories` ·
+`/projects/{id}/reviews?tab=closed` · `/projects/{id}/context` · `/projects/{id}/modules` · `/projects/{id}/factories` ·
 `/projects/{id}/factories/{fid}` · `/projects/{id}/factories/{fid}/runs?run=` · `/projects/{id}/scheduler` ·
 `/projects/{id}/settings` ·
 `/tasks/{id}` · `/tasks/{id}/review?round=&tab=files` · `/transcripts/{id}` · `/agents` · `/usage` ·
@@ -871,7 +946,10 @@ every 3 s, and the open run's log `GET /api/runs/{id}/log` (§6.2) while it runs
 `GET /api/projects/{id}/context` for the pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1),
 plus `GET /api/pages/projects/{id}` for its header, once each. `/projects/{id}/scheduler` loads
 `GET /api/projects/{id}/schedules` every 3 s, and `GET /api/projects/{id}/factories` and `GET /api/pages/projects/{id}`
-(its header and the accounts) once and after each action (§6.1).
+(its header and the accounts) once and after each action (§6.1). `/projects/{id}/modules` (112) loads
+`GET /api/projects/{id}/modules` and `GET /api/pages/projects/{id}` for its header, once and after each action. The
+board's + New task and the task page load `GET /api/projects/{id}/modules` once for their Module select (112 Q6);
+the board's cards and the task page's `task` carry `module` {id, name} or null.
 
 Each page loads one view-model from the backend, plus the sidebar's. Markdown fields arrive
 rendered as `*_html` (raw HTML off, §4.5). Unknown ids get a JSON 404.
@@ -962,7 +1040,10 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 102: runs_enabled (the active account is logged in to
                                                 claude.ai, the login badge's check), plus accounts and auto
                                                 shaped as the task page's (DB only), for the Workflows page's
-                                                Run now and its Run menu
+                                                Run now and its Run menu.
+                                                108: project.github_label, github_repo (owner/repo of a github.com
+                                                remote_url, else null), and github_hint (why Sync now is off;
+                                                null with github_repo), from the stored remote_url alone
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
@@ -974,7 +1055,9 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
                                                 accounts, every account by id as {id, label, active, five_hour,
                                                 seven_day} (windows as GET /api/usage reads them, DB only, no
                                                 claude call); auto, {account_id, label} of Auto's first candidate
-                                                from the DB alone, or null when all are low or there are none
+                                                from the DB alone, or null when all are low or there are none.
+                                                108: task.issue_url, https://github.com/<o/r>/issues/<n> for a
+                                                github:<o/r>#<n> import_key, else null
 GET  /api/pages/tasks/{id}/flow?round=          089: the task page's Factory section. round is a number or latest
                                                 (the default). No git, no claude
 ← 200 {"graph":<Graph>|null,"source":{"factory_id":4,"name":"Factory"}|null,"rounds":[1,2],"round":2,

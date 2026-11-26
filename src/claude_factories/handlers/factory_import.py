@@ -329,22 +329,35 @@ def put_line(tasks: TasksRepo, project_id: int, task, line: dict, now: str) -> i
     the app hasn't started changes only description_md and status, and only when they differ; a new status sends
     it to the bottom of that column with an event. A started task is left alone. done_at stays NULL (Q4)."""
     status = Status.DONE if line["done"] else Status.BACKLOG
+    title = line["title"] if task is None else None  # 108 Q6: a rerun never changes its title
+    return upsert(tasks, project_id, task, f"factory:{line['id']}", title, line["description_md"], status, now)[0]
+
+
+def upsert(tasks: TasksRepo, project_id: int, task, key: str, title: str | None, description_md: str, status: str,
+           now: str) -> tuple[int, str]:
+    """058 Q4–Q6, shared with 108's GitHub issues sync (AC21): `task` is by_import_key(`key`)'s row, or None. A new
+    task goes to the bottom of its column with one `app` event. One the app hasn't started gets `title` (None keeps
+    the stored one) and description_md, each only when it differs, without an event or a move; a new status sends
+    it to the bottom of that column with an event. A started task is left alone. (task id, `new`, `updated`, or
+    `skipped`)."""
     if task is None:
         task_id = tasks.put_imported(None, {
-            "project_id": project_id, "import_key": f"factory:{line['id']}", "title": line["title"],
-            "description_md": line["description_md"], "spec_md": None, "status": status, "stage": None,
-            "position": tasks.bottom_position(project_id, status), "branch": None, "created_at": now,
-            "updated_at": now, "done_at": None})
+            "project_id": project_id, "import_key": key, "title": title, "description_md": description_md,
+            "spec_md": None, "status": status, "stage": None, "position": tasks.bottom_position(project_id, status),
+            "branch": None, "created_at": now, "updated_at": now, "done_at": None})
         tasks.add_event(task_id, "app", None, status, None, now)
-        return task_id
+        return task_id, "new"
     if task["started"]:
-        return task["id"]
-    if task["description_md"] != line["description_md"]:
-        tasks.edit(task["id"], None, line["description_md"], now)
+        return task["id"], "skipped"
+    retitle = title if title is not None and title != task["title"] else None
+    redescribe = description_md if description_md != task["description_md"] else None
+    if retitle is not None or redescribe is not None:
+        tasks.edit(task["id"], retitle, redescribe, now)
     if task["status"] != status:
         tasks.move(task["id"], status, None, None, now, tasks.bottom_position(project_id, status))
         tasks.add_event(task["id"], "app", task["status"], status, None, now)
-    return task["id"]
+    changed = retitle is not None or redescribe is not None or task["status"] != status
+    return task["id"], "updated" if changed else "skipped"
 
 
 def sync(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo,

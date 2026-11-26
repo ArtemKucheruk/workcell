@@ -46,10 +46,12 @@ class TasksRepo:
         return db.now()
 
     def get(self, task_id: int) -> sqlite3.Row | None:
-        """The task row with its project's id, path, and context, for every handler that reads one."""
+        """The task row with its project's id, path, and context, for every handler that reads one. 112: with its
+        module's id and name as module_id and module, NULL with none."""
         return self.conn.execute(
             "SELECT t.id, t.title, t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path,"
-            " t.done_at, t.project_id, p.path, p.context_md FROM tasks t JOIN projects p ON p.id = t.project_id"
+            " t.done_at, t.project_id, p.path, p.context_md, t.module_id, m.name AS module"
+            " FROM tasks t JOIN projects p ON p.id = t.project_id LEFT JOIN modules m ON m.id = t.module_id"
             " WHERE t.id = ?",
             (task_id,),
         ).fetchone()
@@ -58,8 +60,10 @@ class TasksRepo:
         return self.conn.execute("SELECT 1 FROM tasks WHERE id = ?", (task_id,)).fetchone() is not None
 
     def for_project(self, project_id: int) -> list[sqlite3.Row]:
+        """112: with module_id and the module's name as module, NULL with none."""
         return self.conn.execute(
-            "SELECT id, title, description_md, status, stage, position, branch FROM tasks WHERE project_id = ?",
+            "SELECT t.id, t.title, t.description_md, t.status, t.stage, t.position, t.branch, t.module_id,"
+            " m.name AS module FROM tasks t LEFT JOIN modules m ON m.id = t.module_id WHERE t.project_id = ?",
             (project_id,),
         ).fetchall()
 
@@ -71,12 +75,16 @@ class TasksRepo:
         ).fetchone()[0]
 
     def add(self, project_id: int, title: str, description_md: str, status: str, stage: str | None,
-            position: float, now: str) -> int:
+            position: float, now: str, module_id: int | None = None) -> int:
         return self.conn.execute(
             "INSERT INTO tasks (project_id, title, description_md, status, stage, position, created_at,"
-            " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (project_id, title, description_md, status, stage, position, now, now),
+            " updated_at, module_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, title, description_md, status, stage, position, now, now, module_id),
         ).lastrowid
+
+    def set_module(self, task_id: int, module_id: int | None, now: str) -> None:
+        """112 AC13: None clears it."""
+        self.conn.execute("UPDATE tasks SET module_id = ?, updated_at = ? WHERE id = ?", (module_id, now, task_id))
 
     def set_spec(self, task_id: int, spec_md: str, now: str) -> None:
         self.conn.execute("UPDATE tasks SET spec_md = ?, updated_at = ? WHERE id = ?", (spec_md, now, task_id))
@@ -125,9 +133,9 @@ class TasksRepo:
         )
 
     def by_import_key(self, key: str) -> sqlite3.Row | None:
-        """058 Q6: `started` is any run or round, or a status other than backlog."""
+        """058 Q6: `started` is any run or round, or a status other than backlog. 108: with the title."""
         return self.conn.execute(
-            "SELECT id, project_id, status, description_md, status != 'backlog'"
+            "SELECT id, project_id, status, title, description_md, status != 'backlog'"
             " OR EXISTS (SELECT 1 FROM runs WHERE task_id = tasks.id)"
             " OR EXISTS (SELECT 1 FROM rounds WHERE task_id = tasks.id) AS started FROM tasks WHERE import_key = ?",
             (key,),
@@ -255,20 +263,22 @@ class TasksRepo:
 
     def for_page(self, task_id: int) -> sqlite3.Row | None:
         """The task row both task pages show; `path` is for Review's commit hint. 047: the workspace is the
-        project's now, joined at read time, for the breadcrumb."""
+        project's now, joined at read time, for the breadcrumb. 112: module_id and the module's name as module."""
         return self.conn.execute(
             "SELECT t.id, t.project_id, p.name AS project, p.workspace_id, w.name AS workspace, t.title,"
-            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, t.pr_url, p.path,"
-            " p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id"
-            " JOIN workspaces w ON w.id = p.workspace_id"
+            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, t.pr_url, t.import_key,"
+            " p.path, p.default_branch, t.module_id, m.name AS module FROM tasks t JOIN projects p ON p.id = t.project_id"
+            " JOIN workspaces w ON w.id = p.workspace_id LEFT JOIN modules m ON m.id = t.module_id"
             " WHERE t.id = ?",
             (task_id,),
         ).fetchone()
 
     def for_pr(self, task_id: int) -> sqlite3.Row | None:
-        """093: what Create PR and Merge PR need: the task, its PR, and its project's path and default branch."""
+        """093: what Create PR and Merge PR need: the task, its PR, and its project's path and default branch. 108:
+        the import_key, for Create PR's `Closes` line."""
         return self.conn.execute(
-            "SELECT t.id, t.title, t.description_md, t.status, t.branch, t.worktree_path, t.pr_url, p.path,"
+            "SELECT t.id, t.title, t.description_md, t.status, t.branch, t.worktree_path, t.pr_url, t.import_key,"
+            " p.path,"
             " p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
             (task_id,),
         ).fetchone()

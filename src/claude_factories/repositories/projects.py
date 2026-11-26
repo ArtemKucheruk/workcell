@@ -40,7 +40,7 @@ class ProjectsRepo:
         project."""
         sets = ", ".join(f"{column} = :{column}" for column in fields)
         return self.conn.execute(
-            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, test_cmd",
+            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, test_cmd, github_label",
             fields | {"id": project_id},
         ).fetchone()
 
@@ -88,7 +88,7 @@ class ProjectsRepo:
     def for_board(self, project_id: int) -> sqlite3.Row | None:
         return self.conn.execute(
             "SELECT p.id, p.name, p.path, p.default_branch, p.workspace_id, w.name AS workspace, p.remote_url,"
-            " p.test_cmd FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
+            " p.test_cmd, p.github_label FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
             (project_id,),
         ).fetchone()
 
@@ -106,6 +106,10 @@ class ProjectsRepo:
         return self.conn.execute(
             "SELECT path, factory_mark, factory_error FROM projects WHERE id = ?", (project_id,)
         ).fetchone()
+
+    def for_issues(self, project_id: int) -> sqlite3.Row | None:
+        """108: what GitHub issues sync needs: the main checkout's path and the saved label."""
+        return self.conn.execute("SELECT path, github_label FROM projects WHERE id = ?", (project_id,)).fetchone()
 
     def set_factory_sync(self, project_id: int, mark: str | None, error: str | None) -> None:
         self.conn.execute("UPDATE projects SET factory_mark = ?, factory_error = ? WHERE id = ?",

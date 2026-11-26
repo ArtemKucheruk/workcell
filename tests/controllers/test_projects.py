@@ -222,7 +222,7 @@ def test_move_project(client):  # 020 AC30
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = client.patch(f"/api/projects/{pid}", json={"workspace_id": work}, headers=H)
     assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "api",
-                                              "test_cmd": "pytest -q"})  # 049 BE9: the whole project
+                                              "test_cmd": "pytest -q", "github_label": None})  # 049 BE9: the whole project
     assert project_workspace(pid) == work
 
 
@@ -263,7 +263,7 @@ def test_rename_project(client):  # 049 BE1
     before = stored(pid)
     r = patch(client, pid, {"name": "  api2  "})
     assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": before[0], "name": "api2",
-                                              "test_cmd": "pytest -q"})
+                                              "test_cmd": "pytest -q", "github_label": None})
     assert stored(pid) == (before[0], "api2", *before[2:])
 
 
@@ -281,7 +281,8 @@ def test_patch_all_three(client):  # 049 BE3
     pid = connect(client)["id"]
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = patch(client, pid, {"workspace_id": work, "name": "x", "test_cmd": "y"})
-    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "x", "test_cmd": "y"})
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "x", "test_cmd": "y",
+                                              "github_label": None})
     assert stored(pid)[:2] == (work, "x")
     assert stored(pid)[5] == "y"
 
@@ -309,8 +310,29 @@ def test_patch_project_nothing_sent(client, body):  # 049 BE6
     pid = connect(client)["id"]
     before = stored(pid)
     r = patch(client, pid, body)
-    assert (r.status_code, r.json()) == (422, {"detail": "send at least one of: workspace_id, name, test_cmd"})
+    assert (r.status_code, r.json()) == (422, {"detail": "send at least one of: workspace_id, name, test_cmd,"
+                                                         " github_label"})  # 108 AC4
     assert stored(pid) == before
+
+
+def label(pid):
+    return sql("SELECT github_label FROM projects WHERE id = ?", (pid,))[0][0]
+
+
+def test_patch_github_label(client):  # 108 AC2
+    pid = connect(client)["id"]
+    before = stored(pid)
+    r = patch(client, pid, {"github_label": "  bug "})
+    assert (r.status_code, r.json()["github_label"]) == (200, "bug")
+    assert label(pid) == "bug" and stored(pid) == before
+
+
+def test_patch_github_label_blank(client):  # 108 AC3
+    pid = connect(client)["id"]
+    patch(client, pid, {"github_label": "bug"})
+    r = patch(client, pid, {"github_label": "  "})
+    assert (r.status_code, r.json()["github_label"]) == (200, None)
+    assert label(pid) is None
 
 
 def test_patch_project_unknown(client):  # 049 BE7

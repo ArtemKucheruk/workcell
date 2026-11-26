@@ -33,7 +33,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl import-factory [--job ID]` | me, `/factory approve` | `POST /api/projects/{id}/import-factory`: the bootstrap `factory/board.json` jobs, then the `factory/backlog.md` lines it doesn't list, become tasks |
 | `fctl export <id> [-o FILE] [--transcripts]` | me | `GET /api/tasks/{id}/export` → writes the task bundle, `task-<id>.zip` by default |
 | `fctl import FILE` | me | `POST /api/projects/{id}/import` with the bundle as the body: a new task, or an update of the one it made before |
-| `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]` (stdin: description, with `--description -`) | me | `POST /api/projects/{id}/tasks` with `description_md` and `blocked_by` (+ `/run`) |
+| `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--module NAME] [--run]` (stdin: description, with `--description -`) | me | `POST /api/projects/{id}/tasks` with `description_md`, `blocked_by`, and `module_id` (after `GET /api/projects/{id}/modules` for `--module`) (+ `/run`) |
 | `fctl task block <id> --by <id>` | me | `PUT /api/tasks/{id}/blocked-by/{blocker}` → prints every blocker with its status |
 | `fctl task unblock <id> --by <id>` | me | `DELETE /api/tasks/{id}/blocked-by/{blocker}` → prints the blockers left |
 | `fctl task retry <id> [--account <id\|email>]` | me | `GET /api/tasks/{id}` (refuses a task that never ran or is running) then `POST /api/tasks/{id}/run` (`{"account_id"}` with `--account`, else Auto) |

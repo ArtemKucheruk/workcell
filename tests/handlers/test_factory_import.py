@@ -565,6 +565,16 @@ def test_backlog_rerun_ticked(client, repo, project):  # BE11, Q5
     assert task("103-gamma")["updated_at"] == T[0]  # unchanged lines aren't touched
 
 
+def test_backlog_rerun_keeps_title(client, repo, project):  # 108 AC21, Q6: the shared upsert gets no title
+    backlog(repo)
+    ok(client, project)
+    sql("UPDATE tasks SET title = 'Renamed by me' WHERE import_key = 'factory:101-alpha'")
+    backlog(repo, LOG.replace("- [ ] 101-alpha: first", "- [ ] 101-alpha: changed"))
+    ok(client, project)
+    t = task("101-alpha")
+    assert (t["title"], t["description_md"]) == ("Renamed by me", "## Repo backlog\n\nchanged")
+
+
 def start_run(client, tid):
     sql("INSERT INTO runs (task_id, session_id, status, log_path, started_at) VALUES (?, 's', 'failed', 'l', ?)",
         (tid, T[0]))

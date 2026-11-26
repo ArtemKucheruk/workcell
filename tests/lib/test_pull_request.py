@@ -27,6 +27,11 @@ def test_body_whitespace_line_splits_paragraphs():  # AC20
     assert pr_body("First.\r\n \r\nSecond.", 1, None, {}, None, URL).startswith("First.\n\nRounds: 1")
 
 
+def test_body_closes_paragraph():  # 108 AC24, AC25
+    assert pr_body("", 0, None, {}, None, URL, "Closes #12") == f"Rounds: 0\n\nTask: {URL}\n\nCloses #12"
+    assert pr_body("", 0, None, {}, None, URL, None) == pr_body("", 0, None, {}, None, URL)
+
+
 def test_body_has_no_attribution():  # AC20
     body = pr_body("x", 1, 1, {}, ("APPROVE", "y"), URL)
     assert "Claude" not in body and "Co-Authored-By" not in body

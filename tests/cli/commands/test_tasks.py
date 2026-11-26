@@ -460,3 +460,31 @@ def test_import_errors(server, repo, monkeypatch, capsys):  # AC44
         main(["import", "b.zip"])
     assert e.value.code == 1
     assert capsys.readouterr().err == "fctl: 422 not a zip file\n"
+
+
+# --- 112: fctl task add --module -----------------------------------------------------------------
+
+MODULES = {"modules": [{"id": 5, "name": "backend", "description_md": "", "counts": {}},
+                       {"id": 7, "name": "frontend", "description_md": "", "counts": {}}], "no_module": {}}
+
+
+def test_task_add_module(server, repo, monkeypatch, capsys):  # 112 AC23
+    monkeypatch.chdir(repo)
+    server.replies = [reply(PROJECT), reply(MODULES), reply(ADDED, 201)]
+    main(["task", "add", "T", "--module", "  FrontEnd "])
+    assert requests(server)[1:] == [
+        ("GET", "/api/projects/3/modules", None),
+        ("POST", "/api/projects/3/tasks", {"title": "T", "module_id": 7}),
+    ]
+    assert capsys.readouterr().out == f"Added #12 to api → {os.environ['FCTL_URL']}/projects/3\n"
+
+
+@pytest.mark.parametrize("listed, known", [(MODULES, "backend, frontend"), ({"modules": [], "no_module": {}}, "none")])
+def test_task_add_unknown_module(server, repo, monkeypatch, capsys, listed, known):  # 112 AC24
+    monkeypatch.chdir(repo)
+    server.replies = [reply(PROJECT), reply(listed)]
+    with pytest.raises(SystemExit) as e:
+        main(["task", "add", "T", "--module", "nope"])
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", f"fctl: no module nope in api; known: {known}\n")
+    assert [m for m, _, _ in requests(server)] == ["GET", "GET"]  # no task posted

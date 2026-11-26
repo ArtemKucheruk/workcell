@@ -141,6 +141,19 @@ test('AC3: the branch shows in a <code>; no branch and no run leave the header w
   expect(header().querySelector('code')).toBeNull()
 })
 
+test('108 AC23: an issue_url shows an Issue #12 link beside the branch; without one there is none', async () => {
+  const url = 'https://github.com/o/r/issues/12'
+  const withIssue = await open(taskPage({ issue_url: url }))
+  const link = within(header()).getByRole('link', { name: 'Issue #12' })
+  expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([
+    url, '_blank', 'noopener noreferrer',
+  ])
+  expect(link.previousElementSibling.textContent).toBe('factory/12-rate-limit-login')
+  withIssue.unmount()
+  await open(taskPage({ issue_url: null }))
+  expect(within(header()).queryByRole('link', { name: /^Issue/ })).toBeNull()
+})
+
 test('AC4: a title with markup shows as text and adds no script', async () => {
   await open(taskPage({ title: '<script>alert(1)</script>' }))
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 <script>alert(1)</script>')
@@ -219,7 +232,8 @@ test('AC9, 043 FE11: a pending chip, or a posted one with a blank body, is a col
     expect(document.getElementById(id)).toBeNull()
   }
   expect(within(row).queryAllByRole('button')).toEqual([])
-  expect([...document.querySelectorAll('[popover]')].map((el) => el.id)).toEqual(['export']) // 047: Export's alone
+  // 047: Export's alone, beside 112's Module select listbox
+  expect([...document.querySelectorAll('[popover]:not([role="listbox"])')].map((el) => el.id)).toEqual(['export'])
 })
 
 test('AC10: a standalone round with nothing posted says no agent review; a factory one shows four pending chips', async () => {
@@ -939,4 +953,49 @@ test('093 AC37, AC44: after a merge the notes show, the page reloads, and the hi
   const status = screen.getAllByRole('status').find((el) => el.querySelector('li'))
   expect([...status.querySelectorAll('li')].map((li) => li.textContent)).toEqual(notes)
   expect(await within(section('Status history')).findByText(/done · PR #71 merged/)).toBeTruthy()
+})
+
+// --- 112: the task's module ---------------------------------------------------------------
+
+const MODULES = '/api/projects/3/modules'
+const LISTED = {
+  modules: [{ id: 5, name: 'backend', description_md: '', counts: {} }, { id: 7, name: 'frontend', description_md: '', counts: {} }],
+  no_module: {},
+}
+const moduleSelect = () => within(header()).getByRole('combobox', { name: 'Module' })
+
+test('112 AC22: the status line shows the module pill; the Module select lists No module then the modules, set to the task\'s', async () => {
+  await open(taskPage({ module: { id: 7, name: 'frontend' } }), { [`GET ${MODULES}`]: [200, LISTED] })
+  expect(within(statusLine()).getByText('frontend').closest('span').textContent).toBe('Module: frontend')
+  await waitFor(() => expect(openSelect(moduleSelect()).querySelectorAll('[role="option"]')).toHaveLength(3))
+  expect([...openSelect(moduleSelect()).querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual([
+    'No module', 'backend', 'frontend',
+  ])
+  expect(moduleSelect().getAttribute('value')).toBe('7')
+})
+
+test('112 AC22: no module, no pill, and the select reads No module', async () => {
+  await open(taskPage({ module: null }), { [`GET ${MODULES}`]: [200, LISTED] })
+  expect(statusLine().textContent).not.toContain('Module:')
+  expect(moduleSelect().textContent).toBe('No module')
+})
+
+test('112 AC22: a change PATCHes module_id and reloads; No module sends null; a refusal shows inline', async () => {
+  const { fetch, responses } = await open(taskPage({ module: { id: 7, name: 'frontend' } }), {
+    [`GET ${MODULES}`]: [200, LISTED],
+    'PATCH /api/tasks/12': [200, { id: 12, status: 'in_progress', stage: 'build' }],
+  })
+  await waitFor(() => expect(openSelect(moduleSelect()).querySelectorAll('[role="option"]')).toHaveLength(3))
+  pick(moduleSelect(), '')
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  sent(fetch, 'PATCH', '/api/tasks/12')
+  expect(JSON.parse(sends(fetch, 'PATCH', '/api/tasks/12')[0][1].body)).toEqual({ module_id: null })
+
+  responses['PATCH /api/tasks/12'] = [422, { detail: 'no module #5' }]
+  pick(moduleSelect(), '5')
+  const alert = await within(header()).findByRole('alert')
+  expect(alert.textContent).toBe('no module #5')
+  expect(alert.parentElement).toBe(moduleSelect().parentElement) // beside the select
+  expect(JSON.parse(sends(fetch, 'PATCH', '/api/tasks/12')[1][1].body)).toEqual({ module_id: 5 })
+  expect(loads(fetch)).toBe(2)
 })

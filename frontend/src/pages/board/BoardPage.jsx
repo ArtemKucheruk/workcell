@@ -1,15 +1,17 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { Link, useParams } from 'react-router'
+import { listModules } from '../../api/modules.js'
 import { boardPage } from '../../api/pages.js'
 import { runNext, runTask } from '../../api/runs.js'
 import { createTask, deleteTask, editTask, moveTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
-import { LABELS, RunningBadge, Stage } from '../../components/Badge.jsx'
+import { LABELS, ModulePill, RunningBadge, Stage } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Select } from '../../components/Select.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { button, danger, field, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
@@ -190,6 +192,11 @@ function Card({ card, canRun, runTitle, onRun, moves, nudges, onEdit, onDelete, 
       <Link id={`task-${card.id}`} to={`/tasks/${card.id}`} draggable="false" className="font-medium">
         {`#${card.id} ${card.title}`}
       </Link>
+      {card.module && (
+        <p>
+          <ModulePill name={card.module.name} />
+        </p>
+      )}
       {blocked && <Blocked card={card} />}
       <StatusLine card={card} running={running} retry={runButton('Retry')} />
       <Rounds card={card} />
@@ -225,10 +232,12 @@ const moveButton = (id) => `[popovertarget="move-${id}"]:not([popovertargetactio
  * Q10, Q11: the + New task form; a success resets and hides its popover, an error keeps it open with the input.
  * 048 Q5, Q6: given `card`, the same form edits it: labelled `Edit #id`, filled from the card, and sent with Save.
  * The inputs are uncontrolled, so a poll never refills them (FE6). `onDone` gets the title as stored, trimmed.
+ * 112 AC21: creating, a Module select (No module, then `modules`) whose pick goes out as `module_id`; Edit has none (Q8).
  */
-function TaskForm({ projectId, card, onDone }) {
+function TaskForm({ projectId, card, modules, onDone }) {
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [moduleId, setModuleId] = useState('') // '' = No module
   async function submit(event) {
     event.preventDefault()
     const form = event.currentTarget
@@ -236,8 +245,9 @@ function TaskForm({ projectId, card, onDone }) {
     const fields = { title: data.get('title'), description_md: data.get('description_md') }
     setBusy(true)
     try {
-      await (card ? editTask(card.id, fields) : createTask(projectId, fields))
+      await (card ? editTask(card.id, fields) : createTask(projectId, { ...fields, module_id: moduleId ? Number(moduleId) : null }))
       setError(null)
+      setModuleId('')
       form.reset()
       form.closest('[popover]').hidePopover?.() // Q12: jsdom has no Popover API
       onDone(fields.title.trim())
@@ -268,6 +278,17 @@ function TaskForm({ projectId, card, onDone }) {
         Description
         <textarea name="description_md" defaultValue={card?.description_md} rows={4} placeholder="Markdown" className={field} />
       </label>
+      {!card && (
+        <div className="grid gap-1">
+          <label htmlFor="new-task-module">Module</label>
+          <Select
+            id="new-task-module"
+            value={moduleId}
+            onChange={setModuleId}
+            options={[{ value: '', label: 'No module' }, ...modules.map((m) => ({ value: String(m.id), label: m.name }))]}
+          />
+        </div>
+      )}
       <button disabled={busy} className={`${button} justify-self-start`}>
         {card ? 'Save' : 'Add task'}
       </button>
@@ -283,7 +304,7 @@ function TaskForm({ projectId, card, onDone }) {
  * Move button for an Edit, else to + New task. The browser does that itself only for a popover its invoker opened, and
  * + New task over an Edit cancels that invoker (round-1 review-ui).
  */
-function NewTask({ projectId, editing, setEditing, onCreated, onSaved }) {
+function NewTask({ projectId, modules, editing, setEditing, onCreated, onSaved }) {
   function create(event) {
     if (!editing) return
     event.preventDefault() // the popover is open on the Edit: keep it open, in create mode
@@ -312,6 +333,7 @@ function NewTask({ projectId, editing, setEditing, onCreated, onSaved }) {
         <TaskForm
           key={editing ? `edit-${editing.id}` : 'new'}
           projectId={projectId}
+          modules={modules}
           card={editing}
           onDone={editing ? (title) => onSaved(editing, title) : onCreated}
         />
@@ -404,6 +426,8 @@ export function BoardPage() {
   const refresh = useCallback(() => setTick((n) => n + 1), [])
   const load = useCallback(() => boardPage(id), [id, tick])
   const { data: page, error } = usePoll(load, 3000)
+  // 112 Q6: + New task's Module options, loaded once; a failure leaves only No module
+  const { data: modules } = usePoll(useCallback(() => listModules(id), [id]))
   const [actionError, setActionError] = useState(null)
   const [said, setSaid] = useState('') // Q5: the status region's words
   // `dragged` is the card and its column, read by drop; `drag` is what renders: the card's id, `dim`, and the column and gap
@@ -555,7 +579,7 @@ export function BoardPage() {
     <>
       {/* 042: Code, Create factory, Import, Project context, and Move live on the project's other pages */}
       <ProjectHeader project={project} factory={page.factory}>
-        <NewTask projectId={project.id} editing={editing} setEditing={setEditing} onCreated={refresh} onSaved={saved} />
+        <NewTask projectId={project.id} modules={modules?.modules ?? []} editing={editing} setEditing={setEditing} onCreated={refresh} onSaved={saved} />
         <ActionButton action={() => boardAction(() => runNext(project.id))} disabled={!page.can_run} title={capHint}>
           Run next ▶
         </ActionButton>

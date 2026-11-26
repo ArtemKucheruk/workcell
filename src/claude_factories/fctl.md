@@ -1096,15 +1096,16 @@ fctl import task-12.zip
 
 ## fctl task add
 
-Adds a task to the bottom of the current repo's Backlog, with an optional markdown description and
-the tasks it waits on, and with `--run` starts a factory run on it. Calls
-`POST /api/projects/{id}/tasks` with `title` and, when given, `description_md` and `blocked_by`,
-then with `--run` `POST /api/tasks/{id}/run`.
+Adds a task to the bottom of the current repo's Backlog, with an optional markdown description,
+the tasks it waits on, and its module, and with `--run` starts a factory run on it. With `--module`
+it first reads the project's modules with `GET /api/projects/{id}/modules`. Then it calls
+`POST /api/projects/{id}/tasks` with `title` and, when given, `description_md`, `blocked_by`, and
+`module_id`, then with `--run` `POST /api/tasks/{id}/run`.
 
 **Synopsis**
 
 ```
-fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]
+fctl task add "title" [--description TEXT] [--blocked-by IDS] [--module NAME] [--run]
 ```
 
 **Arguments and flags**
@@ -1117,6 +1118,9 @@ fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]
   Each must be a task of the same project. The new task is blocked until all of them are done. Change
   the links later with [fctl task block](#fctl-task-block) and
   [fctl task unblock](#fctl-task-unblock).
+- `--module NAME`: the project's module the task belongs to, for example `frontend`, matched in any
+  case after trimming. Create modules on the project's Modules page; change a task's module on its
+  task page. Without the flag the task has no module.
 - `--run`: then start a factory run on it, as `fctl run <id>` does.
 
 **Stdin**
@@ -1147,6 +1151,8 @@ Run #41 on #12 as b@y → http://127.0.0.1:4545/tasks/12
 - `fctl: 422 no task #99` or
   `fctl: 422 #30 is in another project; a task waits only on tasks of its own project`: no task is
   added, exit `1`.
+- `fctl: no module nope in api-server; known: backend, frontend` (or `known: none` when the
+  project has no modules): no task is added, exit `1`.
 - `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
 - With `--run`, any refusal of [fctl run](#fctl-run), exit `1`. The task stays in Backlog and the
   `Added` line is already printed. A task added with open blockers is refused as blocked.
@@ -1754,12 +1760,14 @@ none
 Markdown. With no flag, the project context comes first, as `## Project context`: the pinned
 context set with `fctl context set`, then each card of the project's Context page in its order,
 as `### <title>` and its text, a group's cards under it as `#### <title>`. It is left out when
-the pinned context is blank and there are no cards. Then the task's heading and status, the
-description, the spec (`_No spec yet._` if none), and every round:
+the pinned context is blank and there are no cards. Then the task's heading and status, a
+`Module: <name>` line when the task has a module (none without one), the description, the spec
+(`_No spec yet._` if none), and every round:
 
 ```
 # #12 Rate-limit login endpoint
 Status: in_progress · agent_review
+Module: backend
 
 ## Description
 …

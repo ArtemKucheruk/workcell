@@ -25,6 +25,14 @@ export const EscalatedPill = () => <span className={`${pill} border-danger bg-da
 // 097 Q8: the Settings page's marker for the active account, which Auto prefers
 export const PreferredPill = () => <span className={`${pill} border-accent text-accent`}>preferred</span>
 
+/** 112 AC20, AC22: a task's module, its name as text on the raised token; a fact, not a state, so no tone. */
+export const ModulePill = ({ name }) => (
+  <span className={`${pill} border-line bg-raised text-fg`} title={`Module: ${name}`}>
+    <span className="sr-only">Module: </span>
+    {name}
+  </span>
+)
+
 /** 057: the Context page's first card, which can't be moved or deleted; a fact, not a state, so muted. */
 export const PinnedPill = () => <span className={`${pill} border-muted text-muted`}>Pinned</span>
 
