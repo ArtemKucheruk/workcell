@@ -6,7 +6,8 @@ import { openSelect, pick } from '../../test/select.js'
 
 const PROJECT = {
   id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
-  remote_url: 'git@github.com:me/api.git', test_cmd: 'pytest -q',
+  remote_url: 'git@github.com:me/api.git', test_cmd: 'pytest -q', github_label: null, github_repo: 'me/api',
+  github_hint: null,
 }
 const WORKSPACES = [{ id: 2, name: 'personal', projects: 1 }, { id: 4, name: 'work', projects: 0 }]
 const BOARD = '/api/pages/projects/3'
@@ -106,7 +107,7 @@ test('049 FE17: Save sends PATCH {name, test_cmd} as typed; on 200 the page relo
   fireEvent.change(nameBox(), { target: { value: '  api2 ' } })
   fireEvent.change(testBox(), { target: { value: '   ' } })
   responses[`GET ${BOARD}`] = [200, board({ project: { ...PROJECT, name: 'api2', test_cmd: null } })]
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  fireEvent.click(within(section('Repository')).getByRole('button', { name: 'Save' }))
   expect(await screen.findByRole('heading', { level: 1, name: 'api2 · personal' })).toBeTruthy()
   expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ name: '  api2 ', test_cmd: '   ' })
   expect(loads(fetch)).toBe(2)
@@ -119,7 +120,7 @@ test('049 FE18: a refused Save shows its detail in the form, which keeps what wa
   const { fetch } = await open(board(), { 'PATCH /api/projects/3': [422, { detail: 'name must not be blank' }] })
   fireEvent.change(nameBox(), { target: { value: '   ' } })
   fireEvent.change(testBox(), { target: { value: 'make test' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  fireEvent.click(within(section('Repository')).getByRole('button', { name: 'Save' }))
   const alert = await screen.findByRole('alert')
   expect(alert.textContent).toBe('name must not be blank')
   expect(alert.closest('form')).toBe(nameBox().closest('form'))
@@ -380,6 +381,105 @@ test('058 FE4: Sync factory/ is disabled while its request is pending, and enabl
   await screen.findByText('Synced factory/: 1 new, 2 updated, 1 skipped')
   expect(syncButton().disabled).toBe(false)
   expect(sends(fetch, 'POST', SYNC)).toHaveLength(1)
+})
+
+// --- GitHub issues (108) -----------------------------------------------------------------
+
+const ISSUES = '/api/projects/3/github-issues/sync'
+const ISSUES_SYNCED = { new: 2, updated: 1, skipped: 5 }
+const ISSUES_LINE = 'Synced GitHub issues: 2 new, 1 updated, 5 skipped'
+const github = () => within(section('GitHub issues'))
+const labelBox = () => github().getByRole('textbox', { name: 'Label' })
+const syncNow = () => github().getByRole('button', { name: 'Sync now' })
+
+test('108 AC27: GitHub issues follows Import, with a Label prefilled from github_label; its Save sends PATCH {github_label}, says Saved. and reloads', async () => {
+  const project = { ...PROJECT, github_label: 'bug' }
+  const { fetch, responses } = await open(board({ project }), {
+    'PATCH /api/projects/3': [200, { id: 3, workspace_id: 2, name: 'api', test_cmd: 'pytest -q', github_label: 'ui' }],
+  })
+  const regions = screen.getAllByRole('region')
+  expect(regions.indexOf(section('GitHub issues'))).toBe(regions.indexOf(section('Import')) + 1)
+  expect(labelBox().value).toBe('bug')
+  expect(labelBox().getAttribute('placeholder')).toBe('all open issues')
+  fireEvent.change(labelBox(), { target: { value: ' ui ' } })
+  responses[`GET ${BOARD}`] = [200, board({ project: { ...project, github_label: 'ui' } })]
+  fireEvent.click(github().getByRole('button', { name: 'Save' }))
+  const saved = await github().findByText('Saved.')
+  expect(saved.closest('[aria-live]').getAttribute('aria-live')).toBe('polite')
+  expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ github_label: ' ui ' })
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(labelBox().value).toBe('ui')
+})
+
+test('108 AC27: a refused Label save shows as an alert in the section and keeps what was typed', async () => {
+  const { fetch } = await open(board(), { 'PATCH /api/projects/3': [422, { detail: 'something is wrong' }] })
+  fireEvent.change(labelBox(), { target: { value: 'needs triage' } })
+  fireEvent.click(github().getByRole('button', { name: 'Save' }))
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe('something is wrong')
+  expect(alert.closest('section')).toBe(section('GitHub issues'))
+  expect(labelBox().value).toBe('needs triage')
+  expect(github().queryByText('Saved.')).toBeNull()
+  expect(loads(fetch)).toBe(1)
+})
+
+test('108 AC28: Sync now sends POST github-issues/sync {}, is disabled while pending, and says the counts in a polite live region, then reloads', async () => {
+  const { fetch } = await open(board(), { [`POST ${ISSUES}`]: [200, ISSUES_SYNCED] })
+  const reply = fetch.getMockImplementation()
+  let release
+  const gate = new Promise((resolve) => (release = resolve))
+  fetch.mockImplementation((url, init) => (url === ISSUES ? gate.then(() => reply(url, init)) : reply(url, init)))
+  expect(syncNow().disabled).toBe(false)
+  fireEvent.click(syncNow())
+  expect(syncNow().disabled).toBe(true)
+  release()
+  const line = await github().findByText(ISSUES_LINE)
+  expect(line.closest('[aria-live]').getAttribute('aria-live')).toBe('polite')
+  expect(syncNow().disabled).toBe(false)
+  expect(sent(fetch, 'POST', ISSUES)).toEqual({})
+  expect(screen.queryByRole('alert')).toBeNull()
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+})
+
+test('108 AC28: the live region is cleared when a sync starts, so the same result is announced again', async () => {
+  const { fetch } = await open(board(), { [`POST ${ISSUES}`]: [200, ISSUES_SYNCED] })
+  fireEvent.click(syncNow())
+  await github().findByText(ISSUES_LINE)
+  const reply = fetch.getMockImplementation()
+  let release
+  const gate = new Promise((resolve) => (release = resolve))
+  fetch.mockImplementation((url, init) => (url === ISSUES ? gate.then(() => reply(url, init)) : reply(url, init)))
+  fireEvent.click(syncNow())
+  expect(github().queryByText(ISSUES_LINE)).toBeNull()
+  release()
+  expect(await github().findByText(ISSUES_LINE)).toBeTruthy()
+})
+
+test('108 AC29: a refused sync shows its detail as an alert in the section and does not reload', async () => {
+  const detail = 'gh is not logged in: run gh auth login. You are not logged into any GitHub hosts.'
+  const { fetch } = await open(board(), { [`POST ${ISSUES}`]: [409, { detail }] })
+  fireEvent.click(syncNow())
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe(detail)
+  expect(alert.closest('section')).toBe(section('GitHub issues'))
+  expect(screen.queryByText(/^Synced GitHub/)).toBeNull()
+  await waitFor(() => expect(syncNow().disabled).toBe(false))
+  expect(loads(fetch)).toBe(1)
+})
+
+test('108 AC30: with a github.com origin a muted line names the repo; without one the hint shows and Sync now is disabled', async () => {
+  const { unmount } = await open(board())
+  const line = github().getByText('Open issues of me/api as Backlog tasks, through your gh login.')
+  expect(line.className).toMatch(/(^|\s)text-muted(\s|$)/)
+  unmount()
+  const hint = "origin isn't on GitHub (gitlab.com); GitHub issues sync needs a github.com origin."
+  const { fetch } = await open(board({ project: { ...PROJECT, github_repo: null, github_hint: hint } }))
+  expect(github().getByText(hint)).toBeTruthy()
+  expect(github().queryByText(/^Open issues of/)).toBeNull()
+  expect(syncNow().disabled).toBe(true)
+  fireEvent.click(syncNow())
+  expect(sends(fetch, 'POST', ISSUES)).toHaveLength(0)
+  expect(labelBox().disabled).toBe(false) // the label can still be saved
 })
 
 // --- Move (board AC27–AC28, moved) -------------------------------------------------------

@@ -18,10 +18,11 @@ def pr_number(url: str | None) -> int | None:
 
 
 def pr_body(description_md: str, rounds: int, latest: int | None, verdicts: dict[str, str],
-            approver: tuple[str, str] | None, task_url: str) -> str:
+            approver: tuple[str, str] | None, task_url: str, closes: str | None = None) -> str:
     """AC20: the description's first paragraph (left out if blank), `Rounds: <count>`, round `latest`'s verdicts in
     reviewer order (`pending` for a missing one; left out with no round), the approver's latest decision with its
-    body (left out with none), and the task's app URL, as paragraphs. No attribution."""
+    body (left out with none), and the task's app URL, as paragraphs. No attribution. 108 AC24: `closes`, e.g.
+    `Closes #12`, is a final paragraph."""
     first = BLANK_LINE.split(description_md.strip().replace("\r\n", "\n"), maxsplit=1)[0].strip()
     parts = [first] if first else []
     parts.append(f"Rounds: {rounds}")
@@ -32,6 +33,8 @@ def pr_body(description_md: str, rounds: int, latest: int | None, verdicts: dict
         decision, body = approver
         parts.append(f"Approver: {decision}" + (f" — {body.strip()}" if body.strip() else ""))
     parts.append(f"Task: {task_url}")
+    if closes:
+        parts.append(closes)
     return "\n\n".join(parts)
 
 

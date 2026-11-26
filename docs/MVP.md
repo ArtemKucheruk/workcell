@@ -38,7 +38,9 @@ and what is waiting on me.
 - Multiple users, auth, cloud hosting.
 - Agents committing, pushing, merging, or opening GitHub PRs. Only my click on Create PR or
   Merge PR runs git or `gh` writes.
-- Any GitHub API integration beyond those two buttons, which go through my `gh` login.
+- Any GitHub API integration beyond those two buttons and project Settings' **Sync now** (108), a read
+  (`gh issue list`) that brings the repo's open issues into Backlog. All three go through my `gh` login, and
+  only on my click: no periodic sync, no webhooks, no other `gh` write.
 - Editing code in the browser.
 
 ---
@@ -679,6 +681,8 @@ Rules:
   `claude --resume`.
 - Review page: rounds, verdict chips, unified diff, inline comments, Approve, Request changes,
   and Create PR / Merge PR (§3.7).
+- GitHub issues sync (108): project Settings' **Sync now** imports the repo's open issues (optionally one
+  label's) as Backlog tasks through `gh issue list`, and Create PR's body says `Closes #<n>` for them.
 - `/factory-submit` for changes made without the factory.
 - Dashboard, project code page with README landing and a branch picker.
 - The local safety measures in §4.5.

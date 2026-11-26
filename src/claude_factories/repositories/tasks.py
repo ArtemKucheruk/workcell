@@ -133,9 +133,9 @@ class TasksRepo:
         )
 
     def by_import_key(self, key: str) -> sqlite3.Row | None:
-        """058 Q6: `started` is any run or round, or a status other than backlog."""
+        """058 Q6: `started` is any run or round, or a status other than backlog. 108: with the title."""
         return self.conn.execute(
-            "SELECT id, project_id, status, description_md, status != 'backlog'"
+            "SELECT id, project_id, status, title, description_md, status != 'backlog'"
             " OR EXISTS (SELECT 1 FROM runs WHERE task_id = tasks.id)"
             " OR EXISTS (SELECT 1 FROM rounds WHERE task_id = tasks.id) AS started FROM tasks WHERE import_key = ?",
             (key,),
@@ -266,17 +266,19 @@ class TasksRepo:
         project's now, joined at read time, for the breadcrumb. 112: module_id and the module's name as module."""
         return self.conn.execute(
             "SELECT t.id, t.project_id, p.name AS project, p.workspace_id, w.name AS workspace, t.title,"
-            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, t.pr_url, p.path,"
-            " p.default_branch, t.module_id, m.name AS module FROM tasks t JOIN projects p ON p.id = t.project_id"
+            " t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path, t.pr_url, t.import_key,"
+            " p.path, p.default_branch, t.module_id, m.name AS module FROM tasks t JOIN projects p ON p.id = t.project_id"
             " JOIN workspaces w ON w.id = p.workspace_id LEFT JOIN modules m ON m.id = t.module_id"
             " WHERE t.id = ?",
             (task_id,),
         ).fetchone()
 
     def for_pr(self, task_id: int) -> sqlite3.Row | None:
-        """093: what Create PR and Merge PR need: the task, its PR, and its project's path and default branch."""
+        """093: what Create PR and Merge PR need: the task, its PR, and its project's path and default branch. 108:
+        the import_key, for Create PR's `Closes` line."""
         return self.conn.execute(
-            "SELECT t.id, t.title, t.description_md, t.status, t.branch, t.worktree_path, t.pr_url, p.path,"
+            "SELECT t.id, t.title, t.description_md, t.status, t.branch, t.worktree_path, t.pr_url, t.import_key,"
+            " p.path,"
             " p.default_branch FROM tasks t JOIN projects p ON p.id = t.project_id WHERE t.id = ?",
             (task_id,),
         ).fetchone()

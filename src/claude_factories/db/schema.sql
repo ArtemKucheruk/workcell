@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at TEXT NOT NULL,
   context_md TEXT NOT NULL DEFAULT '',    -- stack and conventions, atop fctl show; db.init() adds it to old DBs
   factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync
-  factory_error TEXT);                    -- that sync's refusal, NULL when it worked; db.init() adds both
+  factory_error TEXT,                     -- that sync's refusal, NULL when it worked; db.init() adds both
+  github_label TEXT);                     -- 108: GitHub issues sync's label, NULL = every open issue; db.init() adds it
 
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12
@@ -25,7 +26,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   position REAL NOT NULL,                 -- order within column; Run next = lowest backlog
   branch TEXT, worktree_path TEXT,        -- NULL for standalone (/factory-submit) tasks
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
-  import_key TEXT UNIQUE,                 -- 031: factory:<job id> of an imported bootstrap job; db.init() adds it to old DBs
+  import_key TEXT UNIQUE,                 -- 031: factory:<job id> of an imported bootstrap job, 108: github:<owner>/<repo>#<n> of an issue; db.init() adds it to old DBs
   pr_url TEXT,                            -- 093: the task's GitHub PR (Create PR, or a 031 job's pr); db.init() adds it
   module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL);  -- 112: at most one module, NULL = none; db.init() adds it
 

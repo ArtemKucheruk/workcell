@@ -1,6 +1,6 @@
 import { api } from './client.js'
 
-/** 049: any of workspace_id, name, and test_cmd, sent as given; the reply is the project after the update. */
+/** 049: any of workspace_id, name, test_cmd, and (108) github_label, sent as given; the reply is the project after the update. */
 export const patchProject = (id, fields) =>
   api(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: fields })
 
@@ -21,3 +21,7 @@ export const saveProjectContext = (id, contextMd) =>
 /** 058: `{}` syncs factory/board.json and factory/backlog.md onto the board; the reply has `imported` and `skipped`. */
 export const syncFactory = (id) =>
   api(`/api/projects/${encodeURIComponent(id)}/import-factory`, { method: 'POST', body: {} })
+
+/** 108 Q1, Q10: the repo's open issues (the saved label's) as Backlog tasks; the reply is `{new, updated, skipped}`. */
+export const syncGithubIssues = (id) =>
+  api(`/api/projects/${encodeURIComponent(id)}/github-issues/sync`, { method: 'POST', body: {} })

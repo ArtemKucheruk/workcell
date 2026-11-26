@@ -101,6 +101,17 @@ elif args[:2] == ["pr", "merge"]:
             run("push", "-q", "origin", "--delete", p["head"])
     p["state"] = "MERGED"
     save()
+elif args[:2] == ["issue", "list"]:  # 108: `issues` [{number, title, body, url, labels}], newest first as gh lists
+    probe()
+    save()
+    if state.get("issue_error"):
+        fail(state["issue_error"])
+    if "issue_output" in state:
+        sys.stdout.write(state["issue_output"])
+        sys.exit(0)
+    label = opt("--label")
+    print(json.dumps([{k: i.get(k) for k in ("number", "title", "body", "url")} for i in state.get("issues", [])
+                      if label is None or label in i.get("labels", [])]))
 else:
     fail("unknown command: " + " ".join(args))
 '''
@@ -306,6 +317,31 @@ def test_pr_body(client, setup, gh):  # AC20
         "Verdicts (round 2): security PASS · ux PASS · ui pending · code PASS\n\n"
         f"Approver: APPROVE — Ship it.\n\nTask: http://127.0.0.1:4545/tasks/{setup.task}")
     assert "Claude" not in found["body"]
+
+
+def test_pr_body_closes_issue(client, setup, gh):  # 108 AC24
+    sql("UPDATE tasks SET import_key = 'github:o/r#12' WHERE id = ?", (setup.task,))
+    change(setup)
+    assert create(client, setup.task).status_code == 200
+    [found] = gh.state()["prs"]
+    assert found["body"].endswith(f"Task: http://127.0.0.1:4545/tasks/{setup.task}\n\nCloses #12")
+
+
+@pytest.mark.parametrize("key", [None, "factory:12-rate-limit"])
+def test_pr_body_no_closes(client, setup, gh, key):  # 108 AC25 (test_pr_body's exact body passes unchanged)
+    sql("UPDATE tasks SET import_key = ? WHERE id = ?", (key, setup.task))
+    change(setup)
+    assert create(client, setup.task).status_code == 200
+    [found] = gh.state()["prs"]
+    assert "Closes" not in found["body"]
+
+
+def test_pr_body_closes_other_repo(client, setup, gh):  # 108 AC26, Q7
+    sql("UPDATE tasks SET import_key = 'github:old/name#12' WHERE id = ?", (setup.task,))
+    change(setup)
+    assert create(client, setup.task).status_code == 200
+    [found] = gh.state()["prs"]
+    assert found["body"].endswith("\n\nCloses old/name#12")
 
 
 def test_clean_branch_ahead(client, setup, gh):  # AC16

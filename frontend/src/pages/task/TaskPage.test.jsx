@@ -141,6 +141,19 @@ test('AC3: the branch shows in a <code>; no branch and no run leave the header w
   expect(header().querySelector('code')).toBeNull()
 })
 
+test('108 AC23: an issue_url shows an Issue #12 link beside the branch; without one there is none', async () => {
+  const url = 'https://github.com/o/r/issues/12'
+  const withIssue = await open(taskPage({ issue_url: url }))
+  const link = within(header()).getByRole('link', { name: 'Issue #12' })
+  expect([link.getAttribute('href'), link.getAttribute('target'), link.getAttribute('rel')]).toEqual([
+    url, '_blank', 'noopener noreferrer',
+  ])
+  expect(link.previousElementSibling.textContent).toBe('factory/12-rate-limit-login')
+  withIssue.unmount()
+  await open(taskPage({ issue_url: null }))
+  expect(within(header()).queryByRole('link', { name: /^Issue/ })).toBeNull()
+})
+
 test('AC4: a title with markup shows as text and adds no script', async () => {
   await open(taskPage({ title: '<script>alert(1)</script>' }))
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('#12 <script>alert(1)</script>')

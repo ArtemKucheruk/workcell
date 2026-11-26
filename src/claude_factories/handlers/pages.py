@@ -21,6 +21,7 @@ from ..domain.enums import Reviewer, Status
 from ..domain.errors import Conflict, Failed, Invalid, NotFound
 from ..lib.account_choice import rank
 from ..lib.diff import diff_rows, file_tree
+from ..lib.github_issue import issue_url
 from ..lib.markdown import render_with_headings
 from ..lib.run_log import run_agents
 from ..repositories.claude_accounts import ClaudeAccountsRepo
@@ -36,6 +37,7 @@ from ..repositories.usage import UsageRepo
 from ..repositories.workspaces import WorkspacesRepo
 from .factory import factory_files, factory_hint, factory_state
 from .factory_import import sync
+from .github_issues import page_github
 from .pull_requests import page_pr
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
@@ -398,7 +400,8 @@ def board(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, reviews:
     logged_in = claude_login(claude, accounts)[1]
     listed, auto = run_menu(accounts, usage, time.time())
     return {
-        "project": project, "workspaces": workspaces.all(), "columns": columns, "factory": factory,
+        "project": dict(project) | page_github(project["remote_url"]),  # 108 AC5
+        "workspaces": workspaces.all(), "columns": columns, "factory": factory,
         "hint": factory_hint(factory, project["default_branch"]),
         "runs_active": active, "max_concurrent_runs": cap,
         # Q4: the server's checks still decide
@@ -493,7 +496,8 @@ def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsR
         "run": run_out, "takeover": takeover, "hint": factory_hint(factory, found["default_branch"]),
         "accounts": listed, "auto": auto,
         "can_run": factory == "ready" and claude_login(claude, accounts)[1],  # Q4
-        "task": found, "pr": page_pr(git, found),
+        "task": dict(found) | {"issue_url": issue_url(found["import_key"])},  # 108 AC22
+        "pr": page_pr(git, found),
         "rounds": summaries(rounds, reviews, task_id), "posted": posted_verdicts(reviews, task_id),
         "build": {r["n"]: r["build_md"] for r in rounds.all(task_id)},
         "reviewers": REVIEWERS, "approver": reviews.approver_latest(task_id),

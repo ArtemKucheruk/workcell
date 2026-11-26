@@ -42,7 +42,8 @@ def init() -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(projects)")}
         if "context_md" not in columns:
             conn.execute("ALTER TABLE projects ADD COLUMN context_md TEXT NOT NULL DEFAULT ''")
-        for column in ("factory_mark", "factory_error"):  # 058 Q10: the same for the last factory/ sync
+        # 058 Q10: the same for the last factory/ sync; 108 AC1: GitHub issues sync's label
+        for column in ("factory_mark", "factory_error", "github_label"):
             if column not in columns:
                 conn.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
         # 031: the same for tasks.import_key; ALTER can't add UNIQUE, so an index enforces it

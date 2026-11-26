@@ -30,8 +30,9 @@ class ProjectPatch(BaseModel):
     workspace_id: int | None = Field(None, ge=-2**63, lt=2**63)  # SQLite INTEGER bounds: a 404, not a 500
     name: str | None = None
     test_cmd: str | None = None
+    github_label: str | None = None  # 108 AC2: stored trimmed, blank clears it
 
-    @field_validator("workspace_id", "name", "test_cmd")
+    @field_validator("workspace_id", "name", "test_cmd", "github_label")
     @classmethod
     def not_null(cls, value):
         """048's TaskPatch.not_null: a sent null gets FastAPI's list detail; an omitted key stays None."""
@@ -45,6 +46,7 @@ class ProjectPatched(BaseModel):
     workspace_id: int
     name: str
     test_cmd: str | None
+    github_label: str | None  # 108
 
 
 class ContextBody(BaseModel):

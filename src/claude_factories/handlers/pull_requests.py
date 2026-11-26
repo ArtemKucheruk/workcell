@@ -12,6 +12,7 @@ from ..adapters.git import Git, Ran
 from ..domain.enums import Status
 from ..domain.errors import Conflict, DomainError, Failed, NotFound
 from ..dto.pull_requests import PrCreated, PrMerged, PrState
+from ..lib.github_issue import closes_line
 from ..lib.pull_request import checks, pr_body, pr_number
 from ..lib.remote import web_url
 from ..repositories.reviews import ReviewsRepo
@@ -59,8 +60,9 @@ def check_done(task: dict) -> None:
         raise Conflict(f"#{task['id']} is not done; approve it first")
 
 
-def github_repo(git: Git, root: str) -> str:
-    """AC10, AC11, Q6: origin's `owner/repo` on github.com, read raw (no insteadOf) and parsed by lib/remote."""
+def github_repo(git: Git, root: str, fix: str = "push and open the PR yourself") -> str:
+    """AC10, AC11, Q6: origin's `owner/repo` on github.com, read raw (no insteadOf) and parsed by lib/remote. 108 Q3:
+    `fix` ends the not-on-GitHub refusal."""
     code, out, _ = git.origin_url(root)
     url = out.strip()
     if code or not url:
@@ -69,26 +71,26 @@ def github_repo(git: Git, root: str) -> str:
     parts = urlsplit(web) if web else None
     host = parts.hostname if parts else None
     if host != "github.com":
-        raise Conflict(f"origin isn't on GitHub ({host or url}); push and open the PR yourself")
+        raise Conflict(f"origin isn't on GitHub ({host or url}); {fix}")
     return parts.path.strip("/")
 
 
-def gh_refusal(detail: str) -> Conflict:
-    """AC14: under Docker, the AC12 and AC13 refusals say why."""
-    return Conflict(detail + (DOCKER_HINT if config.in_docker() else ""))
+def gh_refusal(detail: str, hint: str = DOCKER_HINT) -> Conflict:
+    """AC14: under Docker, the AC12 and AC13 refusals say why. 108 Q3: `hint` words it for the caller."""
+    return Conflict(detail + (hint if config.in_docker() else ""))
 
 
-def gh_installed(git: Git) -> None:
+def gh_installed(git: Git, hint: str = DOCKER_HINT) -> None:
     if not git.gh_installed():
-        raise gh_refusal("gh is not installed: install GitHub CLI, then run gh auth login")
+        raise gh_refusal("gh is not installed: install GitHub CLI, then run gh auth login", hint)
 
 
-def gh_ready(git: Git) -> None:
+def gh_ready(git: Git, hint: str = DOCKER_HINT) -> None:
     """AC12, AC13: gh is on PATH and logged in to github.com."""
-    gh_installed(git)
+    gh_installed(git, hint)
     r = git.gh_auth()
     if r[0]:
-        raise gh_refusal(f"gh is not logged in: run gh auth login. {said(r, 'gh')}")
+        raise gh_refusal(f"gh is not logged in: run gh auth login. {said(r, 'gh')}", hint)
 
 
 def gh_json(r: Ran, what: str):
@@ -169,7 +171,7 @@ def create(tx, git: Git, task_id: int, base_url: str) -> PrCreated:
         url, reused = opened["url"], True
     else:
         body = pr_body(task["description_md"], task["rounds"], task["latest"], task["verdicts"], task["approver"],
-                       f"{base_url}tasks/{task_id}")
+                       f"{base_url}tasks/{task_id}", closes_line(task["import_key"], repo))  # 108 AC24–AC26
         r = git.pr_create(repo, default, branch, task["title"], body)
         if r[0]:
             raise Conflict(said(r, "gh"))
