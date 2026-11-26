@@ -75,7 +75,7 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   409 detail shows inside the dialog, which stays open. A deleted project's app goes to
   `/workspaces/{id}`, a deleted workspace's to `/`.
 - Bottom: **Dashboard**, **Usage** (item 16), **Agents** (item 15), the fctl reference (item 7),
-  and the login runs
+  **Settings** (`/settings`, item 9; 111), and the login runs
   will use, from `GET /api/auth` (`claude auth status`), refreshed every 3 s: `Claude: Pro ✓`
   when it is a subscription, or a red `Not signed in — runs disabled` otherwise. The badge links
   to `/settings` (item 9). **Agents** carries the count of running runs as a filled `accent` pill
@@ -842,6 +842,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 │ Usage                    │
 │ Agents               (1) │  ← running runs, when above 0: an accent pill
 │ fctl reference           │
+│ Settings                 │
 │ Claude: Pro ✓            │
 │ me@example.com active    │  ← the usage block: one link to /usage, named "Claude usage"
 │ 5h ▓▓▓░░░░░░░        34% │  ← bar: accent / warning / danger on a line track
