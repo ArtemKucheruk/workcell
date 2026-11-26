@@ -38,5 +38,8 @@ class ClaudeAccountsRepo:
         self.conn.execute("UPDATE claude_accounts SET email = ? WHERE id = ? AND email IS NOT ?",
                           (email, account_id, email))
 
-    def delete(self, account_id: int) -> None:
+    def delete(self, account_id: int, commit: bool = False) -> None:
+        """110: `commit` keeps the delete although the request then refuses, which rolls its transaction back."""
         self.conn.execute("DELETE FROM claude_accounts WHERE id = ?", (account_id,))
+        if commit:
+            self.conn.commit()

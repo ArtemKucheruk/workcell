@@ -241,6 +241,37 @@ test('FE7: a refused code shows its detail, and the form and the typed code stay
   expect(within(section).queryByRole('status')).toBeNull()
 })
 
+const HINT =
+  'The page signs in the claude.ai account your browser is signed into. For a different account, open the link in a ' +
+  'private window or sign out of claude.ai first.'
+const DUPLICATE =
+  'already connected as artem@example.com (account #1); to add a different account, open the sign-in link in a ' +
+  'private window or sign out of claude.ai first'
+
+test('110 AC8: the sign-in form has one muted hint line under the sign-in link, on how to add a different account', async () => {
+  const { section } = await open([ONE])
+  await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+  const hint = screen.getByText(HINT)
+  expect(hint.tagName).toBe('P')
+  expect(hint.className).toMatch(cls('text-muted'))
+  expect(follows(signInLink(), hint)).toBe(true)
+  expect(follows(hint, codeInput())).toBe(true)
+})
+
+test('110 AC9: a 409 on Submit code shows its detail, closes the form, and reloads the list, with no Logged in line', async () => {
+  const { fetch, responses, section } = await open([ONE], { [CODE]: [409, { detail: DUPLICATE }] })
+  await startLogin(within(section).getByRole('button', { name: '+ Add account' }))
+  responses[ACCOUNTS] = [200, [ONE, TWO]]
+  fireEvent.change(codeInput(), { target: { value: 'good#state' } })
+  fireEvent.click(submitButton())
+  await waitFor(() => expect(calls(fetch, ACCOUNTS)).toHaveLength(2))
+  await waitFor(() => expect(items(section)).toHaveLength(2))
+  expect(within(section).getByRole('alert').textContent).toBe(DUPLICATE)
+  expect(signInLink()).toBeNull()
+  expect(screen.queryByRole('textbox', { name: 'Code' })).toBeNull()
+  expect(within(section).queryByRole('status')).toBeNull()
+})
+
 test("FE8: Log in again sends the item's account_id and becomes Start over, which resends it; an add's Start over resends 3", async () => {
   const { fetch, section } = await open([ONE, TWO], { [LOGIN]: [200, { url: SIGN_IN, account_id: 1 }] })
   const one = items(section)[0]

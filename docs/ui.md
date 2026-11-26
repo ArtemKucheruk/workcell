@@ -384,9 +384,13 @@ Loading, failures, times, and motion are the same on every page:
      `Not signed in with a Claude subscription — runs disabled` when the active one is signed out.
    - **+ Add account**, **Log in**, and **Log in again** post `POST /api/auth/login`, with the
      item's `account_id` (none for a new account), and show **Open the Claude sign-in page**,
-     which opens claude.ai in a new tab, and a **Code** field. **Submit code** posts the pasted
-     `<code>#<state>` with that `account_id` to `POST /api/auth/login/code`, and on success the
-     list reloads and shows `Logged in as <email>`. While a login is pending, its button reads
+     which opens claude.ai in a new tab, a muted hint line under it (`The page signs in the
+     claude.ai account your browser is signed into. For a different account, open the link in a
+     private window or sign out of claude.ai first.`, 110), and a **Code** field. **Submit code**
+     posts the pasted `<code>#<state>` with that `account_id` to `POST /api/auth/login/code`, and on
+     success the list reloads and shows `Logged in as <email>`. A 422 keeps the form and the typed
+     code; a 409 (the account is already connected, or no login is pending) shows its detail in the
+     alert, closes the form, and reloads the list. While a login is pending, its button reads
      **Start over**, which begins a fresh login for the same account.
    - **Make preferred** posts `POST /api/auth/accounts/{id}/activate` and reloads the list, and focus
      goes to that item's login button. A refusal (a run is active) shows its detail in an alert.

@@ -1027,6 +1027,13 @@ POST /api/auth/login/code                                         (Settings: Sub
   #   checked afresh
   # 409 {"detail":"no login in progress"}: none is pending, or account_id isn't the pending login's,
   #     which then stays pending
+  # 409 {"detail":"already connected as <email> (account #N); to add a different account, open the
+  #     sign-in link in a private window or sign out of claude.ai first"} (110): claude signed in, but
+  #     a fresh `claude auth status` email (trimmed, case-insensitive) equals another row's stored
+  #     email, N the lowest such id. `claude auth logout` runs in the login's dir; a new account's row
+  #     is removed with its app-made dir, an existing account's row stays, signed out. The login is
+  #     over and the auth cache cleared. A status with no email isn't checked. A failed logout is
+  #     DELETE /api/auth/accounts/{id}'s 500, and the row and dir stay
   # 422 {"detail":"Login failed: Invalid code"}: claude refused it; or the code isn't
   #     <code>#<state>, and the login stays pending
   # 500 {"detail":"claude auth login didn't finish"}: no exit within 60 s, so the login is stopped
