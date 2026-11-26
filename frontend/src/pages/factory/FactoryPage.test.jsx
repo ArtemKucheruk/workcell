@@ -2,6 +2,7 @@ import '../../test/reactflow.js'
 import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { cls, expectSkeleton, fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { optionLabels, pick } from '../../test/select.js'
 
 const URL = '/api/factories/7'
 const agent = (name, model, extra = {}) => ({
@@ -350,10 +351,10 @@ test('FE16: the side panel shows the selected node\'s fields by kind, and a hint
   expect(document.getElementById(name.getAttribute('aria-describedby')).textContent).toBe('a-z, 0-9, and -')
   expect(p.getByRole('textbox', { name: 'Description' }).value).toBe('The builder.')
   const model = p.getByRole('combobox', { name: 'Model' })
-  expect([...model.options].map((o) => o.value)).toEqual(['inherit', 'opus', 'sonnet', 'haiku'])
+  expect(optionLabels(model)).toEqual(['inherit', 'opus', 'sonnet', 'haiku'])
   expect(model.value).toBe('opus')
   const side = p.getByRole('combobox', { name: 'Side' })
-  expect([[...side.options].map((o) => o.value), side.value]).toEqual([['backend', 'frontend', 'both'], 'both'])
+  expect([optionLabels(side), side.value]).toEqual([['backend', 'frontend', 'both'], 'both'])
   expect(p.queryByRole('combobox', { name: 'Focus' })).toBeNull()
   expect(p.getByRole('textbox', { name: 'Tools' }).value).toBe('Read, Edit')
   const prompt = p.getByRole('textbox', { name: 'Prompt' })
@@ -362,7 +363,7 @@ test('FE16: the side panel shows the selected node\'s fields by kind, and a hint
 
   select('review-ux')
   const focus = panel().getByRole('combobox', { name: 'Focus' })
-  expect([[...focus.options].map((o) => o.value), focus.value]).toEqual([['security', 'ux', 'ui', 'code', 'custom'], 'ux'])
+  expect([optionLabels(focus), focus.value]).toEqual([['security', 'ux', 'ui', 'code', 'custom'], 'ux'])
   expect(panel().queryByRole('combobox', { name: 'Side' })).toBeNull()
 
   select('rounds')
@@ -400,7 +401,7 @@ test('FE17: an edit reaches the node at once: the card title follows Name, Tools
   const tools = panel().getByRole('textbox', { name: 'Tools' })
   fireEvent.change(tools, { target: { value: 'Read, Grep' } })
   expect(tools.value).toBe('Read, Grep')
-  fireEvent.change(panel().getByRole('combobox', { name: 'Model' }), { target: { value: 'haiku' } })
+  pick(panel().getByRole('combobox', { name: 'Model' }), 'haiku')
   expect(flowNode('builder').querySelector('[title="Builder · both · haiku"]')).toBeTruthy()
   fireEvent.click(save())
   await waitFor(() => expect(puts(fetch)).toHaveLength(1))

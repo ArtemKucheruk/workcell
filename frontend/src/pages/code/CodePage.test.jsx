@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { expect, test } from 'vitest'
 import { cls, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { openSelect, pick as pickValue } from '../../test/select.js'
 
 const API = '/api/pages/projects/3/code'
 /** 020's CodeProject, with 047's workspace and 090's web_url. */
@@ -42,9 +43,13 @@ const BOARD_PAGE = {
 }
 const h1 = () => document.querySelector('main h1')
 const picker = () => screen.queryByRole('combobox', { name: 'Branch' })
-/** The Branch select's options as [text, value] pairs. */
-const options = () => [...picker().options].map((o) => [o.textContent, o.value])
-const pick = (value) => fireEvent.change(picker(), { target: { value } })
+/** The Branch select's options as [text, value] pairs, read by opening it; Esc closes it again. */
+const options = () => {
+  const pairs = [...openSelect(picker()).querySelectorAll('[role="option"]')].map((o) => [o.textContent, o.dataset.value])
+  fireEvent.keyDown(picker(), { key: 'Escape' })
+  return pairs
+}
+const pick = (value) => pickValue(picker(), value)
 const hrefs = () => [...files().querySelectorAll('a')].map((a) => [a.textContent, a.getAttribute('href')])
 /** FE9's hrefs, with no browsed branch. */
 const PLAIN_HREFS = [
@@ -143,12 +148,14 @@ test('FE1: the header has a Branch select after the factory state: the checked-o
   const header = document.querySelector('main header')
   const factory = await within(header).findByText('Factory: ready ✓')
   const select = within(header).getByRole('combobox', { name: 'Branch' })
-  expect(select.tagName).toBe('SELECT')
+  expect(select.getAttribute('aria-haspopup')).toBe('listbox') // 107: the shared Select
   expect(factory.compareDocumentPosition(select) & FOLLOWING).toBeTruthy()
   expect(options()).toEqual([['main', ''], ['feature-x', 'feature-x'], ['origin/old', 'origin/old']])
   expect(select.value).toBe('')
-  expect(select.selectedOptions[0].textContent).toBe('main')
-  expect(screen.queryByText(fullText('Branch main'))).toBeNull()
+  expect(select.textContent).toBe('main')
+  expect(select.className).toMatch(cls('font-mono'))
+  // the old plain `Branch main` text is gone: only the line holding the Select reads so
+  expect(screen.queryAllByText(fullText('Branch main')).every((el) => el.contains(select))).toBe(true)
   expect(header.querySelector('code')).toBeNull()
   // round-1 review-ui: the header's flex item shrinks (min-w-0), so the select's max width holds on a 390 px screen
   expect(select.parentElement.className).toMatch(cls('min-w-0'))
@@ -162,7 +169,7 @@ test('AC2, FE2, FE3, FE12: "detached HEAD" is the first option, before every lis
   unmount()
   await open({ [`GET ${API}`]: [200, landing({ branch: null, branches: [] })] })
   expect(picker()).toBeNull()
-  expect(document.querySelector('main select')).toBeNull()
+  expect(document.querySelector('main [role="combobox"]')).toBeNull()
   expect(document.querySelector('main').textContent).not.toContain('Branch')
 })
 

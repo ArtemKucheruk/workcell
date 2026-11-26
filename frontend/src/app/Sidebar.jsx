@@ -8,6 +8,7 @@ import { ErrorMessage } from '../components/ErrorMessage.jsx'
 import { Actions, Item, menuItem } from '../components/Menu.jsx'
 import { useNewWorkspace, WorkspaceNameField } from '../components/NewWorkspace.jsx'
 import { Rename } from '../components/Rename.jsx'
+import { Select } from '../components/Select.jsx'
 import { field, muted, smallButton } from '../components/styles.js'
 import { NO_DATA, percent, STATE, UsageWindow, WINDOWS, worst } from '../components/UsageWindow.jsx'
 
@@ -320,7 +321,8 @@ function Projects({ workspace, open, onToggle, ...row }) {
 }
 
 /**
- * 049 FE2, FE9, FE15: the workspace `<select>` (or its rename field) and its `⋯` menu: Rename, Settings, and Delete.
+ * 049 FE2, FE9, FE15: the workspace picker (the shared Select since 107), or its rename field, and its `⋯` menu: Rename,
+ * Settings, and Delete.
  */
 function WorkspaceRow({ workspaces, workspace, selected, onSelect, selectId, onReload, go }) {
   const menu = `${useId().replace(/[^\w-]/g, '')}-workspace-menu`
@@ -346,18 +348,13 @@ function WorkspaceRow({ workspaces, workspace, selected, onSelect, selectId, onR
           onClose={closeRename}
         />
       ) : (
-        <select
+        <Select
           id={selectId}
           value={selected ?? ''}
-          onChange={(event) => onSelect(Number(event.target.value))}
-          className={`${field} w-full min-w-0 flex-1`}
-        >
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => onSelect(Number(value))}
+          options={workspaces.map((w) => ({ value: w.id, label: w.name }))}
+          className="w-full min-w-0 flex-1"
+        />
       )}
       {workspace && (
         <Actions ref={actions} id={menu} label={`Actions for workspace ${workspace.name}`}>

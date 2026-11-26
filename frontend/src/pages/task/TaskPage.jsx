@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { taskPage } from '../../api/pages.js'
 import { runTask, stopRun } from '../../api/runs.js'
@@ -14,8 +14,9 @@ import { NotFound } from '../../components/NotFound.jsx'
 import { PullRequest } from '../../components/PullRequest.jsx'
 import { RunLog } from '../../components/RunLog.jsx'
 import { RunMenu } from '../../components/RunMenu.jsx'
+import { Select } from '../../components/Select.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
-import { button, field, muted, popover, smallButton } from '../../components/styles.js'
+import { button, muted, popover, smallButton } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 import { TaskFlow } from './TaskFlow.jsx'
@@ -99,16 +100,18 @@ function ExportPopover({ id }) {
 }
 
 /**
- * 094 AC25–AC27: Blocked by lists every link, done ones too, each with Remove; Add picks from a native <select> of the
- * project's other tasks (Q8), minus the current blockers. Both reload the page; a refusal shows inside the section, and
- * the select, uncontrolled, keeps its pick through it and through polls. Blocks is read-only (Q9).
+ * 094 AC25–AC27: Blocked by lists every link, done ones too, each with Remove; Add picks from the shared Select (107) of
+ * the project's other tasks (Q8), minus the current blockers. Both reload the page; a refusal shows inside the section,
+ * and the pick, kept in state while this stays mounted, survives it and polls. Blocks is read-only (Q9).
+ * 107 Q5: a pick that became a blocker falls back to the first choice, as a native select's did.
  */
 function Dependencies({ page, onChange }) {
   const { task, blocked_by: blockers, blocks } = page
   const [error, setError] = useState(null)
-  const picked = useRef(null)
+  const [picked, setPicked] = useState(null)
   const taken = new Set(blockers.map((b) => b.id))
   const choices = page.project_tasks.filter((t) => !taken.has(t.id))
+  const shown = choices.find((t) => t.id === picked) ?? choices[0]
   async function change(call) {
     setError(null)
     try {
@@ -147,12 +150,14 @@ function Dependencies({ page, onChange }) {
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* htmlFor, not a wrapping label, so the picked option isn't part of the select's name */}
             <label htmlFor="blocker-pick">Wait on</label>
-            <select id="blocker-pick" ref={picked} className={`${field} max-w-full`}>
-              {choices.map((t) => (
-                <option key={t.id} value={t.id}>{`#${t.id} ${t.title}`}</option>
-              ))}
-            </select>
-            <ActionButton action={() => change(() => blockTask(task.id, picked.current.value))} className={smallButton}>
+            <Select
+              id="blocker-pick"
+              value={shown.id}
+              onChange={(value) => setPicked(Number(value))}
+              options={choices.map((t) => ({ value: t.id, label: `#${t.id} ${t.title}` }))}
+              className="max-w-full"
+            />
+            <ActionButton action={() => change(() => blockTask(task.id, String(shown.id)))} className={smallButton}>
               Add
             </ActionButton>
           </div>

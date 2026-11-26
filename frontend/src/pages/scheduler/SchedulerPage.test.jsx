@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { expectOfflineBanner, expectSkeleton, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { optionLabels, pick as pickValue } from '../../test/select.js'
 
 const BOARD = '/api/pages/projects/3'
 const LIST = '/api/projects/3/schedules'
@@ -59,9 +60,8 @@ const calls = (fetch, method, url) => fetch.mock.calls.filter(([u, init]) => u =
 const sent = (fetch, method, url) => calls(fetch, method, url).map(([, init]) => JSON.parse(init.body))
 const form = () => document.getElementById('schedule-form')
 const inForm = () => within(form())
-const pick = (name, value) => fireEvent.change(inForm().getByRole('combobox', { name, hidden: true }), { target: { value } })
-const options = (name) =>
-  within(inForm().getByRole('combobox', { name, hidden: true })).getAllByRole('option', { hidden: true }).map((o) => o.textContent)
+const pick = (name, value) => pickValue(inForm().getByRole('combobox', { name, hidden: true }), value)
+const options = (name) => optionLabels(inForm().getByRole('combobox', { name, hidden: true }))
 const submit = (label = 'Create') => fireEvent.click(inForm().getByRole('button', { name: label, hidden: true }))
 const timeInput = () => form().querySelector('input[type="time"]')
 
@@ -184,7 +184,7 @@ test('104 AC27: Edit opens the form with the automation fixed and the preset fro
   expect(edit.getAttribute('popovertarget')).toBe('schedule-form')
   fireEvent.click(edit)
   const automation = inForm().getByRole('combobox', { name: 'Automation', hidden: true })
-  expect([automation.disabled, options('Automation')]).toEqual([true, ['Security audit']])
+  expect([automation.disabled, automation.textContent]).toEqual([true, 'Security audit'])
   expect(inForm().getByRole('combobox', { name: 'Repeat', hidden: true }).value).toBe('weekly')
   expect(inForm().getByRole('combobox', { name: 'Weekday', hidden: true }).value).toBe('1')
   expect(timeInput().value).toBe('09:00')

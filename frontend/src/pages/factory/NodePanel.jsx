@@ -1,4 +1,5 @@
 import { useId, useState } from 'react'
+import { Select } from '../../components/Select.jsx'
 import { field, muted } from '../../components/styles.js'
 import { Icon, isAgent, KINDS, tint } from './graph.jsx'
 
@@ -9,16 +10,20 @@ const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/
 const label = 'grid gap-1 text-sm font-medium'
 const input = `${field} w-full text-sm font-normal`
 
+/** 107 Q2: the shared Select, named by its span; a wrapping label would add the option's text to the name. */
 function Choice({ name, value, options, onChange }) {
+  const id = `${useId().replace(/[^\w-]/g, '')}-label`
   return (
-    <label className={label}>
-      {name}
-      <select value={value} onChange={(event) => onChange(event.target.value)} className={input}>
-        {options.map((option) => (
-          <option key={option}>{option}</option>
-        ))}
-      </select>
-    </label>
+    <div className={label}>
+      <span id={id}>{name}</span>
+      <Select
+        aria-labelledby={id}
+        value={value}
+        onChange={onChange}
+        options={options.map((option) => ({ value: option, label: option }))}
+        className="w-full text-sm font-normal"
+      />
+    </div>
   )
 }
 

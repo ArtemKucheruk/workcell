@@ -7,6 +7,7 @@ import { FactoryForm, FactoryResult, FileList } from '../../components/FactoryRe
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Select } from '../../components/Select.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Rows, Skeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, section } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
@@ -188,14 +189,16 @@ function MoveProject({ project, workspaces, onDone }) {
   }
   return (
     <form onSubmit={submit} className="flex flex-wrap items-center gap-3">
-      <label className="flex items-center gap-2">
-        Workspace
-        <select name="workspace_id" defaultValue={project.workspace_id} className={field}>
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>{w.name}</option>
-          ))}
-        </select>
-      </label>
+      {/* 107 Q2: named by its span, not a wrapping label, which would add the option's text to its name */}
+      <div className="flex items-center gap-2">
+        <span id={`move-${project.id}-workspace`}>Workspace</span>
+        <Select
+          aria-labelledby={`move-${project.id}-workspace`}
+          name="workspace_id"
+          defaultValue={project.workspace_id}
+          options={workspaces.map((w) => ({ value: w.id, label: w.name }))}
+        />
+      </div>
       <button disabled={busy} className={button}>
         Move
       </button>

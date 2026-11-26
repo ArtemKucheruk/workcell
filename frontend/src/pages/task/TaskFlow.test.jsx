@@ -2,6 +2,7 @@ import '../../test/reactflow.js'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { cls, fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { optionLabels, pick } from '../../test/select.js'
 
 // 089: the task page's Factory section (TaskFlow), rendered through the page with both APIs mocked
 
@@ -207,12 +208,12 @@ test('AC26: nodes are tab stops; Enter on one opens its panel and Esc in the pan
 test('AC27: the Round select lists the rounds, defaults to the latest, and refetches with ?round=; the panel follows', async () => {
   const { fetch } = await open(ROUND2, { [`GET ${FLOW}?round=1`]: [200, ROUND1] })
   const select = screen.getByRole('combobox', { name: 'Round' })
-  expect(select.tagName).toBe('SELECT')
-  expect([...select.options].map((o) => o.value)).toEqual(['1', '2'])
+  expect(select.id).toBe('flow-round')
+  expect(optionLabels(select)).toEqual(['1', '2'])
   expect(select.value).toBe('2')
   fireEvent.click(flowNode('review-code'))
   expect(within(region('review-code result')).getByText('No verdict yet.')).toBeTruthy()
-  fireEvent.change(select, { target: { value: '1' } })
+  pick(select, '1')
   await waitFor(() => expect(flowNode('review-code').textContent).toContain('CHANGES'))
   expect(flowLoads(fetch)).toEqual([FLOW, `${FLOW}?round=1`])
   expect(select.value).toBe('1')

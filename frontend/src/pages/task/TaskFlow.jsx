@@ -4,7 +4,8 @@ import { Link } from 'react-router'
 import { taskFlow } from '../../api/pages.js'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
-import { field, muted, smallButton } from '../../components/styles.js'
+import { Select } from '../../components/Select.jsx'
+import { muted, smallButton } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 import { CONDITIONS, edgeTypes, nodeTypes, STATES, stateIcon, title } from '../factory/graph.jsx'
 
@@ -178,18 +179,12 @@ export function TaskFlow({ taskId, running }) {
         <label htmlFor="flow-round" className="text-sm">
           Round
         </label>
-        <select
+        <Select
           id="flow-round"
           value={picked ?? flow.round}
-          onChange={(event) => setPicked(Number(event.target.value))}
-          className={field}
-        >
-          {flow.rounds.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
+          onChange={(value) => setPicked(Number(value))}
+          options={flow.rounds.map((n) => ({ value: n, label: n }))}
+        />
       </div>
       <div className="mt-2 flex flex-col overflow-hidden rounded-lg border border-line md:flex-row">
         {/* Q8: a fixed 20rem box; panning and zooming stay on */}

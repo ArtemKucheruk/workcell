@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { fetched, fullText, mockFetch, renderAt } from '../test/render.jsx'
+import { pick } from '../test/select.js'
 
 const SIDEBAR = '/api/pages/sidebar'
 const KEY = 'sidebar.workspace'
@@ -17,7 +18,7 @@ afterEach(() => vi.restoreAllMocks())
 
 const sidebar = () => within(screen.getByRole('navigation', { name: 'Sidebar' }))
 const workspace = () => sidebar().findByRole('combobox', { name: 'Workspace' })
-const shown = (select) => select.selectedOptions[0].textContent
+const shown = (select) => select.textContent // 107: the Select shows its option's label
 const projectButton = (name) => sidebar().queryByRole('button', { name })
 /** The Board and Code list a project's button controls. */
 const linksOf = (name) => within(document.getElementById(projectButton(name).getAttribute('aria-controls')))
@@ -99,7 +100,7 @@ test("FE9: choosing work lists its projects and stores 5 without navigating; a t
     }
     const { select, router, unmount } = await open('/')
     expect(shown(select)).toBe('personal')
-    fireEvent.change(select, { target: { value: '5' } })
+    pick(select, '5')
     expect(shown(select)).toBe('work')
     expect(projectButton('billing')).toBeTruthy()
     expect(projectButton('api-server')).toBeNull()
@@ -373,7 +374,7 @@ test('049 FE2: beside the workspace select, Actions for workspace personal opens
   expect(itemsOf(menu)).toEqual(['BUTTON Rename', 'A Settings', 'HR', 'BUTTON Delete'])
   expect(within(menu).getByRole('link', { name: 'Settings', hidden: true }).getAttribute('href')).toBe('/workspaces/2/settings')
   expect(within(menu).getByRole('button', { name: 'Delete', hidden: true }).className).toMatch(/(^|\s)text-danger(\s|$)/)
-  fireEvent.change(select, { target: { value: '5' } })
+  pick(select, '5')
   expect(actionsOf('workspace work')).toBe(actions) // it follows the selected workspace
 })
 
