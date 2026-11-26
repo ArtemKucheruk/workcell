@@ -42,6 +42,7 @@ class ApproveBody(BaseModel):
 class ApproveOut(BaseModel):
     status: str
     commit_hint: str
+    plane_warning: str | None = None  # 109 AC14: the approve stands; why the Plane item wasn't marked done
 
 
 class ChangesBody(BaseModel):

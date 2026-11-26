@@ -482,6 +482,132 @@ test('108 AC30: with a github.com origin a muted line names the repo; without on
   expect(labelBox().disabled).toBe(false) // the label can still be saved
 })
 
+// --- Plane (109) -----------------------------------------------------------------------------
+
+const PLANE_SYNC = '/api/projects/3/plane/sync'
+const PLANE_LINE = 'Synced Plane: 2 new, 1 updated, 5 skipped'
+const NO_PLANE = { plane_api_url: null, plane_workspace: null, plane_project_id: null, plane_mark_done: false, plane_key_set: false }
+const PLANE_SET = { plane_api_url: 'https://plane.example.com', plane_workspace: 'acme', plane_project_id: 'p-1', plane_mark_done: true, plane_key_set: true }
+const planeBoard = (plane = NO_PLANE) => board({ project: { ...PROJECT, ...plane } })
+const planeSection = () => within(section('Plane'))
+const box = (name) => planeSection().getByLabelText(name)
+const planeSync = () => planeSection().getByRole('button', { name: 'Sync now' })
+const patched = (plane) => [200, { id: 3, workspace_id: 2, name: 'api', test_cmd: 'pytest -q', github_label: null, ...plane }]
+
+test('109 AC17: Plane follows GitHub issues with API URL (default https://api.plane.so), Workspace slug, Project ID, Mark done in Plane, and Save (PATCH, Saved., reload)', async () => {
+  const { fetch, responses } = await open(planeBoard(), { 'PATCH /api/projects/3': patched({ ...PLANE_SET, plane_key_set: true }) })
+  const regions = screen.getAllByRole('region')
+  expect(regions.indexOf(section('Plane'))).toBe(regions.indexOf(section('GitHub issues')) + 1)
+  expect(box('API URL').value).toBe('https://api.plane.so')
+  expect([box('Workspace slug').value, box('Project ID').value, box('Mark done in Plane').checked]).toEqual(['', '', false])
+  fireEvent.change(box('API URL'), { target: { value: 'https://plane.example.com/' } })
+  fireEvent.change(box('Workspace slug'), { target: { value: 'acme' } })
+  fireEvent.change(box('Project ID'), { target: { value: 'p-1' } })
+  fireEvent.change(box('API key'), { target: { value: 'k-123' } })
+  fireEvent.click(box('Mark done in Plane'))
+  responses[`GET ${BOARD}`] = [200, planeBoard(PLANE_SET)]
+  fireEvent.click(planeSection().getByRole('button', { name: 'Save' }))
+  const saved = await planeSection().findByText('Saved.')
+  expect(saved.closest('[aria-live]').getAttribute('aria-live')).toBe('polite')
+  expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({
+    plane_api_url: 'https://plane.example.com/', plane_workspace: 'acme', plane_project_id: 'p-1', plane_mark_done: true,
+    plane_api_key: 'k-123',
+  })
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(box('API URL').value).toBe('https://plane.example.com')
+})
+
+test('109 AC17: a refused Plane save shows as an alert in the section and keeps what was typed', async () => {
+  const detail = 'plane_api_url must be an http(s) URL like https://api.plane.so'
+  const { fetch } = await open(planeBoard(), { 'PATCH /api/projects/3': [422, { detail }] })
+  fireEvent.change(box('API URL'), { target: { value: 'ftp://x' } })
+  fireEvent.click(planeSection().getByRole('button', { name: 'Save' }))
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe(detail)
+  expect(alert.closest('section')).toBe(section('Plane'))
+  expect(box('API URL').value).toBe('ftp://x')
+  expect(loads(fetch)).toBe(1)
+})
+
+test('109 AC18: the API key is write-only: an empty password input when not set; `API key: set` with Replace and Clear when set', async () => {
+  const leak = 'plane_api_LEAK_should_never_render'
+  const { unmount } = await open(planeBoard())
+  expect(box('API key').type).toBe('password')
+  expect(box('API key').value).toBe('')
+  unmount()
+  const { fetch, responses } = await open(board({ project: { ...PROJECT, ...PLANE_SET, plane_api_key: leak } }), {
+    'PATCH /api/projects/3': patched({ ...PLANE_SET }),
+  })
+  expect(document.body.innerHTML).not.toContain(leak)
+  expect(planeSection().getByText('API key: set')).toBeTruthy()
+  expect(planeSection().queryByLabelText('API key')).toBeNull()
+  fireEvent.click(planeSection().getByRole('button', { name: 'Replace' }))
+  expect(box('API key').type).toBe('password')
+  expect(box('API key').value).toBe('')
+  fireEvent.change(box('API key'), { target: { value: 'new-key' } })
+  fireEvent.click(planeSection().getByRole('button', { name: 'Save' }))
+  await planeSection().findByText('Saved.')
+  expect(sent(fetch, 'PATCH', '/api/projects/3').plane_api_key).toBe('new-key')
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  fetch.mockClear()
+  responses['PATCH /api/projects/3'] = patched({ ...PLANE_SET, plane_key_set: false })
+  responses[`GET ${BOARD}`] = [200, planeBoard({ ...PLANE_SET, plane_key_set: false })]
+  fireEvent.click(planeSection().getByRole('button', { name: 'Clear' }))
+  await waitFor(() => expect(planeSection().queryByText('API key: set')).toBeNull())
+  expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ plane_api_key: '' })
+  expect(box('API key').value).toBe('')
+})
+
+test('109 AC18: Save without a typed key leaves the stored key alone', async () => {
+  const { fetch } = await open(planeBoard(PLANE_SET), { 'PATCH /api/projects/3': patched(PLANE_SET) })
+  fireEvent.click(planeSection().getByRole('button', { name: 'Save' }))
+  await planeSection().findByText('Saved.')
+  expect(Object.keys(sent(fetch, 'PATCH', '/api/projects/3'))).not.toContain('plane_api_key')
+})
+
+test('109 AC19: Sync now is disabled until URL, slug, project ID are saved and a key is set', async () => {
+  for (const missing of ['plane_api_url', 'plane_workspace', 'plane_project_id', 'plane_key_set']) {
+    const { fetch, unmount } = await open(planeBoard({ ...PLANE_SET, [missing]: missing === 'plane_key_set' ? false : null }))
+    expect(planeSync().disabled).toBe(true)
+    fireEvent.click(planeSync())
+    expect(sends(fetch, 'POST', PLANE_SYNC)).toHaveLength(0)
+    unmount()
+  }
+  await open(planeBoard(PLANE_SET))
+  expect(planeSync().disabled).toBe(false)
+})
+
+test('109 AC19: Sync now posts {}, is disabled while pending, says the counts in a polite region cleared as a sync starts, and reloads', async () => {
+  const { fetch } = await open(planeBoard(PLANE_SET), { [`POST ${PLANE_SYNC}`]: [200, { new: 2, updated: 1, skipped: 5 }] })
+  fireEvent.click(planeSync())
+  const line = await planeSection().findByText(PLANE_LINE)
+  expect(line.closest('[aria-live]').getAttribute('aria-live')).toBe('polite')
+  expect(sent(fetch, 'POST', PLANE_SYNC)).toEqual({})
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  const reply = fetch.getMockImplementation()
+  let release
+  const gate = new Promise((resolve) => (release = resolve))
+  fetch.mockImplementation((url, init) => (url === PLANE_SYNC ? gate.then(() => reply(url, init)) : reply(url, init)))
+  fireEvent.click(planeSync())
+  expect(planeSync().disabled).toBe(true)
+  expect(planeSection().queryByText(PLANE_LINE)).toBeNull()
+  release()
+  expect(await planeSection().findByText(PLANE_LINE)).toBeTruthy()
+  expect(planeSync().disabled).toBe(false)
+})
+
+test('109 AC19: a refused sync shows its detail as an alert in the Plane section and does not reload', async () => {
+  const detail = 'Plane refused the API key: check it in project Settings'
+  const { fetch } = await open(planeBoard(PLANE_SET), { [`POST ${PLANE_SYNC}`]: [409, { detail }] })
+  fireEvent.click(planeSync())
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe(detail)
+  expect(alert.closest('section')).toBe(section('Plane'))
+  expect(screen.queryByText(/^Synced Plane/)).toBeNull()
+  await waitFor(() => expect(planeSync().disabled).toBe(false))
+  expect(loads(fetch)).toBe(1)
+})
+
 // --- Move (board AC27–AC28, moved) -------------------------------------------------------
 
 test('FE31 (AC27), 049 Q13: Move lists the workspaces, patches the chosen one, the header follows the reload, and so does the sidebar', async () => {

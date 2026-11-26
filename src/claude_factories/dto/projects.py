@@ -31,8 +31,14 @@ class ProjectPatch(BaseModel):
     name: str | None = None
     test_cmd: str | None = None
     github_label: str | None = None  # 108 AC2: stored trimmed, blank clears it
+    plane_api_url: str | None = None  # 109 AC2: the same, and without a trailing /
+    plane_workspace: str | None = None
+    plane_project_id: str | None = None
+    plane_api_key: str | None = None  # 109 AC5: write-only; "" clears it
+    plane_mark_done: bool | None = None
 
-    @field_validator("workspace_id", "name", "test_cmd", "github_label")
+    @field_validator("workspace_id", "name", "test_cmd", "github_label", "plane_api_url", "plane_workspace",
+                     "plane_project_id", "plane_api_key", "plane_mark_done")
     @classmethod
     def not_null(cls, value):
         """048's TaskPatch.not_null: a sent null gets FastAPI's list detail; an omitted key stays None."""
@@ -47,6 +53,11 @@ class ProjectPatched(BaseModel):
     name: str
     test_cmd: str | None
     github_label: str | None  # 108
+    plane_api_url: str | None  # 109 AC4: never the key, only whether one is set
+    plane_workspace: str | None
+    plane_project_id: str | None
+    plane_mark_done: bool
+    plane_key_set: bool
 
 
 class ContextBody(BaseModel):

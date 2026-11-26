@@ -11,6 +11,7 @@ from fastapi import Depends
 from .. import db
 from ..adapters.claude import Claude, SubprocessClaude
 from ..adapters.git import Git, SubprocessGit
+from ..adapters.plane import Plane
 from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.context_items import ContextItemsRepo
 from ..repositories.factories import FactoriesRepo
@@ -100,6 +101,10 @@ def get_claude() -> Claude:
     return SubprocessClaude()
 
 
+def get_plane() -> Plane:
+    return Plane()
+
+
 Workspaces = Annotated[WorkspacesRepo, Depends(get_workspaces)]
 Projects = Annotated[ProjectsRepo, Depends(get_projects)]
 Tasks = Annotated[TasksRepo, Depends(get_tasks)]
@@ -115,3 +120,4 @@ Modules = Annotated[ModulesRepo, Depends(get_modules)]
 Usage = Annotated[UsageRepo, Depends(get_usage)]
 GitAdapter = Annotated[Git, Depends(get_git)]
 ClaudeAdapter = Annotated[Claude, Depends(get_claude)]
+PlaneAdapter = Annotated[Plane, Depends(get_plane)]  # 109

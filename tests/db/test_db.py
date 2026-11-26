@@ -231,7 +231,35 @@ def test_old_db_gets_github_label():  # 108 AC1
         assert conn.execute("SELECT id, github_label FROM projects").fetchall() == [(1, None)]
     schema = (Path(db.__file__).with_name("schema.sql")).read_text()
     projects = schema[schema.index("CREATE TABLE IF NOT EXISTS projects"):schema.index("CREATE TABLE IF NOT EXISTS tasks")]
-    assert "github_label TEXT)" in projects
+    assert "github_label TEXT," in projects
+
+
+PLANE_COLUMNS = {"plane_api_url": ("TEXT", 0, None), "plane_workspace": ("TEXT", 0, None),
+                 "plane_project_id": ("TEXT", 0, None), "plane_api_key": ("TEXT", 0, None),
+                 "plane_mark_done": ("INTEGER", 1, "0")}
+
+
+def plane_columns(conn) -> dict:
+    return {name: (kind, notnull, default) for _, name, kind, notnull, default, _ in
+            conn.execute("PRAGMA table_info(projects)") if name.startswith("plane_")}
+
+
+def test_old_db_gets_plane_columns():  # 109 AC1
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    start_app()
+    start_app()  # a second startup finds them there
+    with closing(db.connect()) as conn:
+        assert plane_columns(conn) == PLANE_COLUMNS
+        assert conn.execute("SELECT id, plane_api_key, plane_mark_done FROM projects").fetchall() == [(1, None, 0)]
+
+
+def test_fresh_db_has_plane_columns():  # 109 AC1
+    start_app()
+    with closing(db.connect()) as conn:
+        assert plane_columns(conn) == PLANE_COLUMNS
 
 
 def test_startup_adds_task_deps():  # 094 AC1

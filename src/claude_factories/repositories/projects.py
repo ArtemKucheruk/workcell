@@ -5,6 +5,9 @@ import sqlite3
 from .. import db
 from .tasks import TILE_TASKS
 
+# 109 AC4: the Plane settings a reply or page may carry; never plane_api_key itself
+PLANE = "plane_api_url, plane_workspace, plane_project_id, plane_mark_done, plane_api_key IS NOT NULL AS plane_key_set"
+
 
 class ProjectsRepo:
     def __init__(self, conn: sqlite3.Connection):
@@ -40,7 +43,7 @@ class ProjectsRepo:
         project."""
         sets = ", ".join(f"{column} = :{column}" for column in fields)
         return self.conn.execute(
-            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, test_cmd, github_label",
+            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, test_cmd, github_label, {PLANE}",
             fields | {"id": project_id},
         ).fetchone()
 
@@ -88,7 +91,7 @@ class ProjectsRepo:
     def for_board(self, project_id: int) -> sqlite3.Row | None:
         return self.conn.execute(
             "SELECT p.id, p.name, p.path, p.default_branch, p.workspace_id, w.name AS workspace, p.remote_url,"
-            " p.test_cmd, p.github_label FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
+            f" p.test_cmd, p.github_label, {PLANE} FROM projects p JOIN workspaces w ON w.id = p.workspace_id WHERE p.id = ?",
             (project_id,),
         ).fetchone()
 
@@ -110,6 +113,12 @@ class ProjectsRepo:
     def for_issues(self, project_id: int) -> sqlite3.Row | None:
         """108: what GitHub issues sync needs: the main checkout's path and the saved label."""
         return self.conn.execute("SELECT path, github_label FROM projects WHERE id = ?", (project_id,)).fetchone()
+
+    def for_plane(self, project_id: int) -> sqlite3.Row | None:
+        """109: what Plane sync and mark done need, the key included; for the adapter only, never a reply."""
+        return self.conn.execute(
+            "SELECT plane_api_url, plane_workspace, plane_project_id, plane_api_key, plane_mark_done FROM projects"
+            " WHERE id = ?", (project_id,)).fetchone()
 
     def set_factory_sync(self, project_id: int, mark: str | None, error: str | None) -> None:
         self.conn.execute("UPDATE projects SET factory_mark = ?, factory_error = ? WHERE id = ?",

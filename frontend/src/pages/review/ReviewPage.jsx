@@ -336,14 +336,15 @@ const DECISIONS = [
  * summary goes with either choice; Request changes needs one. Q5: no radio starts chosen, so Submit waits for one. Q6: a
  * success hides and resets the popover, a refusal shows inside it and keeps its input, and the page refetches either way.
  */
-function ReviewChanges({ task, off, onDone }) {
+function ReviewChanges({ task, off, onDone, onApproved }) {
   const [summary, setSummary] = useState('')
   const [choice, setChoice] = useState(null)
   const [error, setError] = useState(null)
   const box = useRef(null)
   async function submit() {
     try {
-      await (choice === 'approve' ? approveTask(task.id, summary) : requestChanges(task.id, summary))
+      if (choice === 'approve') onApproved(await approveTask(task.id, summary))
+      else await requestChanges(task.id, summary)
       setSummary('')
       setChoice(null)
       setError(null)
@@ -487,6 +488,9 @@ export function ReviewPage() {
   const refresh = useCallback(() => setTick((n) => n + 1), [])
   const load = useCallback(() => reviewPage(id, round), [id, round, tick])
   const { data: page, error } = usePoll(load)
+  // 109 AC20: Approve's plane_warning, kept in page state so the refetch after it doesn't drop it; only this task's
+  const [warned, setWarned] = useState(null)
+  const planeWarning = warned?.id === id ? warned.text : null
   const heading = page && `#${page.task.id} ${page.task.title}`
   useEffect(() => {
     if (heading) document.title = `${heading} · Review · Claude Factories`
@@ -528,7 +532,12 @@ export function ReviewPage() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <h1 className="mr-auto wrap-anywhere">{heading}</h1>
           {page.pr && <PullRequest key={task.id} taskId={task.id} pr={page.pr} onChange={refresh} />}
-          <ReviewChanges task={task} off={off} onDone={refresh} />
+          <ReviewChanges
+            task={task}
+            off={off}
+            onDone={refresh}
+            onApproved={(out) => setWarned({ id, text: out?.plane_warning ?? null })}
+          />
         </div>
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <TaskState task={task} />
@@ -553,6 +562,15 @@ export function ReviewPage() {
         </p>
       </header>
       {error && <ErrorMessage error={error} />}
+      {/* 109 AC20, Q6: the approve stood; the icon and the words both say Plane wasn't updated */}
+      <div aria-live="polite">
+        {planeWarning && (
+          <p className="mb-6 flex items-baseline gap-2 font-medium text-warning">
+            <span aria-hidden="true">⚠</span>
+            {planeWarning}
+          </p>
+        )}
+      </div>
       {task.commit_hint && <CommitHint hint={task.commit_hint} />}
       <nav aria-label="Review tabs" className="mb-6 flex gap-4 border-b border-line">
         <Link to={tabHref()} aria-current={onFiles ? undefined : 'page'} className={tab}>

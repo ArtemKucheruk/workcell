@@ -8,8 +8,9 @@ from fastapi import APIRouter, HTTPException, Request
 from ..dto.github_issues import IssuesSynced
 from ..dto.projects import ConnectBody, ConnectOut, ContextBody, ContextOut, ProjectOut, ProjectPatch, ProjectPatched
 from ..handlers import github_issues
+from ..handlers import plane as plane_handler
 from ..handlers import projects as handler
-from ..server.deps import GitAdapter, Projects, Runs, Tasks, Workspaces, transaction
+from ..server.deps import GitAdapter, PlaneAdapter, Projects, Runs, Tasks, Workspaces, transaction
 
 router = APIRouter()
 
@@ -49,6 +50,12 @@ def delete_project(project_id: int, projects: Projects, tasks: Tasks, runs: Runs
 def sync_github_issues(project_id: int, git: GitAdapter) -> IssuesSynced:
     """108 Q1: the handler opens its own transactions, so no write lock is held while gh runs (AC19)."""
     return github_issues.sync(transaction, git, project_id)
+
+
+@router.post("/api/projects/{project_id}/plane/sync")
+def sync_plane(project_id: int, plane: PlaneAdapter) -> IssuesSynced:
+    """109 AC11: the handler opens its own transactions, so no write lock is held while Plane answers."""
+    return plane_handler.sync(transaction, plane, project_id)
 
 
 @router.get("/api/projects/{project_id}/context")

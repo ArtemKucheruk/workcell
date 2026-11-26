@@ -143,3 +143,96 @@ def client():
     # base_url sets Host: 127.0.0.1:4545, which passes the Host check
     with TestClient(create_app(), base_url="http://127.0.0.1:4545") as c:
         yield c
+
+
+# --- 109: a fake Plane API v1 on a local http.server --------------------------------------------
+
+PLANE_KEY = "plane_api_SECRET_1234567890"
+
+
+class FakePlane:
+    """Workspace `acme`, project `p-1` (identifier ENG), with `states` and `items`, listed `page` at a time with
+    Plane's cursor fields. `fail[<suffix>]` answers a status (int), `"html"` (200, not JSON) or `"slow"` for the
+    path after the project's (`""`, `"states/"`, `"work-items/"`, `"work-items/<id>/"`). `old` makes `work-items/`
+    a 404, as before the rename. Every request lands in `requests` as {method, path, query, key, body}."""
+
+    def __init__(self):
+        self.states = [{"id": "s-b", "group": "backlog", "sequence": 1}, {"id": "s-u", "group": "unstarted",
+                       "sequence": 2}, {"id": "s-s", "group": "started", "sequence": 3},
+                       {"id": "s-d2", "group": "completed", "sequence": 9}, {"id": "s-d", "group": "completed",
+                       "sequence": 5}, {"id": "s-t", "group": "triage", "sequence": 0}]
+        self.items, self.page, self.fail, self.old, self.requests = [], 2, {}, False, []
+        self.url = None
+
+    def answer(self, h, method):
+        from urllib.parse import parse_qs, urlsplit
+        parts = urlsplit(h.path)
+        length = int(h.headers.get("Content-Length") or 0)
+        body = json.loads(h.rfile.read(length)) if length else None
+        self.requests.append({"method": method, "path": parts.path, "query": parse_qs(parts.query),
+                              "key": h.headers.get("X-API-Key"), "body": body})
+        base = "/api/v1/workspaces/acme/projects/p-1/"
+        if not parts.path.startswith(base):
+            return 404, {"detail": "Not found."}
+        rest = parts.path[len(base):]
+        fail = self.fail.get(rest)
+        if fail == "slow":
+            import time
+            time.sleep(1)
+        if fail == "html":
+            return 200, "<html>nope</html>"
+        if isinstance(fail, int):
+            return fail, {"detail": "no"}
+        if rest == "":
+            return 200, {"id": "p-1", "identifier": "ENG", "name": "Engineering"}
+        listing = {"states/": self.states, "issues/": self.items, "work-items/": None if self.old else self.items}
+        if rest in listing and listing[rest] is not None and method == "GET":
+            cursor = parse_qs(parts.query).get("cursor", ["2:0:0"])[0]
+            start = int(cursor.split(":")[1]) * self.page
+            more = start + self.page < len(listing[rest])
+            return 200, {"results": listing[rest][start:start + self.page], "next_page_results": more,
+                         "next_cursor": f"{self.page}:{start // self.page + 1}:0", "prev_page_results": start > 0,
+                         "count": len(listing[rest][start:start + self.page])}
+        if method == "PATCH" and (rest.startswith("work-items/") and not self.old or rest.startswith("issues/")):
+            return 200, {"id": rest.split("/")[1], "state": (body or {}).get("state")}
+        return 404, {"detail": "Not found."}
+
+
+@pytest.fixture
+def plane(monkeypatch):
+    """A FakePlane serving on 127.0.0.1; its `url` is what project Settings would hold."""
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    fake = FakePlane()
+
+    class Handler(BaseHTTPRequestHandler):
+        def reply(self, method):
+            status, data = fake.answer(self, method)
+            raw = data.encode() if isinstance(data, str) else json.dumps(data).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def do_GET(self):
+            self.reply("GET")
+
+        def do_PATCH(self):
+            self.reply("PATCH")
+
+        def log_message(self, *args):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    fake.url = f"http://127.0.0.1:{srv.server_address[1]}"
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield fake
+    srv.shutdown()
+    srv.server_close()
+
+
+def plane_item(n, state="s-b", name=None, description=None):
+    return {"id": f"item-{n}", "name": name or f"Item {n}", "sequence_id": n, "state": state,
+            "description_stripped": f"About {n}\n" if description is None else description}

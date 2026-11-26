@@ -222,7 +222,8 @@ def test_move_project(client):  # 020 AC30
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = client.patch(f"/api/projects/{pid}", json={"workspace_id": work}, headers=H)
     assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "api",
-                                              "test_cmd": "pytest -q", "github_label": None})  # 049 BE9: the whole project
+                                              "test_cmd": "pytest -q", "github_label": None,
+                                              **NO_PLANE})  # 049 BE9: the whole project
     assert project_workspace(pid) == work
 
 
@@ -263,7 +264,7 @@ def test_rename_project(client):  # 049 BE1
     before = stored(pid)
     r = patch(client, pid, {"name": "  api2  "})
     assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": before[0], "name": "api2",
-                                              "test_cmd": "pytest -q", "github_label": None})
+                                              "test_cmd": "pytest -q", "github_label": None, **NO_PLANE})
     assert stored(pid) == (before[0], "api2", *before[2:])
 
 
@@ -282,7 +283,7 @@ def test_patch_all_three(client):  # 049 BE3
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = patch(client, pid, {"workspace_id": work, "name": "x", "test_cmd": "y"})
     assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "x", "test_cmd": "y",
-                                              "github_label": None})
+                                              "github_label": None, **NO_PLANE})
     assert stored(pid)[:2] == (work, "x")
     assert stored(pid)[5] == "y"
 
@@ -311,7 +312,9 @@ def test_patch_project_nothing_sent(client, body):  # 049 BE6
     before = stored(pid)
     r = patch(client, pid, body)
     assert (r.status_code, r.json()) == (422, {"detail": "send at least one of: workspace_id, name, test_cmd,"
-                                                         " github_label"})  # 108 AC4
+                                                         " github_label, plane_api_url, plane_workspace,"
+                                                         " plane_project_id, plane_api_key,"
+                                                         " plane_mark_done"})  # 108 AC4, 109 Q2
     assert stored(pid) == before
 
 
@@ -333,6 +336,61 @@ def test_patch_github_label_blank(client):  # 108 AC3
     r = patch(client, pid, {"github_label": "  "})
     assert (r.status_code, r.json()["github_label"]) == (200, None)
     assert label(pid) is None
+
+
+NO_PLANE = {"plane_api_url": None, "plane_workspace": None, "plane_project_id": None, "plane_mark_done": False,
+            "plane_key_set": False}  # 109 AC4
+SECRET = "plane_api_SECRET_1234567890"
+
+
+def plane_row(pid):
+    return sql("SELECT plane_api_url, plane_workspace, plane_project_id, plane_api_key, plane_mark_done FROM projects"
+               " WHERE id = ?", (pid,))[0]
+
+
+def test_patch_plane_settings(client):  # 109 AC2
+    pid = connect(client)["id"]
+    before = stored(pid)
+    r = patch(client, pid, {"plane_api_url": " https://plane.example.com/// ", "plane_workspace": " acme ",
+                            "plane_project_id": " p-1 ", "plane_api_key": f" {SECRET} ", "plane_mark_done": True,
+                            "name": "api"})
+    assert r.status_code == 200, r.text
+    assert plane_row(pid) == ("https://plane.example.com", "acme", "p-1", SECRET, 1)
+    assert stored(pid) == before
+    assert {k: r.json()[k] for k in NO_PLANE} == {
+        "plane_api_url": "https://plane.example.com", "plane_workspace": "acme", "plane_project_id": "p-1",
+        "plane_mark_done": True, "plane_key_set": True}
+    r = patch(client, pid, {"plane_workspace": "  ", "plane_api_url": "", "plane_mark_done": False})
+    assert r.status_code == 200 and plane_row(pid) == (None, None, "p-1", SECRET, 0)  # blank stores NULL
+
+
+@pytest.mark.parametrize("url", ["ftp://plane.example.com", "plane.example.com", "https://", "https://u:p@x.io",
+                                 "https://x.io?a=1", "javascript:alert(1)", "https://x.io:99999"])
+def test_patch_plane_url_refused(client, url):  # 109 AC3
+    pid = connect(client)["id"]
+    r = patch(client, pid, {"plane_api_url": url, "plane_workspace": "acme"})
+    assert (r.status_code, r.json()) == (422, {"detail": "plane_api_url must be an http(s) URL like"
+                                                         " https://api.plane.so"})
+    assert plane_row(pid) == (None, None, None, None, 0)
+
+
+def test_patch_plane_key_never_returned(client):  # 109 AC4
+    pid = connect(client)["id"]
+    r = patch(client, pid, {"plane_api_key": SECRET})
+    assert SECRET not in r.text and "plane_api_key" not in r.json() and r.json()["plane_key_set"] is True
+    page = client.get(f"/api/pages/projects/{pid}")
+    assert page.status_code == 200 and SECRET not in page.text and "plane_api_key" not in page.json()["project"]
+    assert page.json()["project"]["plane_key_set"] is True
+
+
+def test_patch_plane_key_clear_and_keep(client):  # 109 AC5
+    pid = connect(client)["id"]
+    patch(client, pid, {"plane_api_key": SECRET})
+    assert patch(client, pid, {"plane_workspace": "acme"}).json()["plane_key_set"] is True
+    assert plane_row(pid)[3] == SECRET
+    r = patch(client, pid, {"plane_api_key": ""})
+    assert (r.status_code, r.json()["plane_key_set"]) == (200, False)
+    assert plane_row(pid)[3] is None
 
 
 def test_patch_project_unknown(client):  # 049 BE7

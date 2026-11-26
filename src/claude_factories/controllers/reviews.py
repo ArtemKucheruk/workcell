@@ -6,7 +6,7 @@ from fastapi import APIRouter, Query, Request, Response
 from ..dto.reviews import (ApproveBody, ApproveOut, ChangesBody, ChangesOut, CommentBody, DecisionBody, IdOut, Reviewer,
                            VerdictBody, VerdictOut)
 from ..handlers import reviews as handler
-from ..server.deps import ClaudeAdapter, ContextItems, GitAdapter, Reviews, Rounds, Tasks, transaction
+from ..server.deps import ClaudeAdapter, ContextItems, GitAdapter, PlaneAdapter, Reviews, Rounds, Tasks, transaction
 from .rounds import NOSNIFF
 from .runs import agent_url
 
@@ -30,8 +30,9 @@ def post_decision(task_id: int, body: DecisionBody, tasks: Tasks, rounds: Rounds
 
 
 @router.post("/api/tasks/{task_id}/approve")
-def approve(task_id: int, body: ApproveBody, tasks: Tasks, rounds: Rounds, reviews: Reviews) -> ApproveOut:
-    return handler.approve(tasks, rounds, reviews, task_id, body)
+def approve(task_id: int, body: ApproveBody, plane: PlaneAdapter) -> ApproveOut:
+    """109 AC13: the handler commits the approve before it calls Plane, so it takes transaction()."""
+    return handler.approve(transaction, plane, task_id, body)
 
 
 @router.post("/api/tasks/{task_id}/request-changes", status_code=202)

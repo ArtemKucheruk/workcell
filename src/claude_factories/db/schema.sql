@@ -13,7 +13,12 @@ CREATE TABLE IF NOT EXISTS projects (
   context_md TEXT NOT NULL DEFAULT '',    -- stack and conventions, atop fctl show; db.init() adds it to old DBs
   factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync
   factory_error TEXT,                     -- that sync's refusal, NULL when it worked; db.init() adds both
-  github_label TEXT);                     -- 108: GitHub issues sync's label, NULL = every open issue; db.init() adds it
+  github_label TEXT,                      -- 108: GitHub issues sync's label, NULL = every open issue; db.init() adds it
+  plane_api_url TEXT,                     -- 109: Plane sync's API URL (NULL = https://api.plane.so in the UI only),
+  plane_workspace TEXT,                   --   workspace slug,
+  plane_project_id TEXT,                  --   project ID,
+  plane_api_key TEXT,                     --   API key: plaintext, write-only, never returned, logged, or exported
+  plane_mark_done INTEGER NOT NULL DEFAULT 0);  -- 1 = approve marks the item done in Plane; db.init() adds all five
 
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12

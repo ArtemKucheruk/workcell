@@ -1147,7 +1147,9 @@ def test_board(client, project, repo):  # AC8
     assert page["project"] == {"id": project, "name": "repo", "path": str(repo), "default_branch": "main",
                                "workspace_id": ws_id("personal"), "workspace": "personal",
                                "remote_url": None, "test_cmd": "pytest -q", "github_label": None,
-                               "github_repo": None, "github_hint": page["project"]["github_hint"]}  # 108 AC5
+                               "github_repo": None, "github_hint": page["project"]["github_hint"],  # 108 AC5
+                               "plane_api_url": None, "plane_workspace": None, "plane_project_id": None,
+                               "plane_mark_done": False, "plane_key_set": False}  # 109 AC4
     assert (page["factory"], page["hint"], page["can_run"]) == ("ready", None, True)
     assert page["workspaces"] == [{"id": ws_id("personal"), "name": "personal", "projects": 1}]
     assert list(page["columns"]) == ["backlog", "in_progress", "review", "done"]
@@ -1243,7 +1245,9 @@ def test_board_project_facts(client):  # 042 BE1
     assert api(client, f"/api/pages/projects/{p}")["project"] == {  # dict equality: no extra keys
         "id": p, "name": "api", "path": "/code/api", "default_branch": "main", "workspace_id": ws_id("personal"),
         "workspace": "personal", "remote_url": "git@github.com:me/repo.git", "test_cmd": "pytest -q",
-        "github_label": None, "github_repo": "me/repo", "github_hint": None}  # 108 AC5
+        "github_label": None, "github_repo": "me/repo", "github_hint": None,  # 108 AC5
+        "plane_api_url": None, "plane_workspace": None, "plane_project_id": None, "plane_mark_done": False,
+        "plane_key_set": False}  # 109 AC4
 
 
 def test_board_project_facts_unset(client):  # 042 BE2

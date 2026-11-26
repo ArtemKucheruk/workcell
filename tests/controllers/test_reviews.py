@@ -584,7 +584,7 @@ def test_approve(client, factory_task):  # 009 AC1, moved by 026
     task, _ = factory_task
     r = approve(client, task)
     assert r.status_code == 200
-    assert list(r.json()) == ["status", "commit_hint"] and r.json()["status"] == "done"
+    assert list(r.json()) == ["status", "commit_hint", "plane_warning"] and r.json()["status"] == "done"
     status, stage, position, done_at, updated_at = row(task)
     assert (status, stage, position) == ("done", None, 1.0)
     assert current(done_at) and current(updated_at)

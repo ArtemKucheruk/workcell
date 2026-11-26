@@ -50,7 +50,7 @@ class TasksRepo:
         module's id and name as module_id and module, NULL with none."""
         return self.conn.execute(
             "SELECT t.id, t.title, t.description_md, t.spec_md, t.status, t.stage, t.branch, t.worktree_path,"
-            " t.done_at, t.project_id, p.path, p.context_md, t.module_id, m.name AS module"
+            " t.done_at, t.project_id, p.path, p.context_md, t.module_id, m.name AS module, t.import_key"
             " FROM tasks t JOIN projects p ON p.id = t.project_id LEFT JOIN modules m ON m.id = t.module_id"
             " WHERE t.id = ?",
             (task_id,),

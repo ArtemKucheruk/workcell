@@ -246,6 +246,11 @@ class BoardProject(BaseModel):
     github_label: str | None  # 108 AC5: the Settings page's GitHub issues section
     github_repo: str | None  # owner/repo of a github.com remote_url, else null
     github_hint: str | None  # why Sync now is off; null when github_repo is set
+    plane_api_url: str | None  # 109 AC4: the Plane section; null shows as https://api.plane.so
+    plane_workspace: str | None
+    plane_project_id: str | None
+    plane_mark_done: bool
+    plane_key_set: bool  # never the key itself
 
 
 class Card(TaskItem):

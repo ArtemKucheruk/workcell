@@ -8,6 +8,7 @@ import {
   patchProject,
   syncFactory,
   syncGithubIssues,
+  syncPlane,
 } from '../../api/projects.js'
 import { DangerZone, PROJECT_TEXT } from '../../components/DeleteDialog.jsx'
 import { FactoryForm, FactoryResult, FileList } from '../../components/FactoryResult.jsx'
@@ -267,6 +268,163 @@ function GithubIssues({ project, onSynced }) {
   )
 }
 
+const PLANE_URL = 'https://api.plane.so' // 109 AC4: a null plane_api_url shows as Plane's cloud
+
+/**
+ * 109 AC17, AC18: API URL, Workspace slug, Project ID, the API key, and Mark done in Plane, with one Save (PATCH, `Saved.`,
+ * reload; a refusal is an alert and keeps what was typed). The key is write-only: page data says only plane_key_set, so
+ * the field is an empty password input, or `API key: set` with Replace (an empty input Save sends) and Clear. Save sends
+ * the key only when one was typed.
+ */
+function PlaneForm({ project, onSaved }) {
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [replacing, setReplacing] = useState(false)
+  const askKey = !project.plane_key_set || replacing
+  async function save(fields, form) {
+    setBusy(true)
+    setSaved(false)
+    try {
+      const out = await patchProject(project.id, fields)
+      setError(null)
+      if (form) {
+        form.elements.namedItem('plane_api_url').value = out.plane_api_url ?? PLANE_URL
+        form.elements.namedItem('plane_workspace').value = out.plane_workspace ?? ''
+        form.elements.namedItem('plane_project_id').value = out.plane_project_id ?? ''
+        const key = form.elements.namedItem('plane_api_key')
+        if (key) key.value = ''
+      }
+      setReplacing(false)
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  function submit(event) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const value = (name) => form.elements.namedItem(name).value
+    const fields = {
+      plane_api_url: value('plane_api_url'),
+      plane_workspace: value('plane_workspace'),
+      plane_project_id: value('plane_project_id'),
+      plane_mark_done: form.elements.namedItem('plane_mark_done').checked,
+    }
+    const key = form.elements.namedItem('plane_api_key')?.value
+    if (key) fields.plane_api_key = key
+    save(fields, form)
+  }
+  const rows = [
+    ['plane-url', 'plane_api_url', 'API URL', project.plane_api_url ?? PLANE_URL, 'font-mono text-sm/6'],
+    ['plane-workspace', 'plane_workspace', 'Workspace slug', project.plane_workspace ?? '', ''],
+    ['plane-project', 'plane_project_id', 'Project ID', project.plane_project_id ?? '', 'font-mono text-sm/6'],
+  ]
+  return (
+    <form onSubmit={submit} onInput={() => setSaved(false)} className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-6 gap-y-2">
+      {rows.map(([id, name, label, value, extra]) => (
+        <div key={id} className="contents">
+          <label htmlFor={id} className={muted}>
+            {label}
+          </label>
+          <input id={id} name={name} defaultValue={value} className={`${field} w-full max-w-md ${extra}`} />
+        </div>
+      ))}
+      {askKey ? (
+        <>
+          <label htmlFor="plane-key" className={muted}>
+            API key
+          </label>
+          <input
+            id="plane-key"
+            name="plane_api_key"
+            type="password"
+            autoComplete="off"
+            placeholder={replacing ? 'the new key' : 'not set'}
+            className={`${field} w-full max-w-md`}
+          />
+        </>
+      ) : (
+        <>
+          <span className={muted}>API key</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span>API key: set</span>
+            <button type="button" onClick={() => setReplacing(true)} disabled={busy} className={button}>
+              Replace
+            </button>
+            <button type="button" onClick={() => save({ plane_api_key: '' })} disabled={busy} className={button}>
+              Clear
+            </button>
+          </div>
+        </>
+      )}
+      <div className="col-start-2 flex items-center gap-2">
+        <input id="plane-mark-done" name="plane_mark_done" type="checkbox" defaultChecked={project.plane_mark_done} />
+        <label htmlFor="plane-mark-done">Mark done in Plane</label>
+      </div>
+      <div className="col-start-2 flex flex-wrap items-center gap-3">
+        <button disabled={busy} className={button}>
+          Save
+        </button>
+        <span aria-live="polite" className={muted}>
+          {saved ? 'Saved.' : ''}
+        </span>
+      </div>
+      {error && (
+        <div className="col-start-2">
+          <ErrorMessage error={error} />
+        </div>
+      )}
+    </form>
+  )
+}
+
+/**
+ * 109 AC19: Sync now, disabled until the URL, slug and project ID are saved and a key is set, and while pending. A 200
+ * says the counts in a polite region (cleared as a sync starts) and `onSynced` reloads; a refusal is an alert.
+ */
+function Plane({ project, onSynced }) {
+  const [result, setResult] = useState('')
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const ready = Boolean(project.plane_api_url && project.plane_workspace && project.plane_project_id && project.plane_key_set)
+  async function sync() {
+    setBusy(true)
+    setResult('')
+    setError(null)
+    try {
+      const out = await syncPlane(project.id)
+      setResult(`Synced Plane: ${out.new} new, ${out.updated} updated, ${out.skipped} skipped`)
+      onSynced()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <p className={muted}>
+        Backlog and unstarted work items of a Plane project as Backlog tasks; with Mark done in Plane, approving one sets
+        its item to the project&apos;s first completed state.
+      </p>
+      <PlaneForm project={project} onSaved={onSynced} />
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={sync} disabled={busy || !ready} className={button}>
+          Sync now
+        </button>
+        <p aria-live="polite" className={`m-0 ${muted}`}>
+          {result}
+        </p>
+      </div>
+      {error && <ErrorMessage error={error} />}
+    </>
+  )
+}
+
 /** §8 item 2, moved: this project to another workspace; a refusal shows in the form. */
 function MoveProject({ project, workspaces, onDone }) {
   const [error, setError] = useState(null)
@@ -352,7 +510,7 @@ function SettingsSkeleton() {
 
 /**
  * docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Save, Create factory, Import, Sync factory/, Move, and
- * (108) the GitHub label's Save and Sync now.
+ * (108) the GitHub label's Save and Sync now, and (109) the Plane section's Save, Clear, and Sync now.
  */
 function ProjectSettings({ id }) {
   const { reloadSidebar } = useOutletContext()
@@ -435,6 +593,9 @@ function ProjectSettings({ id }) {
         </Section>
         <Section id="settings-github" title="GitHub issues">
           <GithubIssues project={project} onSynced={refresh} />
+        </Section>
+        <Section id="settings-plane" title="Plane">
+          <Plane project={project} onSynced={refresh} />
         </Section>
         <Section id="settings-move" title="Move to another workspace">
           <MoveProject
