@@ -301,7 +301,7 @@ test('042 FE36: on Reviews, Context, and Settings the sidebar selects the projec
     const button = sidebar().getByRole('button', { name: 'api' })
     expect(button.getAttribute('aria-expanded')).toBe('true')
     const links = within(document.getElementById(button.getAttribute('aria-controls'))).getAllByRole('link')
-    expect(links.map((a) => a.textContent)).toEqual(['Board', 'Code', 'Reviews', 'Context', 'Workflows', 'Scheduler', 'Settings'])
+    expect(links.map((a) => a.textContent)).toEqual(['Board', 'Code', 'Reviews', 'Context', 'Modules', 'Workflows', 'Scheduler', 'Settings']) // 112 AC15
     for (const link of links) {
       const on = link.textContent === current
       expect([link.textContent, link.getAttribute('aria-current'), accent.test(link.className)]).toEqual([

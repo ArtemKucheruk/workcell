@@ -1,7 +1,15 @@
 import { api } from './client.js'
 
-export const createTask = (projectId, { title, description_md }) =>
-  api(`/api/projects/${encodeURIComponent(projectId)}/tasks`, { method: 'POST', body: { title, description_md } })
+/** 112 AC21: `module_id` is one of the project's modules, or null for none. */
+export const createTask = (projectId, { title, description_md, module_id = null }) =>
+  api(`/api/projects/${encodeURIComponent(projectId)}/tasks`, {
+    method: 'POST',
+    body: { title, description_md, module_id },
+  })
+
+/** 112 AC22: the task's module, or null to clear it. */
+export const setTaskModule = (id, moduleId) =>
+  api(`/api/tasks/${encodeURIComponent(id)}`, { method: 'PATCH', body: { module_id: moduleId } })
 
 /** 032: the task bundle's download URL; transcripts only when asked. */
 export const exportUrl = (id, transcripts) =>

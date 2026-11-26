@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, FiniteFloat, computed_field, field_validator
 
+from .modules import ModuleRef
 from .rounds import RoundBody, RoundSummary
 
 # 035 Q7: Literals, not the domain enums, so a bad value's 422 keeps type "literal_error"
@@ -14,6 +15,7 @@ class TaskBody(BaseModel):
     description_md: str = ""
     submit: RoundBody | None = None
     blocked_by: list[int] = []  # 094 AC10: the tasks it waits on, each stored once
+    module_id: int | None = None  # 112 AC11: one of the project's modules; omitted or null = none
 
 
 class Dep(BaseModel):
@@ -42,6 +44,7 @@ class TaskPatch(BaseModel):
     position: FiniteFloat | None = None
     title: str | None = None  # 048 Q1: the board's Edit, either or both
     description_md: str | None = None
+    module_id: int | None = None  # 112 AC13, Q4: alone; a sent null clears the module
 
     @field_validator("title", "description_md")
     @classmethod
@@ -66,6 +69,7 @@ class TaskItem(TaskDeps):
     additions: int | None
     deletions: int | None
     run: RunOut | None
+    module: ModuleRef | None  # 112 AC14
 
 
 class DecisionOut(BaseModel):
@@ -85,6 +89,7 @@ class TaskOut(TaskDeps):
     rounds: list[RoundSummary]
     decisions: list[DecisionOut]
     run: RunOut | None
+    module: ModuleRef | None  # 112 AC14
 
 
 class TaskCreated(BaseModel):

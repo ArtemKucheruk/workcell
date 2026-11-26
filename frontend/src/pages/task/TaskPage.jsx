@@ -1,11 +1,12 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
+import { listModules } from '../../api/modules.js'
 import { taskPage } from '../../api/pages.js'
 import { runTask, stopRun } from '../../api/runs.js'
-import { blockTask, exportUrl, unblockTask } from '../../api/tasks.js'
+import { blockTask, exportUrl, setTaskModule, unblockTask } from '../../api/tasks.js'
 import { ActionButton } from '../../components/ActionButton.jsx'
 import { AgentStats, agentLabel } from '../../components/AgentStats.jsx'
-import { StatusPill, TaskState } from '../../components/Badge.jsx'
+import { ModulePill, StatusPill, TaskState } from '../../components/Badge.jsx'
 import { Breadcrumbs, projectTrail } from '../../components/Breadcrumbs.jsx'
 import { Chip } from '../../components/Chip.jsx'
 import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
@@ -182,6 +183,38 @@ function Dependencies({ page, onChange }) {
   )
 }
 
+/**
+ * 112 AC22, Q6: the task's module, picked from No module and the project's modules, loaded once. A change PATCHes
+ * `module_id` and reloads the page; a refusal shows beside it. The value follows the page, so a poll shows the stored one.
+ */
+function ModuleField({ task, onChange }) {
+  const { data } = usePoll(useCallback(() => listModules(task.project_id), [task.project_id]))
+  const [error, setError] = useState(null)
+  const listed = data?.modules ?? (task.module ? [task.module] : [])
+  async function pick(value) {
+    setError(null)
+    try {
+      await setTaskModule(task.id, value ? Number(value) : null)
+    } catch (err) {
+      setError(err)
+      return
+    }
+    onChange()
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <label htmlFor="task-module">Module</label>
+      <Select
+        id="task-module"
+        value={task.module ? String(task.module.id) : ''}
+        onChange={pick}
+        options={[{ value: '', label: 'No module' }, ...listed.map((m) => ({ value: String(m.id), label: m.name }))]}
+      />
+      {error && <ErrorMessage error={error} />}
+    </div>
+  )
+}
+
 /** Q6: the backend's quoted command as is; while a run runs it's null, so say how to get it. */
 function Takeover({ page }) {
   if (page.takeover) {
@@ -339,6 +372,7 @@ export function TaskPage() {
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <TaskState task={task} />
+          {task.module && <ModulePill name={task.module.name} />}
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           <Link to={`/tasks/${task.id}/review`}>Review</Link>
           <button type="button" popoverTarget="export" className={`${smallButton} [anchor-name:--export]`}>
@@ -346,6 +380,7 @@ export function TaskPage() {
           </button>
         </div>
         <ExportPopover id={task.id} />
+        <ModuleField key={task.id} task={task} onChange={refresh} />
         {actionError && <ErrorMessage error={actionError} />}
         <Takeover page={page} />
       </header>

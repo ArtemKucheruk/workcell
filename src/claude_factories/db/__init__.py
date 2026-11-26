@@ -51,6 +51,8 @@ def init() -> None:
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS tasks_import_key ON tasks(import_key)")
         if "pr_url" not in {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}:  # 093 AC1: the same
             conn.execute("ALTER TABLE tasks ADD COLUMN pr_url TEXT")
+        if "module_id" not in {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}:  # 112 AC2: the same
+            conn.execute("ALTER TABLE tasks ADD COLUMN module_id INTEGER REFERENCES modules(id) ON DELETE SET NULL")
         # 096: one run per task replaces the global one-run index; each run remembers its account (Q5)
         conn.execute("DROP INDEX IF EXISTS one_active_run")
         if "account_id" not in {row[1] for row in conn.execute("PRAGMA table_info(runs)")}:

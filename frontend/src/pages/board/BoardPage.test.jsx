@@ -1,6 +1,7 @@
 import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { expectOfflineBanner, expectSkeleton, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { optionLabels, pick as pickOption } from '../../test/select.js'
 
 const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal' }
 const WORKSPACES = [{ id: 2, name: 'personal', projects: 1 }, { id: 4, name: 'work', projects: 0 }]
@@ -847,7 +848,7 @@ test('AC22, FE18: + New task posts the title and markdown, then resets, hides it
   fireEvent.change(description, { target: { value: 'Rows as **CSV**' } })
   fireEvent.click(form.getByRole('button', { name: 'Add task' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
-  expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Export CSV', description_md: 'Rows as **CSV**' })
+  expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Export CSV', description_md: 'Rows as **CSV**', module_id: null })
   expect(title.value).toBe('')
   expect(description.value).toBe('')
   expect(popover.hidePopover).toHaveBeenCalledTimes(1)
@@ -1067,7 +1068,7 @@ test('048 FE7: + New task clicked over an Edit keeps the popover open on the emp
   type(titleBox(form), 'Import CSV')
   fireEvent.click(form.getByRole('button', { name: 'Add task' }))
   await waitFor(() => expect(loads(fetch)).toBe(2))
-  expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Import CSV', description_md: '' })
+  expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Import CSV', description_md: '', module_id: null })
   expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toEqual([])
 })
 
@@ -1240,4 +1241,37 @@ test('094 AC24: a ready card and every Done card show no badge and keep the surf
     expect(cardEl(id).textContent).not.toContain('Blocked by')
     expect(cardEl(id).className).toMatch(cls('bg-surface'))
   }
+})
+
+// --- 112: modules ----------------------------------------------------------------------
+
+const MODULES = '/api/projects/3/modules'
+const LISTED = {
+  modules: [{ id: 5, name: 'backend', description_md: '', counts: {} }, { id: 7, name: 'frontend', description_md: '', counts: {} }],
+  no_module: {},
+}
+
+test('112 AC20: a card with a module shows its name as a text pill; a card without one shows none', async () => {
+  await open(board({ backlog: [card(12, 'backlog', { module: { id: 7, name: 'frontend' } }), card(13, 'backlog', { module: null })] }))
+  const pill = within(cardEl(12)).getByText('frontend')
+  expect(pill.closest('span').textContent).toBe('Module: frontend') // text, not a color only
+  expect(cardEl(13).textContent).not.toContain('Module:')
+})
+
+test('112 AC21: + New task has a Module select, No module then the modules; the pick goes out as module_id', async () => {
+  const { fetch } = await open(board(), {
+    [`GET ${MODULES}`]: [200, LISTED],
+    'POST /api/projects/3/tasks': [201, { id: 14, status: 'backlog' }],
+  })
+  const form = within(newTask())
+  const select = form.getByRole('combobox', { name: 'Module' })
+  await waitFor(() => expect(optionLabels(select)).toEqual(['No module', 'backend', 'frontend']))
+  expect(select.textContent).toBe('No module')
+  pickOption(select, '7')
+  fireEvent.change(form.getByRole('textbox', { name: 'Title' }), { target: { value: 'Navbar' } })
+  fireEvent.click(form.getByRole('button', { name: 'Add task' }))
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'POST', '/api/projects/3/tasks')).toEqual({ title: 'Navbar', description_md: '', module_id: 7 })
+  expect(select.textContent).toBe('No module') // reset for the next task
+  expect(fetched(fetch).filter((u) => u === MODULES)).toHaveLength(1) // loaded once, never polled
 })

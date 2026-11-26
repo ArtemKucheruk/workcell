@@ -126,14 +126,24 @@ def test_claude_code_links_the_page():  # AC15
     assert "](../src/claude_factories/fctl.md)" in commands
 
 
-def test_claude_code_task_add_row():  # 060 BE8, 094 AC21
+def test_claude_code_task_add_row():  # 060 BE8, 094 AC21, 112 AC26
     doc = (REPO / "docs" / "claude-code.md").read_text()
     start = doc.index("### 7.2 Commands")
     commands = doc[start:doc.index("### 7.3", start)]
     [row] = [line for line in commands.splitlines() if line.startswith("| `fctl task add")]
-    assert row.startswith('| `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--run]`')
+    assert row.startswith('| `fctl task add "title" [--description TEXT] [--blocked-by IDS] [--module NAME] [--run]`')
     assert "`--description -`" in row and "`description_md`" in row.split("|")[3]
     assert "`blocked_by`" in row.split("|")[3]
+    assert "`module_id`" in row.split("|")[3] and "`GET /api/projects/{id}/modules`" in row.split("|")[3]
+
+
+def test_task_add_module_docs():  # 112 AC26
+    add = section("task add")
+    for text in ("--module NAME", "GET /api/projects/{id}/modules",
+                 "fctl: no module nope in api-server; known: backend, frontend", "known: none"):
+        assert text in add, text
+    assert "Status: in_progress · agent_review\nModule: backend\n" in section("show")
+    assert "`Module: <name>`" in section("show")
 
 
 def test_task_block_sections():  # 094 AC21: the new commands' rows, and fctl run's new 409s

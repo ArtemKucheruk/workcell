@@ -40,7 +40,7 @@ from .pull_requests import page_pr
 from .reviews import commit_hint
 from .rounds import find_round, round_summaries
 from .runs import log_lines
-from .tasks import list_tasks
+from .tasks import list_tasks, module_ref
 from .transcripts import for_task
 from .usage import accounts_usage, label
 
@@ -458,11 +458,12 @@ def posted_verdicts(reviews: ReviewsRepo, task_id: int) -> dict[int, dict]:
     return posted
 
 
-def page_task(tasks: TasksRepo, task_id: int):
+def page_task(tasks: TasksRepo, task_id: int) -> dict:
+    """The for_page row as a dict, its module as {id, name} or None (112 AC14)."""
     task = tasks.for_page(task_id)
     if task is None:
         raise NotFound(f"Task #{task_id} not found")
-    return task
+    return dict(task) | {"module": module_ref(task)}
 
 
 def task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: RunsRepo, transcripts: TranscriptsRepo,
