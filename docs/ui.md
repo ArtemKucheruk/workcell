@@ -225,7 +225,8 @@ Loading, failures, times, and motion are the same on every page:
      status (`run #N <status>`, and for a running run its start as a relative time:
      `run #41 running · started 5m ago`), and beside Run or Retry the hint for why runs are
      off. The row wraps on narrow screens. Under it, the status line: the status pill and
-     stage, branch, Review, and an **Export** button.
+     stage, branch, Review, and an **Export** button. 108: a task imported from a GitHub issue
+     (`task.issue_url`) shows an `Issue #12` link to the issue beside the branch.
    - 097: the run status names the run's Claude account after its status, `run #41 failed · b@y:
      limited on b@y, resets at 16:00` (nothing for a run with no account). Run and Retry use Auto
      (MVP §4.3). Beside them, when there are accounts, a small `▾` button named **Choose account**
@@ -451,6 +452,21 @@ Loading, failures, times, and motion are the same on every page:
       `POST /api/projects/{id}/import-factory` `{}`, disabled while pending. On 200 a polite live
       region says `Synced factory/: <n> new, <m> updated, <k> skipped` and the page reloads; a
       refusal's detail shows as an alert in the section.
+    - **GitHub issues** (108), after Import, optional: nothing happens until **Sync now** is clicked.
+      A **Label** input (placeholder `all open issues`, prefilled from `project.github_label`) with
+      its own **Save** sends `PATCH /api/projects/{id}` `{github_label}`; a polite `Saved.` follows
+      and the page reloads, and a refusal shows as an alert with the typed text kept. A blank label
+      means every open issue. With a github.com origin, a muted line says `Open issues of
+      <owner/repo> as Backlog tasks, through your gh login.`; without one, `github_hint` shows
+      instead and Sync now is disabled. **Sync now** sends
+      `POST /api/projects/{id}/github-issues/sync` (the saved label only), disabled while pending.
+      On 200 a polite live region (cleared when a sync starts) says `Synced GitHub issues: <new>
+      new, <updated> updated, <skipped> skipped` and the page reloads; a refusal's detail shows as
+      an alert in the section. Each issue becomes a Backlog task (title, body plus a `GitHub issue:
+      <url>` line); a rerun updates only tasks still in Backlog and never started, and leaves
+      tasks whose issue closed alone. There are no tombstones: deleting an imported task and
+      syncing again brings it back as a new task. Create PR's body for such a task ends with
+      `Closes #<n>`, so GitHub closes the issue when the PR merges.
     - **Move** to another workspace (`PATCH /api/projects/{id}`).
     - **Danger zone**, the last section: **Delete project** (filled `danger`) opens the
       sidebar's project delete dialog (§8.4). On 204 the app goes to `/workspaces/{id}`.

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { boardPage } from '../../api/pages.js'
-import { createFactory, deleteProject, importBundle, patchProject, syncFactory } from '../../api/projects.js'
+import {
+  createFactory,
+  deleteProject,
+  importBundle,
+  patchProject,
+  syncFactory,
+  syncGithubIssues,
+} from '../../api/projects.js'
 import { DangerZone, PROJECT_TEXT } from '../../components/DeleteDialog.jsx'
 import { FactoryForm, FactoryResult, FileList } from '../../components/FactoryResult.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
@@ -169,6 +176,97 @@ function SyncFactory({ projectId, onSynced }) {
   )
 }
 
+/**
+ * 108 AC27: the Label filter with its own Save, sent trimmed by the server (blank clears it). A save says `Saved.` and
+ * `onSaved` reloads; a refusal shows as an alert and keeps what was typed.
+ */
+function IssueLabel({ project, onSaved }) {
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    const form = event.currentTarget
+    setBusy(true)
+    setSaved(false)
+    try {
+      const out = await patchProject(project.id, { github_label: form.elements.namedItem('github_label').value })
+      setError(null)
+      form.elements.namedItem('github_label').value = out.github_label ?? ''
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form onSubmit={submit} onInput={() => setSaved(false)} className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="github-label">Label</label>
+        <input
+          id="github-label"
+          name="github_label"
+          defaultValue={project.github_label ?? ''}
+          placeholder="all open issues"
+          className={`${field} w-full max-w-xs`}
+        />
+        <button disabled={busy} className={button}>
+          Save
+        </button>
+        <span aria-live="polite" className={muted}>
+          {saved ? 'Saved.' : ''}
+        </span>
+      </div>
+      {error && <ErrorMessage error={error} />}
+    </form>
+  )
+}
+
+/**
+ * 108 AC28–AC30: Sync now, disabled while pending and without a github.com origin (whose hint shows instead). A 200 says
+ * the counts in a polite region and `onSynced` reloads; a refusal shows as an alert and doesn't. The region is cleared
+ * as a sync starts, so an identical result is announced again.
+ */
+function GithubIssues({ project, onSynced }) {
+  const [result, setResult] = useState('')
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const repo = project.github_repo
+  async function sync() {
+    setBusy(true)
+    setResult('')
+    setError(null)
+    try {
+      const out = await syncGithubIssues(project.id)
+      setResult(`Synced GitHub issues: ${out.new} new, ${out.updated} updated, ${out.skipped} skipped`)
+      onSynced()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <p className={muted}>
+        {repo ? `Open issues of ${repo} as Backlog tasks, through your gh login.` : project.github_hint}
+      </p>
+      <IssueLabel project={project} onSaved={onSynced} />
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={sync} disabled={busy || !repo} className={button}>
+          Sync now
+        </button>
+        <p aria-live="polite" className={`m-0 ${muted}`}>
+          {result}
+        </p>
+      </div>
+      {error && <ErrorMessage error={error} />}
+    </>
+  )
+}
+
 /** §8 item 2, moved: this project to another workspace; a refusal shows in the form. */
 function MoveProject({ project, workspaces, onDone }) {
   const [error, setError] = useState(null)
@@ -252,7 +350,10 @@ function SettingsSkeleton() {
   )
 }
 
-/** docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Save, Create factory, Import, Sync factory/, and Move. */
+/**
+ * docs/ui.md §8 item 12. Q6: loaded once, and reloaded after Save, Create factory, Import, Sync factory/, Move, and
+ * (108) the GitHub label's Save and Sync now.
+ */
 function ProjectSettings({ id }) {
   const { reloadSidebar } = useOutletContext()
   const navigate = useNavigate()
@@ -331,6 +432,9 @@ function ProjectSettings({ id }) {
           <ImportBundle onImport={importFile} />
           <div aria-live="polite">{importOut && <ImportResult out={importOut} />}</div>
           <SyncFactory projectId={project.id} onSynced={refresh} />
+        </Section>
+        <Section id="settings-github" title="GitHub issues">
+          <GithubIssues project={project} onSynced={refresh} />
         </Section>
         <Section id="settings-move" title="Move to another workspace">
           <MoveProject

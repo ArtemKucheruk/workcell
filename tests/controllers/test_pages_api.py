@@ -1146,7 +1146,8 @@ def test_board(client, project, repo):  # AC8
     page = api(client, f"/api/pages/projects/{project}")
     assert page["project"] == {"id": project, "name": "repo", "path": str(repo), "default_branch": "main",
                                "workspace_id": ws_id("personal"), "workspace": "personal",
-                               "remote_url": None, "test_cmd": "pytest -q"}
+                               "remote_url": None, "test_cmd": "pytest -q", "github_label": None,
+                               "github_repo": None, "github_hint": page["project"]["github_hint"]}  # 108 AC5
     assert (page["factory"], page["hint"], page["can_run"]) == ("ready", None, True)
     assert page["workspaces"] == [{"id": ws_id("personal"), "name": "personal", "projects": 1}]
     assert list(page["columns"]) == ["backlog", "in_progress", "review", "done"]
@@ -1240,7 +1241,8 @@ def test_board_project_facts(client):  # 042 BE1
     p = r.json()["id"]
     assert api(client, f"/api/pages/projects/{p}")["project"] == {  # dict equality: no extra keys
         "id": p, "name": "api", "path": "/code/api", "default_branch": "main", "workspace_id": ws_id("personal"),
-        "workspace": "personal", "remote_url": "git@github.com:me/repo.git", "test_cmd": "pytest -q"}
+        "workspace": "personal", "remote_url": "git@github.com:me/repo.git", "test_cmd": "pytest -q",
+        "github_label": None, "github_repo": "me/repo", "github_hint": None}  # 108 AC5
 
 
 def test_board_project_facts_unset(client):  # 042 BE2
@@ -1463,7 +1465,7 @@ def test_task(client, project):  # AC13
         "workspace": "personal", "title": "T", "status": "review",
         "stage": "human_review", "branch": "factory/1-t", "worktree_path": "/code/api/.claude/worktrees/12-x",
         "description_md": "Max **5**", "description_html": "<p>Max <strong>5</strong></p>\n",
-        "spec_md": "## Goal", "spec_html": "<h2>Goal</h2>\n",
+        "spec_md": "## Goal", "spec_html": "<h2>Goal</h2>\n", "issue_url": None,  # 108 AC22
     }
     assert (page["can_run"], page["hint"]) == (True, None)
     task = api(client, f"/api/pages/tasks/{bare}")["task"]
@@ -2171,7 +2173,7 @@ def test_unknown_ids_json_404(client, url, detail):  # AC27
 def test_task_workspace(client):  # 047 BE1
     task, _ = task_in_work(client)
     found = api(client, f"/api/pages/tasks/{task}")["task"]
-    assert set(found) == TASK_KEYS
+    assert set(found) == TASK_KEYS | {"issue_url"}  # 108 AC22
     assert (found["workspace_id"], found["workspace"]) == (ws_id("work"), "work")
 
 

@@ -242,6 +242,9 @@ class BoardProject(BaseModel):
     workspace: str
     remote_url: str | None
     test_cmd: str | None
+    github_label: str | None  # 108 AC5: the Settings page's GitHub issues section
+    github_repo: str | None  # owner/repo of a github.com remote_url, else null
+    github_hint: str | None  # why Sync now is off; null when github_repo is set
 
 
 class Card(TaskItem):
@@ -358,8 +361,12 @@ class PagePr(BaseModel):
     hint: str | None  # why Create PR is off; null when it's on or a PR exists
 
 
+class TaskPageTask(PageTask):
+    issue_url: str | None  # 108 AC22: the issue a `github:` import_key names, else null
+
+
 class TaskPage(BaseModel):
-    task: PageTask
+    task: TaskPageTask
     pr: PagePr | None  # 093: null for a standalone task
     can_run: bool
     hint: str | None

@@ -340,6 +340,12 @@ export function TaskPage() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <TaskState task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
+          {/* 108 AC23: the GitHub issue the task was synced from */}
+          {task.issue_url && (
+            <a href={task.issue_url} target="_blank" rel="noopener noreferrer">
+              {`Issue #${task.issue_url.split('/').at(-1)}`}
+            </a>
+          )}
           <Link to={`/tasks/${task.id}/review`}>Review</Link>
           <button type="button" popoverTarget="export" className={`${smallButton} [anchor-name:--export]`}>
             Export <span aria-hidden="true">▾</span>

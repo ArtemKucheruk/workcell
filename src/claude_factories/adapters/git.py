@@ -17,6 +17,8 @@ SEED_IDENTITY = ("-c", "user.name=fctl seed", "-c", "user.email=seed@example.com
 LOCAL_TIMEOUT = 60  # 093 AC3: local git, as git_ok
 NETWORK_TIMEOUT = 120  # 093 AC3: push, fetch, and every gh call
 MERGE_METHOD = "--merge"  # 093 AC4: a merge commit, as this repo's history has
+# 108 Q8 ponytail: one page of gh issue list; a repo with more open matching issues gets only the 200 newest per sync
+ISSUE_LIMIT = 200
 Ran = tuple[int, str, str]  # 093: (exit code, stdout, stderr)
 WT_SWITCH_TIMEOUT = 60  # 099 Q3
 WT_COPY_TIMEOUT = 300  # 099 Q3: a big node_modules
@@ -163,6 +165,7 @@ class Git(Protocol):
     def pr_create(self, repo: str, base: str, branch: str, title: str, body: str) -> Ran: ...
     def pr_view(self, repo: str, number: int) -> Ran: ...
     def pr_merge(self, repo: str, number: int) -> Ran: ...
+    def issue_list(self, repo: str, label: str | None, limit: int) -> Ran: ...  # 108
 
 
 class SubprocessGit:
@@ -337,3 +340,8 @@ class SubprocessGit:
 
     def pr_merge(self, repo: str, number: int) -> Ran:
         return gh("pr", "merge", str(number), "--repo", repo, MERGE_METHOD)
+
+    def issue_list(self, repo: str, label: str | None, limit: int) -> Ran:
+        """108 AC10, AC11: the repo's open issues as JSON [{number, title, body, url}], `label`'s alone if set."""
+        return gh("issue", "list", "--repo", repo, "--state", "open", "--json", "number,title,body,url",
+                  "--limit", str(limit), *(("--label", label) if label else ()))

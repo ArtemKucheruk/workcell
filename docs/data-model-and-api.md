@@ -21,7 +21,9 @@ CREATE TABLE projects (
   context_md TEXT NOT NULL DEFAULT '',    -- project context: stack and conventions, atop fctl show
   factory_mark TEXT,                      -- factory/board.json's and backlog.md's mtime and size at the last sync,
                                           --   NULL when neither file is there
-  factory_error TEXT);                    -- that sync's refusal detail, shown on the board; NULL when it worked
+  factory_error TEXT,                     -- that sync's refusal detail, shown on the board; NULL when it worked
+  github_label TEXT);                     -- 108: GitHub issues sync's label filter, trimmed; NULL = every open
+                                          --   issue. db.init() adds it (ALTER TABLE projects ADD COLUMN)
 
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,                 -- global, shown as #12
@@ -34,7 +36,9 @@ CREATE TABLE tasks (
   position REAL NOT NULL,                 -- order within column; Run next = lowest backlog
   branch TEXT, worktree_path TEXT,        -- NULL for standalone (/factory-submit) tasks
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, done_at TEXT,
-  import_key TEXT UNIQUE,                 -- factory:<job id> for a job fctl import-factory brought in, else NULL
+  import_key TEXT UNIQUE,                 -- factory:<job id> for a job fctl import-factory brought in,
+                                          --   github:<owner>/<repo>#<n> for a GitHub issue Sync now brought in
+                                          --   (108), else NULL
   pr_url TEXT);                           -- 093: the task's GitHub PR, set by Create PR (§6.3) or an imported
                                           --   job's `pr` that names a /pull/N; NULL until then. db.init() adds it
 
@@ -261,13 +265,15 @@ PATCH /api/projects/3                                             (Settings, sid
 → {"workspace_id":4}                                              (move to another workspace)
 → {"name":"api-server"}
 → {"test_cmd":"pytest -q"}
-→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q"}, applied together
-← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q"}   # the project after the update
-                                                                              # id, workspace_id: int; name: str; test_cmd: str | null
+→ {"github_label":"bug"}                                          (108: Settings, GitHub issues' Label Save)
+→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q", "github_label": "bug"},
+  applied together
+← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q","github_label":"bug"}
+  # the project after the update; id, workspace_id: int; name: str; test_cmd, github_label: str | null
   # name is trimmed: 422 {"detail":"name must not be blank"} if nothing is left
-  # test_cmd is trimmed, and blank stores NULL, returned as "test_cmd": null
-  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd"} for {} (or only unknown keys)
-  # 422 FastAPI's list detail: any of the three sent as null or the wrong type, or workspace_id out of SQLite's range
+  # test_cmd and github_label are trimmed, and blank stores NULL, returned as null
+  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd, github_label"} for {} (or only unknown keys)
+  # 422 FastAPI's list detail: any of the four sent as null or the wrong type, or workspace_id out of SQLite's range
   # 404 {"detail":"Not Found"} for an unknown project or workspace_id (unchanged), with nothing written
   # allowed in any state, also while a run is going (no 409)
   # fctl connect, rerun in the repo, sets the name back to the directory's, and the test command when it passes one
@@ -279,6 +285,27 @@ DELETE /api/projects/3                                            (sidebar Delet
   # on disk, the repo, its worktrees and branches, run logs, and transcript copies stay
   # 409 {"detail":"run #41 active"} while one of its tasks has a running run
   # 404 {"detail":"Project #99 not found"}
+
+POST /api/projects/12/github-issues/sync                          (108: Settings, GitHub issues' Sync now; no fctl)
+→ {}
+← 200 {"new":2,"updated":1,"skipped":5}                           # the SPA shows "Synced GitHub issues: 2 new, …"
+  # gh issue list --repo <owner/repo> --state open --json number,title,body,url --limit 200 [--label <github_label>]
+  #   through my gh login (the saved label only). ponytail: only the 200 newest open issues per sync, no paging
+  # each issue is a task keyed on import_key github:<owner>/<repo>#<n>, added in ascending number. New: Backlog's
+  #   bottom with one app event (created · backlog); title = the issue's, description_md = its body right-stripped,
+  #   a blank line, then "GitHub issue: <url>" (only that line for an empty body). A Backlog task never started (no
+  #   run, no round) gets a changed title or description rewritten (updated; no event, position kept). Started tasks
+  #   and unchanged ones count as skipped. Issues no longer listed (closed, relabeled) leave their tasks alone; a
+  #   deleted task's issue comes back as a new task
+  # the project is read in one transaction and the tasks are written in another: no write lock while gh runs
+  # 404 {"detail":"Project #99 not found"}
+  # 409, before any gh call: "<path> has no origin remote; add one with git remote add origin …" · "origin isn't
+  #     on GitHub (<host>); GitHub issues sync needs a github.com origin" (origin read raw, as Create PR's)
+  # 409 "gh is not installed: install GitHub CLI, then run gh auth login" · "gh is not logged in: run gh auth
+  #     login. <gh's line>"; under Docker both end " (the backend image has no gh login; sync issues from the
+  #     app on your host)"
+  # 409 gh issue list's first stderr line · "github:o/r#2 is imported in project #4" (checked for every issue
+  #     before the first write) · 500 "gh issue list printed no JSON: …". Every refusal writes nothing
 
 POST /api/projects/connect                                        (fctl connect)
 → {"path":"/Users/artem/code/api-server","workspace":"personal","name":"api-server",
@@ -827,6 +854,8 @@ POST /api/tasks/12/pr                                             (Create PR, 09
   # 409 "gh is not installed: install GitHub CLI, then run gh auth login" · "gh is not logged in: run gh
   #     auth login. <gh's line>"; under Docker both end " (the backend image has no gh login; create the PR
   #     from your host)"
+  # 108: the body of a task whose import_key is github:<o/r>#<n> ends with a paragraph "Closes #<n>" (or
+  #     "Closes <o/r>#<n>" when the PR's repo differs, compared case-insensitively), so GitHub closes the issue on merge
   # 409 "nothing to commit: #12's branch has no changes beyond main" · "git push was rejected: ! [rejected] …"
   #     · gh pr create's first stderr line (the commit and push stay; pr_url stays NULL)
   # 500 "<git|gh> timed out: <command>": 60 s for local git, 120 s for push, fetch, and gh
@@ -962,7 +991,10 @@ GET  /api/pages/projects/{id}                   the project (path, remote_url, d
                                                 102: runs_enabled (the active account is logged in to
                                                 claude.ai, the login badge's check), plus accounts and auto
                                                 shaped as the task page's (DB only), for the Workflows page's
-                                                Run now and its Run menu
+                                                Run now and its Run menu.
+                                                108: project.github_label, github_repo (owner/repo of a github.com
+                                                remote_url, else null), and github_hint (why Sync now is off;
+                                                null with github_repo), from the stored remote_url alone
 GET  /api/pages/tasks/{id}                      the task with project_id, project, workspace_id, and workspace (its
                                                 project's now), spec_html, rounds, decision, history, the active run
                                                 and takeover command, transcripts (as GET /api/tasks/{id}/transcripts);
@@ -974,7 +1006,9 @@ GET  /api/pages/tasks/{id}                      the task with project_id, projec
                                                 accounts, every account by id as {id, label, active, five_hour,
                                                 seven_day} (windows as GET /api/usage reads them, DB only, no
                                                 claude call); auto, {account_id, label} of Auto's first candidate
-                                                from the DB alone, or null when all are low or there are none
+                                                from the DB alone, or null when all are low or there are none.
+                                                108: task.issue_url, https://github.com/<o/r>/issues/<n> for a
+                                                github:<o/r>#<n> import_key, else null
 GET  /api/pages/tasks/{id}/flow?round=          089: the task page's Factory section. round is a number or latest
                                                 (the default). No git, no claude
 ← 200 {"graph":<Graph>|null,"source":{"factory_id":4,"name":"Factory"}|null,"rounds":[1,2],"round":2,

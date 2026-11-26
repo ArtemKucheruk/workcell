@@ -1,13 +1,15 @@
-"""docs/data-model-and-api.md §6.1: connect a project, find one by path, patch (move, rename, test command) or
-delete one, and get or put its context."""
+"""docs/data-model-and-api.md §6.1: connect a project, find one by path, patch (move, rename, test command, 108's
+GitHub label) or delete one, get or put its context, and sync its GitHub issues (108)."""
 
 import os
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..dto.github_issues import IssuesSynced
 from ..dto.projects import ConnectBody, ConnectOut, ContextBody, ContextOut, ProjectOut, ProjectPatch, ProjectPatched
+from ..handlers import github_issues
 from ..handlers import projects as handler
-from ..server.deps import GitAdapter, Projects, Runs, Tasks, Workspaces
+from ..server.deps import GitAdapter, Projects, Runs, Tasks, Workspaces, transaction
 
 router = APIRouter()
 
@@ -41,6 +43,12 @@ def patch_project(project_id: int, body: ProjectPatch, workspaces: Workspaces, p
 @router.delete("/api/projects/{project_id}", status_code=204)
 def delete_project(project_id: int, projects: Projects, tasks: Tasks, runs: Runs) -> None:
     handler.delete_project(projects, tasks, runs, project_id)
+
+
+@router.post("/api/projects/{project_id}/github-issues/sync")
+def sync_github_issues(project_id: int, git: GitAdapter) -> IssuesSynced:
+    """108 Q1: the handler opens its own transactions, so no write lock is held while gh runs (AC19)."""
+    return github_issues.sync(transaction, git, project_id)
 
 
 @router.get("/api/projects/{project_id}/context")

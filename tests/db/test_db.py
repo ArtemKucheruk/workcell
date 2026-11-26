@@ -213,7 +213,24 @@ def test_startup_adds_factory_sync_columns():  # 058 BE27, Q10
         assert conn.execute("SELECT id, factory_mark, factory_error FROM projects").fetchall() == [(1, None, None)]
     schema = (Path(db.__file__).with_name("schema.sql")).read_text()
     projects = schema[schema.index("CREATE TABLE IF NOT EXISTS projects"):schema.index("CREATE TABLE IF NOT EXISTS tasks")]
-    assert "factory_mark TEXT," in projects and "factory_error TEXT)" in projects
+    assert "factory_mark TEXT," in projects and "factory_error TEXT," in projects
+
+
+def test_old_db_gets_github_label():  # 108 AC1
+    home = Path(os.environ["FCTL_HOME"])
+    home.mkdir()
+    with closing(sqlite3.connect(home / "factory.db")) as conn:
+        conn.executescript(BEFORE_033)
+    start_app()
+    start_app()  # a second startup finds it there
+    with closing(db.connect()) as conn:
+        columns = {name: (kind, notnull, default) for _, name, kind, notnull, default, _ in
+                   conn.execute("PRAGMA table_info(projects)")}
+        assert columns["github_label"] == ("TEXT", 0, None)
+        assert conn.execute("SELECT id, github_label FROM projects").fetchall() == [(1, None)]
+    schema = (Path(db.__file__).with_name("schema.sql")).read_text()
+    projects = schema[schema.index("CREATE TABLE IF NOT EXISTS projects"):schema.index("CREATE TABLE IF NOT EXISTS tasks")]
+    assert "github_label TEXT)" in projects
 
 
 def test_startup_adds_task_deps():  # 094 AC1

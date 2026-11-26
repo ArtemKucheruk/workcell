@@ -39,13 +39,15 @@ def patch_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, tasks: Tas
     """049 Q1–Q4: the sent fields together, in any state. Both 404s keep 020's `Not Found`."""
     fields = {key: getattr(body, key) for key in body.model_fields_set}
     if not fields:
-        raise Invalid("send at least one of: workspace_id, name, test_cmd")
+        raise Invalid("send at least one of: workspace_id, name, test_cmd, github_label")
     if "name" in fields:
         fields["name"] = fields["name"].strip()
         if not fields["name"]:
             raise Invalid("name must not be blank")
     if "test_cmd" in fields:
         fields["test_cmd"] = fields["test_cmd"].strip() or None  # Q3: blank stores NULL
+    if "github_label" in fields:
+        fields["github_label"] = fields["github_label"].strip() or None  # 108 AC2, AC3: the same
     tasks.lock()  # so the workspace can't go between its check and the update
     if "workspace_id" in fields and not workspaces.exists(fields["workspace_id"]):
         raise NotFound()
