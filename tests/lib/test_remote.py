@@ -7,7 +7,7 @@ import pytest
 from claude_factories.lib.remote import blob_url, web_url
 
 REPO = "https://github.com/owner/repo"
-NONE = ["/Users/me/repo", "../repo", "C:\\repo", "file:///srv/repo.git", None, "", "javascript:alert(1)",
+NONE = ["/home/me/repo", "../repo", "C:\\repo", "file:///srv/repo.git", None, "", "javascript:alert(1)",
         "javascript://github.com/%0aalert(1)", "data:text/html,x", "ftp://host/o/r", "https://github.com"]
 CASES = {
     "git@github.com:owner/repo.git": REPO,

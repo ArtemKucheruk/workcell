@@ -14,7 +14,7 @@ Part of the [MVP design](MVP.md). Section numbers continue from it.
 | `/factory` orchestrator skill | `<repo>/.claude/skills/factory/SKILL.md` | Create factory, or a design's Write to repo (§7.3) |
 | 7 agents | `<repo>/.claude/agents/{spec-writer,builder,review-security,review-ux,review-ui,review-code,approver}.md` | Create factory, or a design's Write to repo (§7.3) |
 
-Agent models are unchanged from FACTORY.md: opus for spec-writer, builder, security, and
+Agent models are unchanged from the file-based bootstrap factory: opus for spec-writer, builder, security, and
 approver; sonnet for ux, ui, and code.
 
 ### 7.2 Commands
@@ -53,9 +53,9 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 | `fctl stage <id> <stage>` | orchestrator | `PATCH /api/tasks/{id}` `stage` |
 | `fctl round <id>` | orchestrator | `GET /api/tasks/{id}` → prints `round 2: security=PASS ux=PASS ui=pending code=PASS (3/4)` |
 
-How the FACTORY.md commands map to the new ones:
+How the file-based bootstrap factory's commands map to the new ones:
 
-| FACTORY.md | Now |
+| Bootstrap factory | Now |
 |---|---|
 | `/factory <feature>` | **+ New task** then **Run**, or `fctl task add "…" --run` |
 | `/factory next` | **Run next**, or `fctl run next` |

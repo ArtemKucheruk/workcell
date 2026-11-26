@@ -5,7 +5,7 @@ import { openSelect, pick as pickValue } from '../../test/select.js'
 
 const API = '/api/pages/projects/3/code'
 /** 020's CodeProject, with 047's workspace and 090's web_url. */
-const PROJECT = { id: 3, name: 'api', path: '/Users/me/api', workspace_id: 2, workspace: 'personal', web_url: null }
+const PROJECT = { id: 3, name: 'api', path: '/home/me/api', workspace_id: 2, workspace: 'personal', web_url: null }
 const TREE = {
   'README.md': { path: 'README.md' },
   'src/': { 'a.py': { path: 'src/a.py' }, 'lib/': { 'b.py': { path: 'src/lib/b.py' } } },
@@ -451,11 +451,11 @@ test('AC17: a path the backend refuses is the not-found state with its detail an
 
 test('AC18: a git failure shows the alert under the header, with no Files nav', async () => {
   const page = landing({
-    project: { ...PROJECT, path: '/Users/me/gone' }, error: 'fatal: not a git repository', branch: null, branches: [], tree: {},
+    project: { ...PROJECT, path: '/home/me/gone' }, error: 'fatal: not a git repository', branch: null, branches: [], tree: {},
     shown: '', view: null, lang: null, readme_html: null,
   })
   await open({ [`GET ${API}`]: [200, page] })
-  expect(screen.getByRole('alert').textContent).toBe("Can't list files in /Users/me/gone: fatal: not a git repository")
+  expect(screen.getByRole('alert').textContent).toBe("Can't list files in /home/me/gone: fatal: not a git repository")
   expect(h1().textContent).toBe('api · personal') // FE4: no board view-model mocked; 047 Q1: the code one names it
   expect(files()).toBeNull()
 })

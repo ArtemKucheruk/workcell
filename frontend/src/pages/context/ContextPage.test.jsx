@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { cls, expectSkeleton, fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECT = {
-  id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
+  id: 3, name: 'api', path: '/home/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
   remote_url: null, test_cmd: 'pytest -q',
 }
 const BOARD = '/api/pages/projects/3'
@@ -27,8 +27,8 @@ const group = (id, title, extra = {}) => item(id, title, { kind: 'group', conten
 const API = item(5, 'API conventions', { description: 'Every endpoint returns JSON.' })
 const RUNBOOKS = group(7, 'Runbooks', { description: 'How we ship.' })
 const DEPLOY = item(8, 'Deploy', { parent_id: 7, description: 'Tag, then push.' })
-const NOTES = item(6, 'Notes', { source_path: '/Users/me/notes/notes.md' })
-const ROLLBACK = item(9, 'Rollback', { parent_id: 7, source_path: '/Users/me/notes/rollback.md' })
+const NOTES = item(6, 'Notes', { source_path: '/home/me/notes/notes.md' })
+const ROLLBACK = item(9, 'Rollback', { parent_id: 7, source_path: '/home/me/notes/rollback.md' })
 const ARCHIVE = group(10, 'Archive')
 const DESIGN = group(11, 'Design')
 const MOCKUPS = item(12, 'Mockups', { parent_id: 11 })
@@ -104,7 +104,7 @@ test("FE2: the pinned card, then the top-level cards in order, each a title butt
   expect(within(card('Design')).getByText('1 card')).toBeTruthy()
   expect(within(card('Archive')).getByText('0 cards')).toBeTruthy()
   expect(within(card('API conventions')).queryByText(/cards?$/)).toBeNull()
-  const path = within(card('Notes')).getByText('/Users/me/notes/notes.md')
+  const path = within(card('Notes')).getByText('/home/me/notes/notes.md')
   expect(path.className).toMatch(cls('font-mono'))
   expect(path.className).toMatch(cls('text-muted'))
   for (const title of ['Deploy', 'Rollback', 'Mockups']) expect(screen.queryByRole('button', { name: title })).toBeNull()
@@ -337,15 +337,15 @@ test("FE10: Reload from path posts reload and reloads; a refusal is the page's a
   expect(sent(fetch, 'POST', '/api/context/items/6/reload')).toBeUndefined()
   expect(screen.queryByRole('alert')).toBeNull()
 
-  responses['POST /api/context/items/6/reload'] = [404, { detail: 'no file at /Users/me/notes/notes.md' }]
+  responses['POST /api/context/items/6/reload'] = [404, { detail: 'no file at /home/me/notes/notes.md' }]
   choose('Notes', 'Reload from path')
-  expect((await screen.findByRole('alert')).textContent).toBe('no file at /Users/me/notes/notes.md')
+  expect((await screen.findByRole('alert')).textContent).toBe('no file at /home/me/notes/notes.md')
 
   fireEvent.click(screen.getByRole('button', { name: 'Runbooks' }))
   const g = dialog('Runbooks')
-  responses['POST /api/context/items/9/reload'] = [422, { detail: '/Users/me/notes/rollback.md: not UTF-8' }]
+  responses['POST /api/context/items/9/reload'] = [422, { detail: '/home/me/notes/rollback.md: not UTF-8' }]
   choose('Rollback', 'Reload from path', within(g))
-  expect((await within(g).findByRole('alert')).textContent).toBe('/Users/me/notes/rollback.md: not UTF-8')
+  expect((await within(g).findByRole('alert')).textContent).toBe('/home/me/notes/rollback.md: not UTF-8')
   expect(screen.getAllByRole('alert')).toHaveLength(2) // the page's, from before, is left alone
 })
 
@@ -405,14 +405,14 @@ test("FE12: inside the group modal, + New card, an upload, and Add from path sen
   expect(calls(fetch, 'POST', upload)).toHaveLength(1)
 
   // Add from path
-  const read = item(22, 'Release', { parent_id: 7, source_path: '/Users/me/notes/release.md' })
+  const read = item(22, 'Release', { parent_id: 7, source_path: '/home/me/notes/release.md' })
   library = [...library, read]
   responses[`POST ${ITEMS}/from-path`] = [201, [read]]
   responses[`GET ${ITEMS}`] = [200, library]
-  type(g.getByRole('textbox', { name: 'Path' }), '/Users/me/notes/release.md')
+  type(g.getByRole('textbox', { name: 'Path' }), '/home/me/notes/release.md')
   fireEvent.click(g.getByRole('button', { name: 'Add from path' }))
   await waitFor(() => expect(titles(grid(g))).toEqual(['Deploy', 'Rollback', 'Hotfix', 'On call', 'Release']))
-  expect(sent(fetch, 'POST', `${ITEMS}/from-path`)).toEqual({ path: '/Users/me/notes/release.md', parent_id: 7 })
+  expect(sent(fetch, 'POST', `${ITEMS}/from-path`)).toEqual({ path: '/home/me/notes/release.md', parent_id: 7 })
 })
 
 test('FE13: Upload files takes several .md, .markdown, .txt; posts each raw, one after the other, then reloads once', async () => {
@@ -473,22 +473,22 @@ test('FE15: the Path field has its hint; Add from path is disabled while blank, 
   expect(add.disabled).toBe(true)
 
   const url = `${ITEMS}/from-path`
-  responses[`POST ${url}`] = [404, { detail: 'no file or folder at /Users/me/nope' }]
-  type(path, '/Users/me/nope')
+  responses[`POST ${url}`] = [404, { detail: 'no file or folder at /home/me/nope' }]
+  type(path, '/home/me/nope')
   fireEvent.click(add)
   const alert = await screen.findByRole('alert')
-  expect(alert.textContent).toBe('no file or folder at /Users/me/nope')
+  expect(alert.textContent).toBe('no file or folder at /home/me/nope')
   expect(alert.closest('form')).toBe(path.closest('form'))
-  expect(path.value).toBe('/Users/me/nope')
+  expect(path.value).toBe('/home/me/nope')
 
-  const folder = group(40, 'notes', { source_path: '/Users/me/notes' })
+  const folder = group(40, 'notes', { source_path: '/home/me/notes' })
   responses[`POST ${url}`] = [201, [folder, item(41, 'A', { parent_id: 40 })]]
   responses[`GET ${ITEMS}`] = [200, [API, folder, item(41, 'A', { parent_id: 40 })]]
   fetch.mockClear()
-  type(path, '/Users/me/notes')
+  type(path, '/home/me/notes')
   fireEvent.click(add)
   await waitFor(() => expect(screen.getByRole('button', { name: 'notes' })).toBeTruthy())
-  expect(sent(fetch, 'POST', url)).toEqual({ path: '/Users/me/notes' })
+  expect(sent(fetch, 'POST', url)).toEqual({ path: '/home/me/notes' })
   expect(path.value).toBe('')
   expect(screen.queryByRole('alert')).toBeNull()
   expect(count(fetch, ITEMS)).toBe(1)

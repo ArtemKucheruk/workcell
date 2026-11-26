@@ -2,8 +2,9 @@
 
 Status: draft · Working name: Claude Factories · CLI name: `fctl`
 
-Built on the loop in [`FACTORY.md`](../FACTORY.md). The loop, the agents, and the rules stay
-the same except where this document lists a change (see §4.3).
+Built on the loop of the file-based bootstrap factory that built this app's first jobs (now
+retired). The loop, the agents, and the rules stay the same except where this document lists a
+change (see §4.3).
 
 | File | Sections |
 |---|---|
@@ -17,7 +18,7 @@ the same except where this document lists a change (see §4.3).
 ## 1. Overview
 
 ### Problem
-The factory in FACTORY.md works, but all of its state sits in `board.json` and markdown
+The file-based factory works, but all of its state sits in `board.json` and markdown
 files inside each repo. Every repo has its own dashboard. Reviewing means reading markdown
 files and running `git diff` in a terminal, and the factory merges to main on its own.
 With several projects there is no single place that shows what is queued, what is running,
@@ -208,7 +209,7 @@ Agents never commit. I commit and merge either by hand (step 2) or with the butt
    cd .claude/worktrees/12-rate-limit-login
    git add -A && git commit -m "Rate-limit login endpoint"
    git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
-   cd /Users/artem/code/api-server && wt remove factory/12-rate-limit-login
+   cd ~/code/api-server && wt remove factory/12-rate-limit-login
    ```
 3. Or **Create PR** (task and review pages, docs/ui.md §8.2), for a done task whose worktree has
    uncommitted changes or commits beyond the default branch. It runs `git add -A` and
@@ -388,7 +389,7 @@ Scheduler page (`schedules`, `docs/data-model-and-api.md §5.1`). No crontab, no
 **The builder works in a worktree.** Several tasks can run in parallel, and my main checkout
 is never touched. The branch is created but gets no commits.
 
-**Changes vs FACTORY.md**
+**Changes vs the file-based factory**
 - There is no merge to main. Approver APPROVE moves the task to review · human_review, and
   only my Approve moves it to done.
 - Agents make no commits. git write commands are denied in runs (§4.4). I commit and merge by
@@ -406,9 +407,9 @@ The run's worktree comes first. The first run on a task creates it with worktrun
 (Retry, rework) reuses the stored one. Either way the app then copies the main checkout's
 gitignored files in, before the auth check:
 ```
-wt -C /Users/artem/code/api-server switch --create factory/12-rate-limit-login --base main \
+wt -C ~/code/api-server switch --create factory/12-rate-limit-login --base main \
    --no-cd --no-hooks --format json                    # first run only
-wt -C /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login step copy-ignored
+wt -C ~/code/api-server/.claude/worktrees/12-rate-limit-login step copy-ignored
 ```
 - Each `wt` call gets `WORKTRUNK_CONFIG_PATH` pointing at a config file the app writes for that
   one call, so my own worktrunk config is never read or written. It sets `worktree-path` to
@@ -437,7 +438,7 @@ wt -C /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login step co
 
 Then the spawn:
 ```
-cd /Users/artem/code/api-server/.claude/worktrees/12-rate-limit-login
+cd ~/code/api-server/.claude/worktrees/12-rate-limit-login
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN FCTL_URL=http://127.0.0.1:4545 \
     CLAUDE_CONFIG_DIR=~/.claude-factories/claude-accounts/… \
 claude -p "/factory 12" \
@@ -508,10 +509,10 @@ claude -p "/factory 12" \
 **An automation's run (102).** **Run now** on an automation's row (or `fctl automation run <id>`) runs its compiled
 skill on the repo itself, with no board task:
 ```
-wt -C /Users/artem/code/api-server switch --create automation/security-audit-1a2b3c4d --base main \
+wt -C ~/code/api-server switch --create automation/security-audit-1a2b3c4d --base main \
    --no-cd --no-hooks --format json                    # every run: a fresh worktree
-wt -C /Users/artem/code/api-server/.claude/worktrees/automation-security-audit-1a2b3c4d step copy-ignored
-cd /Users/artem/code/api-server/.claude/worktrees/automation-security-audit-1a2b3c4d
+wt -C ~/code/api-server/.claude/worktrees/automation-security-audit-1a2b3c4d step copy-ignored
+cd ~/code/api-server/.claude/worktrees/automation-security-audit-1a2b3c4d
 claude -p "/security-audit" --session-id 1a2b3c4d-…  …    # the same flags and tool lists as a task run
 ```
 - The checks: the automation exists (404), is an automation and not a workflow (409), the run cap, then its
@@ -711,7 +712,7 @@ Rules:
 ## 10. Open questions & assumptions
 
 ### Assumptions
-1. FACTORY.md is the "factory example" this app runs. Its loop, agents, and rules carry over
+1. The file-based bootstrap factory is the "factory example" this app runs. Its loop, agents, and rules carry over
    except for §4.3.
 2. "max 2 rounds" means at most 2 agent review rounds per run. If round 2 still has CHANGES,
    the approver runs and must ESCALATE. A rework run gets its own 2.
@@ -741,7 +742,7 @@ Rules:
     and `uv` are on PATH.
 12. Reviewer agents may leave inline comments, and they render like mine.
 13. Polling every 3 s is fast enough. There are no websockets in the MVP.
-14. The agents keep FACTORY.md's models: opus for spec-writer, builder, security, and
+14. The agents keep the bootstrap factory's models: opus for spec-writer, builder, security, and
     approver; sonnet for ux, ui, and code. Changing that later means editing one `model:`
     line per agent file.
 15. A run that hits the Pro usage limit fails like any other run: the card shows "stalled",

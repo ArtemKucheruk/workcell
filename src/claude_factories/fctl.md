@@ -143,7 +143,7 @@ none
 One line, then uvicorn's request log on stderr until you stop it with Ctrl-C:
 
 ```
-Claude Factories → http://127.0.0.1:4545 (data: /Users/me/.claude-factories)
+Claude Factories → http://127.0.0.1:4545 (data: ~/.claude-factories)
 ```
 
 The data dir is `FCTL_HOME`. Stopping `fctl serve` stops every run; at the next start, a run still
@@ -193,9 +193,9 @@ none
 One line per skill:
 
 ```
-Wrote /Users/me/.claude/skills/factory-connect/SKILL.md
-Wrote /Users/me/.claude/skills/factory-submit/SKILL.md
-Wrote /Users/me/.claude/skills/fctl/SKILL.md
+Wrote ~/.claude/skills/factory-connect/SKILL.md
+Wrote ~/.claude/skills/factory-submit/SKILL.md
+Wrote ~/.claude/skills/fctl/SKILL.md
 ```
 
 `fctl` owns each `SKILL.md` and overwrites it, so running `fctl setup` again after an update
@@ -241,7 +241,7 @@ none
 One line:
 
 ```
-Seeded /Users/me/.claude-factories-demo: 2 workspaces, 3 projects, 14 tasks, 7 runs
+Seeded ~/.claude-factories-demo: 2 workspaces, 3 projects, 14 tasks, 7 runs
 ```
 
 What it writes, all in one transaction:
@@ -344,10 +344,10 @@ none
 A warning line on stderr for each optional binary it didn't find, then:
 
 ```
-Wrote /Users/me/Library/LaunchAgents/com.claude-factories.backend.plist
-Wrote /Users/me/Library/LaunchAgents/com.claude-factories.frontend.plist
-Started backend → http://127.0.0.1:4545 (log: /Users/me/.claude-factories/logs/backend.log)
-Started frontend → http://127.0.0.1:3000 (log: /Users/me/.claude-factories/logs/frontend.log)
+Wrote ~/Library/LaunchAgents/com.claude-factories.backend.plist
+Wrote ~/Library/LaunchAgents/com.claude-factories.frontend.plist
+Started backend → http://127.0.0.1:4545 (log: ~/.claude-factories/logs/backend.log)
+Started frontend → http://127.0.0.1:3000 (log: ~/.claude-factories/logs/frontend.log)
 ```
 
 With a `--backend-port` other than 4545, a last line: `export FCTL_URL=http://127.0.0.1:<port>`.
@@ -407,7 +407,7 @@ none
 **Output**
 
 ```
-Uninstalled backend and frontend; logs kept in /Users/me/.claude-factories/logs
+Uninstalled backend and frontend; logs kept in ~/.claude-factories/logs
 ```
 
 With `--force` and active runs, first `Stopping active runs: run #68 on #92`.
@@ -621,7 +621,7 @@ none
 npm's own output, then:
 
 ```
-Python dependencies changed; run: uv tool install --editable --reinstall /Users/me/code/claude-factories
+Python dependencies changed; run: uv tool install --editable --reinstall ~/code/claude-factories
 Restarted backend → http://127.0.0.1:4545
 Restarted frontend → http://127.0.0.1:3000
 ```
@@ -738,9 +738,9 @@ none
 Each log under a header, as `tail` prints them:
 
 ```
-==> /Users/me/.claude-factories/logs/backend.log <==
-Claude Factories → http://127.0.0.1:4545 (data: /Users/me/.claude-factories)
-no log yet: /Users/me/.claude-factories/logs/frontend.log
+==> ~/.claude-factories/logs/backend.log <==
+Claude Factories → http://127.0.0.1:4545 (data: ~/.claude-factories)
+no log yet: ~/.claude-factories/logs/frontend.log
 ```
 
 `no log yet: <path>` for a log that doesn't exist.
@@ -1633,10 +1633,10 @@ The new status, then the commands. For a factory task:
 
 ```
 #12: done
-cd /Users/me/code/api-server/.claude/worktrees/12-rate-limit-login
+cd ~/code/api-server/.claude/worktrees/12-rate-limit-login
 git add -A && git commit -m 'Rate-limit login endpoint'
 git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
-cd /Users/me/code/api-server && wt remove factory/12-rate-limit-login
+cd ~/code/api-server && wt remove factory/12-rate-limit-login
 ```
 
 The last line removes the worktree with worktrunk once the work is committed.

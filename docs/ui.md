@@ -993,7 +993,7 @@ an automation run: its name → /projects/3/factories/9, no stage, round, or Run
 ```
 /projects/3/context
 api-server · personal                                                       Factory: ready ✓
-[+ New card] [+ New group]   Upload files [Choose files]   Path [/Users/me/notes______] [Add from path]
+[+ New card] [+ New group]   Upload files [Choose files]   Path [/path/to/notes_______] [Add from path]
 An absolute path to a .md, .markdown, or .txt file, or a folder of them, on the backend's machine. …
 ┌ Stack and conventions ────── Pinned ┐ ┌ API conventions ──────────── ⋯ ┐ ┌ Runbooks ─────────────────── ⋯ ┐
 │ Agents read it at the top of fctl   │ │ Every endpoint returns JSON,   │ │ Deploys and rollbacks, step by │
@@ -1002,7 +1002,7 @@ An absolute path to a .md, .markdown, or .txt file, or a folder of them, on the 
 └─────────────────────────────────────┘ └────────────────────────────────┘ └────────────────────────────────┘
 ┌ api-server ────────────────────── ⋯ ┐
 │ A small FastAPI service: login, …   │
-│ /Users/me/demo/api-server/README.md │
+│ /path/to/demo/api-server/README.md  │
 └─────────────────────────────────────┘
 grid: the pinned card first, then the top-level cards and groups by position; a title is a button
   that opens the card dialog (a group's, the group modal) · the path under a card read from one: mono, muted

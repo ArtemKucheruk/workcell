@@ -196,15 +196,15 @@ class Dist:
 
 
 def test_repo_path_from_direct_url(monkeypatch, tmp_path):  # AC4
-    url = {"url": "file:///Users/me/my%20repo", "dir_info": {"editable": True}}
+    url = {"url": "file:///home/me/my%20repo", "dir_info": {"editable": True}}
     monkeypatch.setattr(services.metadata, "distribution", lambda name: Dist(json.dumps(url)))
-    assert services.repo_path() == Path("/Users/me/my repo")
+    assert services.repo_path() == Path("/home/me/my repo")
 
 
 @pytest.mark.parametrize("text", [
     None,
-    json.dumps({"url": "file:///Users/me/repo", "dir_info": {}}),
-    json.dumps({"url": "file:///Users/me/repo", "dir_info": {"editable": False}}),
+    json.dumps({"url": "file:///home/me/repo", "dir_info": {}}),
+    json.dumps({"url": "file:///home/me/repo", "dir_info": {"editable": False}}),
     json.dumps({"url": "https://github.com/x/y", "vcs_info": {}}),
     "not json",
 ])

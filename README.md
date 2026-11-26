@@ -1,37 +1,38 @@
 # Claude Factories
 
 A local control center for Claude Code "software factories": a loop of subagents that
-specs a feature, builds it in a git worktree, reviews it four ways, and hands it to you.
-Agents never commit. You review the diff, then commit and merge by hand or with the app's
-Create PR and Merge PR buttons.
-
-> **Status: early.** The app is being built by its own bootstrap factory, a file-based
-> version of the same loop that lives in [`factory/`](factory/). Job 001 (package layout,
-> `fctl serve`, schema, local-safety middleware) is done. What's next is in
-> [`factory/backlog.md`](factory/backlog.md).
-
-## What it will be
+specs a task, builds it in a git worktree, reviews it four ways (security, ux, ui, code),
+and hands it to you. Agents never commit. You review the diff, then commit and merge by hand
+or with the app's Create PR and Merge PR buttons.
 
 - A kanban board per project, with projects grouped into workspaces.
 - A **Run** button that spawns headless Claude Code (`claude -p "/factory <id>"`) on your
-  Claude Pro login. Runs never bill per token through the API.
+  Claude subscription login. Runs never bill per token through the API.
 - A GitHub-style review page per task: files changed, +/−, the agent verdicts, and inline
   comments. **Approve** gives you the commit commands. **Request changes** starts a new
   builder round.
 - **Create factory**, one click that writes the `/factory` skill and its 7 agents into a
-  repo's `.claude/`.
-- Local only: one process on `127.0.0.1:4545` with SQLite. No auth, no cloud.
+  repo's `.claude/`. Workflows let you design your own loops and automations.
+- Local only: a backend on `127.0.0.1:4545` with SQLite and a frontend on `127.0.0.1:3000`.
+  No auth, no cloud.
 
 The full design is in [`docs/MVP.md`](docs/MVP.md).
 
-## Install
+## Requirements
 
-You need:
-- [uv](https://docs.astral.sh/uv/getting-started/installation/), which fetches Python 3.12
-  if you don't have it
-- git
-- [Claude Code](https://claude.com/claude-code), logged in with a Claude subscription. Runs
-  will refuse to start on an API key (docs/MVP.md §4.3).
+- Python 3.12 via [uv](https://docs.astral.sh/uv/getting-started/installation/), which fetches
+  Python 3.12 if you don't have it.
+- Node 22 and npm, for the frontend.
+- git.
+- [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`): runs make each task's worktree
+  with it (`brew install worktrunk`).
+- [Claude Code](https://claude.com/claude-code), signed in with a Claude subscription. Runs
+  refuse to start on an API key (docs/MVP.md §4.3).
+
+macOS and Linux are supported. With Docker you need only Docker with Compose (see
+[Run with Docker](#run-with-docker)).
+
+## Install
 
 ```sh
 git clone https://github.com/ArtemKucheruk/claude-factories.git
@@ -78,27 +79,11 @@ Press Ctrl-C to stop it. The frontend server runs next to it:
 
 | env var | default | used for |
 |---|---|---|
-| `FCTL_HOME` | `~/.claude-factories` | the data dir: `factory.db`, and run logs once runs exist |
+| `FCTL_HOME` | `~/.claude-factories` | the data dir: `factory.db`, run logs, and the services' logs |
 | `FCTL_URL` | `http://127.0.0.1:4545` | where `fctl` sends its API calls; set it if you changed `--port` |
 | `FCTL_IN_DOCKER` | unset | `1` in the backend image, where the takeover command becomes `docker compose exec …` |
 
-The app listens on 127.0.0.1 by default. `--host 0.0.0.0` is the Docker container's setting,
-not one to use on the host. The app rejects requests whose `Host` isn't `127.0.0.1` or
-`localhost`, and it refuses any write that lacks the `X-Requested-By: fctl` header
-(docs/MVP.md §4.5).
-
-To use the app on a repo:
-
-1. `fctl setup` installs the `/factory-connect`, `/factory-submit`, and `fctl` skills.
-2. In the repo, run `/factory-connect <workspace>` in Claude Code, or
-   `fctl connect --workspace W --test-cmd "<cmd>"`.
-3. Project Settings → **Create factory**, then commit `.claude/` on the default branch.
-4. `fctl task add "<title>" [--description TEXT] [--run]`, or **+ New task** on the board.
-
-The full walkthrough, from connecting a repo to approving a task, is in
-[docs/MVP.md §3](docs/MVP.md#3-user-flows).
-
-## Run with Docker
+### Run with Docker
 
 You need Docker with Compose. In the repo:
 
@@ -107,7 +92,7 @@ cp compose.override.example.yaml compose.override.yaml && docker compose up --bu
 ```
 
 Before the first `up`, edit `compose.override.yaml`: set `user:` to your `id -u`:`id -g`, and
-mount every folder that holds a connected project at its own path (`/Users/you/code:/Users/you/code`).
+mount every folder that holds a connected project at its own path (`/path/to/code:/path/to/code`).
 That file is gitignored, and it publishes both servers on 127.0.0.1 only.
 
 The app opens at http://127.0.0.1:3000. The backend is on `127.0.0.1:4545` as before, so
@@ -137,6 +122,41 @@ own image `FROM claude-factories-backend`. The steps are in the comments of
 To take over a stopped run, the task page gives a command like
 `docker compose exec -w <worktree> -e CLAUDE_CONFIG_DIR=<account dir> backend claude --resume <session-id>`.
 Run it from this checkout, next to `compose.yaml`.
+
+## Connect a repo
+
+1. `fctl setup` installs the `/factory-connect`, `/factory-submit`, and `fctl` skills into
+   `~/.claude/skills/`.
+2. In the repo, run `/factory-connect <workspace>` in Claude Code, or
+   `fctl connect --workspace personal --test-cmd "pytest -q"`. The workspace is created if
+   it's new.
+3. In the app, open the project's Settings → **Create factory**, then commit `.claude/` on the
+   default branch. Runs refuse until the factory is committed there.
+
+## A first task and run
+
+1. Add a task: **+ New task** on the board, or in the repo
+   `fctl task add "Rate-limit login endpoint" --description "Max 5 failed logins per minute per IP."`.
+2. Start it: **Run** on the card, or `fctl run <id>` (`fctl run next` takes the top of the
+   Backlog; `fctl task add … --run` adds and runs in one step).
+3. Watch the card move through spec, build, and agent review. `fctl show <id>` prints the task,
+   its spec, and every round's build notes and verdicts.
+4. When it reaches Review, open its review page. **Approve** (or `fctl approve <id>`) marks it
+   done and prints the git commands to commit; **Request changes** (or `fctl rework <id> "note"`)
+   starts a new builder round with your note.
+
+The full walkthrough is in [docs/MVP.md §3](docs/MVP.md#3-user-flows), and every command is in
+[fctl.md](src/claude_factories/fctl.md).
+
+## Security
+
+- The backend has no auth. It must stay on 127.0.0.1: it rejects requests whose `Host` isn't
+  `127.0.0.1` or `localhost`, and every write needs the `X-Requested-By: fctl` header
+  (docs/MVP.md §4.5). Don't bind it to `0.0.0.0` or expose its port outside your machine;
+  `--host 0.0.0.0` is only for inside the Docker container.
+- Runs execute Claude Code agents with shell access inside your repos: they edit files and run
+  commands (your test command among them) in each task's worktree, as your user. Connect only
+  repos you trust, and review every diff before you commit it.
 
 ## Demo data
 
@@ -172,75 +192,43 @@ deletes the demo, and `docker compose up` brings your own app back.
 ## The factory loop
 
 ```
-feature
-  → spec-writer    spec.md: goal, doc sections, testable acceptance criteria, open questions
-  → builder        implements in .claude/worktrees/<id>, runs the tests, writes build.md
+task
+  → spec-writer    the task's spec: goal, testable acceptance criteria, open questions
+  → builder        implements in .claude/worktrees/<id>-<slug>, runs the tests, fctl submit <id>
   → 4 reviewers    security · ux · ui · code, in parallel, each PASS or CHANGES
       ↺ any CHANGES → builder again (at most 2 rounds per run)
-  → approver       APPROVE → human_review · ESCALATE → escalated
-  → you            approve: commit and merge yourself
-                   rework <note>: new builder round with your feedback
+  → approver       APPROVE → review · human_review, ESCALATE → review · escalated
+  → you            Approve: commit and merge yourself, or with Create PR / Merge PR
+                   Request changes <note>: a rework run with your feedback
 ```
 
-| agent | model | writes |
+| agent | model | posts |
 |---|---|---|
-| `spec-writer` | opus | `spec.md` |
-| `builder` | opus | code in its worktree, `round-N/build.md` |
-| `review-security` | opus | `round-N/review-security.md` |
-| `review-ux` | sonnet | `round-N/review-ux.md` |
-| `review-ui` | sonnet | `round-N/review-ui.md` |
-| `review-code` | sonnet | `round-N/review-code.md` (it also runs the tests) |
-| `approver` | opus | `decision.md` |
+| `spec-writer` | opus | the spec (`fctl spec`) |
+| `builder` | opus | code in its worktree, then a round with build notes (`fctl submit`) |
+| `review-security` | opus | a verdict and line comments (`fctl verdict`, `fctl comment`) |
+| `review-ux` | sonnet | a verdict and line comments |
+| `review-ui` | sonnet | a verdict and line comments |
+| `review-code` | sonnet | a verdict and line comments (it also runs the tests) |
+| `approver` | opus | the decision (`fctl decide`) |
 
 Rules that hold everywhere:
-- Agents get their context from files, not from the conversation, and each writes only its
-  own file.
-- One job per terminal. Run `/factory next` in another terminal to start a second job; it
-  skips backlog lines that need code from, or would edit the same code as, an unfinished job.
-- Nobody but you commits, pushes, merges, rebases, or switches branches. The orchestrator's
-  only git write is `git worktree add`.
+- Agents read their context with `fctl show`, not from the conversation, and all state lives
+  in the app's database, not in files in the repo.
+- Nobody but you commits, pushes, merges, rebases, or switches branches: git write commands are
+  denied in runs. Each task gets its own worktree, so tasks run in parallel up to the run cap
+  in Settings.
 
-[`FACTORY.md`](FACTORY.md) is the design of the loop, and
-[`.claude/skills/factory/SKILL.md`](.claude/skills/factory/SKILL.md) is how the
-orchestrator runs it. To change the factory, edit those two files.
-
-## Running the bootstrap factory
-
-You need [Claude Code](https://claude.com/claude-code), git, and Python 3. In a Claude
-Code session at the repo root:
-
-| command | does |
-|---|---|
-| `/factory next` | runs the first unchecked line in `factory/backlog.md` that no active job blocks |
-| `/factory <feature>` | adds a job with the next free id and runs it |
-| `/factory resume [<id>]` | continues an in-progress job whose session ended |
-| `/factory approve <id>` | marks the job done, ticks the backlog, and prints your git commands |
-| `/factory rework <id> <note>` | saves your note as feedback and runs a new builder round |
-
-`/factory approve` prints commands like these for you to run:
-
-```sh
-git -C .claude/worktrees/<id> add -A
-git -C .claude/worktrees/<id> commit -m "<title>"
-git merge --ff-only factory/<id>
-git worktree remove .claude/worktrees/<id> && git branch -d factory/<id>
-```
-
-Don't commit to `main` before the merge, or `--ff-only` fails.
-
-To watch the board, start the dashboard. It polls `factory/board.json`, and clicking a card
-shows its spec, build notes, reviews, decision, and diff.
-
-```sh
-python3 -m http.server -b 127.0.0.1 -d factory
-# → http://127.0.0.1:8000/dashboard.html
-```
+[`.claude/skills/factory/SKILL.md`](.claude/skills/factory/SKILL.md) is how the orchestrator
+runs the loop, and [`docs/claude-code.md`](docs/claude-code.md) §7 describes the skills and
+agent templates.
 
 ## Developing the app
 
 The stack is Python 3.12 with [uv](https://docs.astral.sh/uv/), FastAPI, and stdlib
 `sqlite3`. The `fctl` CLI imports only the stdlib. The frontend in `frontend/` is a Vite +
-React SPA with Tailwind v4, built with Node 22 and npm.
+React SPA with Tailwind v4, built with Node 22 and npm. Backend code follows the layout and
+import rules in `docs/MVP.md §4.7`, and `tests/test_architecture.py` checks its imports.
 
 You don't need the global install to work on the app itself:
 
@@ -270,14 +258,13 @@ against a fake backend on 127.0.0.1.
 ## Layout
 
 ```
-src/claude_factories/   app (FastAPI), fctl CLI, schema.sql
+src/claude_factories/   app (FastAPI), fctl CLI, schema.sql, factory templates
+frontend/               the React SPA and its server.js
 tests/
 docs/                   the design, which is the source of truth for what to build
-FACTORY.md              the bootstrap factory's design
-.claude/skills/factory/ the /factory orchestrator
-.claude/agents/         the 7 subagents
-.claude/worktrees/      one builder checkout per job (git-excluded)
-factory/                board.json, backlog.md, dashboard.html, jobs/<id>/ (spec, rounds, decision)
+.claude/skills/factory/ this repo's /factory orchestrator (written by Create factory)
+.claude/agents/         its 7 subagents
+.claude/worktrees/      one checkout per task (gitignored)
 ```
 
 ## Docs
@@ -288,9 +275,13 @@ factory/                board.json, backlog.md, dashboard.html, jobs/<id>/ (spec
 | [`docs/data-model-and-api.md`](docs/data-model-and-api.md) | §5 data model · §6 API |
 | [`docs/claude-code.md`](docs/claude-code.md) | §7 Claude Code integration: `fctl`, skills, agent templates |
 | [`docs/ui.md`](docs/ui.md) | §8 screens and wireframes |
+| [`docs/fctl_docs/`](docs/fctl_docs/README.md) | a guide to `fctl` for people and agents |
+| [`src/claude_factories/fctl.md`](src/claude_factories/fctl.md) | every `fctl` command, also served at `/docs/fctl` |
 
 Specs cite these sections, for example `docs/data-model-and-api.md §6.2`.
 
-After backlog job 015 the app can run factories itself. At that point this repo gets
-connected to the app with `/factory-connect`, and `factory/` retires along with the
-file-based loop.
+## License
+
+MIT. See [LICENSE](LICENSE).
+
+Claude Factories is an independent project. It is not affiliated with or endorsed by Anthropic.

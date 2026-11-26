@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { expectOfflineBanner, fetched, mockFetch, renderAt } from '../../test/render.jsx'
 
 const PROJECT = {
-  id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
+  id: 3, name: 'api', path: '/home/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
   remote_url: null, test_cmd: 'pytest -q',
 }
 const BOARD = '/api/pages/projects/3'

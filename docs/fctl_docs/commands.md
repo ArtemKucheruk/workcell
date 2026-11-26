@@ -17,7 +17,7 @@ denied there.
 |---|---|
 | [Read](#read) | `show`, `diff`, `round`, `context` |
 | [Post records (agents)](#post-records-agents) | `spec`, `submit`, `verdict`, `comment`, `decide`, `stage` |
-| [The user's actions](#the-users-actions) | `task add`, `task block`, `task unblock`, `run`, `rework`, `approve` |
+| [The user's actions](#the-users-actions) | `task add`, `task block`, `task unblock`, `task retry`, `task delete`, `automation run`, `run`, `rework`, `approve` |
 | [Projects and bundles](#projects-and-bundles) | `connect`, `context set`, `import-factory`, `export`, `import` |
 | [Running the app](#running-the-app) | `serve`, `setup`, `seed`, `service install\|uninstall\|start\|stop\|restart\|reload\|status\|logs` |
 
@@ -272,6 +272,46 @@ Removes one link. `DELETE /api/tasks/{id}/blocked-by/{blocker}`. Works anywhere.
 - Output: the blockers left, or `#15 has no blockers`.
 - Errors: `404 Task #15 not found`, `404 #15 is not blocked by #12`.
 
+### fctl task retry
+
+```
+fctl task retry <id> [--account <id|email>]
+```
+
+The user's **Retry** on a task whose latest run failed or was stopped. Reads the latest run with
+`GET /api/tasks/{id}`, then `POST /api/tasks/{id}/run` as [fctl run](#fctl-run). Works anywhere.
+
+- Output: `Run #42 on #12 as b@y → http://127.0.0.1:4545/tasks/12`
+- Errors: `fctl: #12 never ran; use fctl run 12`, `fctl: run #41 is running on #12; wait for it or stop it`
+  (nothing posted), `404 Task #99 not found`, and every [fctl run](#fctl-run) refusal.
+
+### fctl task delete
+
+```
+fctl task delete <id> [--yes]
+```
+
+Deletes a task and its runs, rounds, verdicts, comments, decisions, and transcript records from the
+app, after a `Delete? [y/N]` prompt. `DELETE /api/tasks/{id}`. Its worktree, branch, and run logs stay
+on disk. Works anywhere.
+
+- Output: `Deleted #14 Export CSV`
+- Errors: `fctl: not a terminal; pass --yes to delete #14 without asking`, `404 Task #14 not found`.
+
+### fctl automation run
+
+```
+fctl automation run <id> [--account <id|email>]
+```
+
+**Run now** on an automation: its skill, headless, in a fresh worktree from the default branch, with
+no board task. `POST /api/factories/{id}/run`. Works anywhere.
+
+- Output: `Run #43 of automation #7 as b@y in .claude/worktrees/automation-security-audit-1a2b3c4d → http://127.0.0.1:4545/agents`
+- Errors: `404 Factory #99 not found`, `409 Review loop is a workflow; run it on a task from the board`,
+  `409 automation <name> isn't committed on main: …`, and [fctl run](#fctl-run)'s worktree, account,
+  and run-cap refusals.
+
 ### fctl run
 
 ```
@@ -337,10 +377,10 @@ user to commit. The app runs no git. `POST /api/tasks/{id}/approve`.
 - Output (factory task):
   ```
   #12: done
-  cd /Users/me/code/api-server/.claude/worktrees/12-rate-limit-login
+  cd ~/code/api-server/.claude/worktrees/12-rate-limit-login
   git add -A && git commit -m 'Rate-limit login endpoint'
   git push -u origin factory/12-rate-limit-login     # then open a PR, or merge locally
-  cd /Users/me/code/api-server && wt remove factory/12-rate-limit-login
+  cd ~/code/api-server && wt remove factory/12-rate-limit-login
   ```
   A standalone task prints only `#17: done` and the commit line.
 - Errors: `409 #12 is not in review`, `404 #12 has no rounds`.

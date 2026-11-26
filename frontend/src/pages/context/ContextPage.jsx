@@ -218,7 +218,7 @@ function AddControls({ projectId, parentId, onNew, onNewGroup, onAdded, onError 
             value={path}
             onChange={(event) => setPath(event.target.value)}
             aria-describedby={`${id}-hint`}
-            placeholder="/Users/me/notes"
+            placeholder="/path/to/notes"
             spellCheck={false}
             className={`${field} min-w-0 flex-1 font-mono text-sm`}
           />

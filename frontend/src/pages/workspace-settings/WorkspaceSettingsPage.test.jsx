@@ -5,9 +5,9 @@ import { expectSkeleton, fetched, mockFetch, renderAt } from '../../test/render.
 const PAGE = '/api/pages/workspaces/5'
 const SIDEBAR = '/api/pages/sidebar'
 const PROJECTS = [
-  { id: 3, name: 'api', path: '/Users/me/api', backlog: 2, in_progress: 1, review: 0, done: 7,
+  { id: 3, name: 'api', path: '/home/me/api', backlog: 2, in_progress: 1, review: 0, done: 7,
     last_activity: '2026-10-18T09:05:00Z', factory: 'ready' },
-  { id: 4, name: 'web', path: '/Users/me/web', backlog: 0, in_progress: 0, review: 1, done: 0,
+  { id: 4, name: 'web', path: '/home/me/web', backlog: 0, in_progress: 0, review: 1, done: 0,
     last_activity: null, factory: 'none' },
 ]
 /** 041's workspace view-model, unchanged. */
@@ -99,8 +99,8 @@ test("049 FE22: Projects lists each project's name, linking to its Settings, and
   const { unmount } = await open()
   const rows = within(section('Projects')).getAllByRole('listitem')
   expect(rows.map((li) => [within(li).getByRole('link').textContent, within(li).getByRole('link').getAttribute('href'), li.textContent])).toEqual([
-    ['api', '/projects/3/settings', 'api/Users/me/api'],
-    ['web', '/projects/4/settings', 'web/Users/me/web'],
+    ['api', '/projects/3/settings', 'api/home/me/api'],
+    ['web', '/projects/4/settings', 'web/home/me/web'],
   ])
   unmount()
   await open(workspace('work', []))

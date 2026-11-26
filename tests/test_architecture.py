@@ -113,7 +113,8 @@ def test_mvp_code_layout_section():  # AC1, 026 AC7
 
 
 def test_conventions_point_at_layout():  # AC2
-    stack = section((REPO / "FACTORY.md").read_text(), "## The repo and its stack\n", "\n## ")
+    # 114 AC5: FACTORY.md is retired; README's "Developing the app" carries this rule now
+    stack = section((REPO / "README.md").read_text(), "## Developing the app\n", "\n## ")
     assert "docs/MVP.md §4.7" in stack
     assert "tests/test_architecture.py" in stack
     review = (REPO / ".claude" / "agents" / "review-code.md").read_text()
