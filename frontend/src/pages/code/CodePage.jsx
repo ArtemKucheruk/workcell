@@ -8,8 +8,9 @@ import { FileTree } from '../../components/FileTree.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Select } from '../../components/Select.jsx'
 import { Block, Crumbs, Lines, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
-import { field, muted } from '../../components/styles.js'
+import { muted } from '../../components/styles.js'
 import { usePoll } from '../../hooks/usePoll.js'
 
 // Q6: both <pre> share font, size, and line height, so the gutter's numbers line up with the code's lines
@@ -134,21 +135,16 @@ export function CodePage() {
         {branch && (
           <p className="min-w-0 basis-full text-sm">
             <label htmlFor={branchId}>Branch</label>{' '}
-            <select
+            <Select
               id={branchId}
               value={browsed}
-              onChange={(event) => setParams(event.target.value ? { branch: event.target.value } : {})}
-              className={`${field} max-w-[min(100%,28rem)] font-mono`}
-            >
-              <option value="">{branch}</option>
-              {branches
-                .filter((name) => name !== branch)
-                .map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-            </select>
+              onChange={(value) => setParams(value ? { branch: value } : {})}
+              options={[
+                { value: '', label: branch },
+                ...branches.filter((name) => name !== branch).map((name) => ({ value: name, label: name })),
+              ]}
+              className="max-w-[min(100%,28rem)] font-mono"
+            />
             {repo && <> {repo}</>}
           </p>
         )}

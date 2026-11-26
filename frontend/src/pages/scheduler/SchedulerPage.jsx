@@ -8,6 +8,7 @@ import { DeleteDialog } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage, OfflineBanner } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
+import { Select } from '../../components/Select.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { Time } from '../../components/Time.jsx'
 import { button, field, muted, popover, smallButton } from '../../components/styles.js'
@@ -89,45 +90,45 @@ function ScheduleForm({ schedule, automations, accounts, onSave }) {
   return (
     <form onSubmit={submit} className="grid gap-2">
       <h2 className="m-0 text-base">{schedule ? `Edit schedule of ${schedule.automation}` : 'Schedule automation'}</h2>
-      <label className="grid gap-1">
-        Automation
+      {/* 107 Q2: the Selects are named by their spans; a wrapping label would add the option's text to the name */}
+      <div className="grid gap-1">
+        <span id={`${FORM}-automation`}>Automation</span>
         {schedule ? (
-          <select disabled className={field}>
-            <option>{schedule.automation}</option>
-          </select>
+          <Select
+            aria-labelledby={`${FORM}-automation`}
+            disabled
+            options={[{ value: schedule.factory_id, label: schedule.automation }]}
+          />
         ) : (
-          <select name="automation" className={field}>
-            {automations.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          <Select
+            aria-labelledby={`${FORM}-automation`}
+            name="automation"
+            options={automations.map((f) => ({ value: f.id, label: f.name }))}
+          />
         )}
-      </label>
-      <label className="grid gap-1">
-        Repeat
-        <select name="repeat" value={repeat} onChange={(event) => setRepeat(event.target.value)} className={field}>
-          {REPEATS.map(([value, text]) => (
-            <option key={value} value={value}>
-              {text}
-            </option>
-          ))}
-        </select>
-      </label>
+      </div>
+      <div className="grid gap-1">
+        <span id={`${FORM}-repeat`}>Repeat</span>
+        <Select
+          aria-labelledby={`${FORM}-repeat`}
+          name="repeat"
+          value={repeat}
+          onChange={setRepeat}
+          options={REPEATS.map(([value, label]) => ({ value, label }))}
+        />
+      </div>
       {repeat === 'daily' && time}
       {repeat === 'weekly' && (
         <>
-          <label className="grid gap-1">
-            Weekday
-            <select name="weekday" defaultValue={start.weekday} className={field}>
-              {WEEKDAYS.map(([value, name]) => (
-                <option key={value} value={value}>
-                  {name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="grid gap-1">
+            <span id={`${FORM}-weekday`}>Weekday</span>
+            <Select
+              aria-labelledby={`${FORM}-weekday`}
+              name="weekday"
+              defaultValue={start.weekday}
+              options={WEEKDAYS.map(([value, label]) => ({ value, label }))}
+            />
+          </div>
           {time}
         </>
       )}
@@ -147,17 +148,15 @@ function ScheduleForm({ schedule, automations, accounts, onSave }) {
           </span>
         </label>
       )}
-      <label className="grid gap-1">
-        Account
-        <select name="account" defaultValue={schedule?.account_id ?? ''} className={field}>
-          <option value="">Auto</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="grid gap-1">
+        <span id={`${FORM}-account`}>Account</span>
+        <Select
+          aria-labelledby={`${FORM}-account`}
+          name="account"
+          defaultValue={schedule?.account_id ?? ''}
+          options={[{ value: '', label: 'Auto' }, ...accounts.map((a) => ({ value: a.id, label: a.label }))]}
+        />
+      </div>
       <button disabled={busy} className={`${button} justify-self-start`}>
         {schedule ? 'Save' : 'Create'}
       </button>

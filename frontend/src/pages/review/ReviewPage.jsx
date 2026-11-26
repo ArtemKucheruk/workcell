@@ -12,6 +12,7 @@ import { FileTree } from '../../components/FileTree.jsx'
 import { Markdown } from '../../components/Markdown.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
 import { PullRequest } from '../../components/PullRequest.jsx'
+import { Select } from '../../components/Select.jsx'
 import { Block, ButtonBlock, Crumbs, Lines, Skeleton, TabsSkeleton, TitleSkeleton } from '../../components/Skeleton.jsx'
 import { button, field, muted, popover, smallButton, tab } from '../../components/styles.js'
 import { Time } from '../../components/Time.jsx'
@@ -533,20 +534,16 @@ export function ReviewPage() {
           <TaskState task={task} />
           {task.branch && <code className="text-sm wrap-anywhere">{task.branch}</code>}
           {rounds.length > 0 && (
-            <label>
-              {'round '}
-              <select
+            <span>
+              {/* 107 Q2: named by its span; a wrapping label would add the round's number to the name */}
+              <span id="review-round">round</span>{' '}
+              <Select
+                aria-labelledby="review-round"
                 value={selected?.n}
-                onChange={(e) => setParams(onFiles ? { round: e.target.value, tab: 'files' } : { round: e.target.value })}
-                className={field}
-              >
-                {rounds.map((r) => (
-                  <option key={r.n} value={r.n}>
-                    {r.n}
-                  </option>
-                ))}
-              </select>
-            </label>
+                onChange={(round) => setParams(onFiles ? { round, tab: 'files' } : { round })}
+                options={rounds.map((r) => ({ value: r.n, label: r.n }))}
+              />
+            </span>
           )}
           {selected && (
             <span className="tabular-nums">

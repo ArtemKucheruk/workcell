@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, expect, test, vi } from 'vitest'
 import { FactoryResult } from '../../components/FactoryResult.jsx'
 import { fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { openSelect, pick } from '../../test/select.js'
 
 const PROJECT = {
   id: 3, name: 'api', path: '/Users/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
@@ -388,9 +389,10 @@ test('FE31 (AC27), 049 Q13: Move lists the workspaces, patches the chosen one, t
     'PATCH /api/projects/3': [200, { id: 3, workspace_id: 4, name: 'api', test_cmd: 'pytest -q' }],
   })
   const select = screen.getByRole('combobox', { name: 'Workspace' })
-  expect([...select.options].map((o) => [o.textContent, o.selected])).toEqual([['personal', true], ['work', false]])
+  const options = within(openSelect(select)).getAllByRole('option', { hidden: true }) // jsdom: no Popover API
+  expect(options.map((o) => [o.textContent, o.getAttribute('aria-selected')])).toEqual([['personal', 'true'], ['work', 'false']])
   responses[`GET ${BOARD}`] = [200, board({ project: { ...PROJECT, workspace_id: 4, workspace: 'work' } })]
-  fireEvent.change(select, { target: { value: '4' } })
+  pick(select, '4')
   fireEvent.click(screen.getByRole('button', { name: 'Move' }))
   const h1 = await screen.findByRole('heading', { level: 1, name: 'api · work' })
   expect(within(h1).getByRole('link', { name: 'work' }).getAttribute('href')).toBe('/workspaces/4')
@@ -401,7 +403,7 @@ test('FE31 (AC27), 049 Q13: Move lists the workspaces, patches the chosen one, t
 
 test('FE31 (AC28): a refused move shows its detail in the Move form', async () => {
   await open(board(), { 'PATCH /api/projects/3': [404, { detail: 'Not Found' }] })
-  fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: '4' } })
+  pick(screen.getByRole('combobox', { name: 'Workspace' }), '4')
   fireEvent.click(screen.getByRole('button', { name: 'Move' }))
   const alert = await screen.findByRole('alert')
   expect(alert.textContent).toBe('Not Found')
@@ -416,13 +418,14 @@ test('FE32: the title; a 404 is the not-found state; /projects/4/settings resets
   await waitFor(() => expect(document.title).toBe('api · Settings · Claude Factories'))
   importFile(bundleFile())
   await screen.findByText(fullText('Imported #12 Rate-limit <login>'))
-  fireEvent.change(screen.getByRole('combobox', { name: 'Workspace' }), { target: { value: '4' } })
+  pick(screen.getByRole('combobox', { name: 'Workspace' }), '4')
+  expect(screen.getByRole('combobox', { name: 'Workspace' }).textContent).toBe('work')
 
   // same workspace as project 3, so only a reset per project puts the select back on it
   responses['GET /api/pages/projects/4'] = [200, board({ project: { ...PROJECT, id: 4, name: 'billing' } })]
   await act(() => router.navigate('/projects/4/settings'))
   await screen.findByRole('heading', { level: 1, name: 'billing · personal' })
-  expect(screen.getByRole('combobox', { name: 'Workspace' }).value).toBe('2')
+  expect(screen.getByRole('combobox', { name: 'Workspace' }).textContent).toBe('personal')
   expect(screen.queryByText(/^Imported/)).toBeNull()
   expect(screen.getByRole('button', { name: 'Import' }).disabled).toBe(true)
 

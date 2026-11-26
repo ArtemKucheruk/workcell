@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { expectOfflineBanner, fetched, fullText, mockFetch, renderAt } from '../../test/render.jsx'
+import { openSelect, pick } from '../../test/select.js'
 
 const PAGE = '/api/pages/tasks/12'
 const LOG = (id, after) => `/api/runs/${id}/log?after=${after}`
@@ -838,18 +839,20 @@ test('094 AC26: Add picks from the project\'s other tasks minus the blockers, se
     'PUT /api/tasks/12/blocked-by/15': [422, { detail: cycle }],
     'PUT /api/tasks/12/blocked-by/14': [200, { id: 12, blocked: true, blocked_by: [], blocks: [] }],
   })
-  expect([...select().options].map((o) => [o.value, o.textContent])).toEqual([
+  expect(select().id).toBe('blocker-pick')
+  const options = [...openSelect(select()).querySelectorAll('[role="option"]')]
+  expect(options.map((o) => [o.dataset.value, o.textContent])).toEqual([
     ['11', '#11 Audit log'], ['14', '#14 Captcha'], ['15', '#15 Lockout email']])
   const add = within(section('Blocked by')).getByRole('button', { name: 'Add' })
-  fireEvent.change(select(), { target: { value: '15' } })
+  pick(select(), '15')
   fireEvent.click(add)
   expect((await within(section('Blocked by')).findByRole('alert')).textContent).toBe(cycle)
   expect(within(header()).queryByRole('alert')).toBeNull()
-  expect(select().value).toBe('15')
+  expect([select().value, select().textContent]).toEqual(['15', '#15 Lockout email'])
   expect(loads(fetch)).toBe(1)
   sent(fetch, 'PUT', '/api/tasks/12/blocked-by/15')
   responses[`GET ${PAGE}`] = [200, taskPage({}, LINKED)]
-  fireEvent.change(select(), { target: { value: '14' } })
+  pick(select(), '14')
   await waitFor(() => expect(add.disabled).toBe(false))
   fireEvent.click(add)
   await waitFor(() => expect(loads(fetch)).toBe(2))

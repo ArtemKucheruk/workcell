@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { optionLabels, pick } from '../../test/select.js'
 
 const PAGE = '/api/pages/tasks/12/review'
 const COMMENTS = '/api/tasks/12/comments'
@@ -142,19 +143,18 @@ test('AC2, 043 FE12: the status pill and stage, the branch in a <code>, and the 
   expect(within(header()).getByText(`1 file changed +3 ${M}0`)).toBeTruthy()
 })
 
-test('AC3: the round <select> lists the rounds; picking 1 sets ?round=1 and shows its totals', async () => {
+test('AC3: the round Select lists the rounds; picking 1 sets ?round=1 and shows its totals', async () => {
   const { fetch, router } = await open(reviewPage(), '/tasks/12/review', {
     [`GET ${PAGE}?round=1`]: [200, reviewPage({}, { selected: summary(ROUND1) })],
   })
-  const select = within(header()).getByLabelText('round')
-  expect(select.tagName).toBe('SELECT')
-  expect([...select.options].map((o) => o.textContent)).toEqual(['1', '2'])
-  expect(select.value).toBe('2')
-  fireEvent.change(select, { target: { value: '1' } })
+  const select = within(header()).getByRole('combobox', { name: 'round' })
+  expect(optionLabels(select)).toEqual(['1', '2'])
+  expect([select.value, select.textContent]).toEqual(['2', '2'])
+  pick(select, '1')
   expect(router.state.location.search).toBe('?round=1')
   await waitFor(() => expect(fetched(fetch)).toContain(`${PAGE}?round=1`))
   expect(await within(header()).findByText(`2 files changed +118 ${M}9`)).toBeTruthy()
-  expect(within(header()).getByLabelText('round').value).toBe('1')
+  expect(within(header()).getByRole('combobox', { name: 'round' }).value).toBe('1')
 })
 
 test('AC4: ?round=1&tab=files fetches round 1 and shows Files changed; the tab links keep round and mark the active one', async () => {
@@ -231,9 +231,11 @@ test('AC8, 043 FE12, 047 FE17: rounds show in order with plain colored chips tit
     'text-danger', 'text-success', 'text-success', 'text-success',
   ])
   expect(section('Rounds').querySelector('[popover], [popovertarget]')).toBeNull()
-  // 047: Review changes' is the page's one popover
-  expect([...document.querySelectorAll('[popover]')].map((el) => el.id)).toEqual(['review-changes'])
-  expect([...document.querySelectorAll('[popovertarget]')].map((el) => el.textContent)).toEqual(['Review changes ▾'])
+  // 047: Review changes' is the page's one popover, besides the round Select's listbox (107)
+  expect([...document.querySelectorAll('[popover]:not([role="listbox"])')].map((el) => el.id)).toEqual(['review-changes'])
+  expect([...document.querySelectorAll('[popovertarget]:not([role="combobox"])')].map((el) => el.textContent)).toEqual([
+    'Review changes ▾',
+  ])
 })
 
 test('AC9: posted verdicts with a body are closed <details> in reviewer order; a blank body gets none', async () => {
@@ -267,7 +269,7 @@ test('AC10: a standalone round with nothing posted says no agent review; a facto
   ])
 })
 
-test('AC11: no rounds says No rounds yet., with no round <select> and no files changed', async () => {
+test('AC11: no rounds says No rounds yet., with no round select and no files changed', async () => {
   await open(noRounds())
   expect(within(section('Rounds')).getByText('No rounds yet.')).toBeTruthy()
   expect(screen.queryByRole('combobox')).toBeNull()

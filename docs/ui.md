@@ -40,9 +40,15 @@ every page uses the same words and colors:
 - Pills and chips use only `muted`, `accent`, `warning`, `success`, `danger`, and `surface`,
   with no opacity tints, and every text-on-background pair they make clears 4.5:1, light and
   dark. The wireframes draw a pill in parentheses, `(Review)`, and a button in brackets.
+- Every dropdown is the shared **Select** (`components/Select.jsx`, item 107), not a native
+  `<select>`: a button in the `field` look showing the current option, whose listbox opens in a
+  native popover anchored under it, on the theme's tokens, light and dark. The selected option
+  has a check mark, the active one a `raised` highlight. It keeps a native select's keyboard
+  (Enter, Space, or ↓ opens; arrows, Home, End, and type-ahead move; Enter picks; Esc closes;
+  Tab moves on), its label, its form value (a hidden input), and `disabled`.
 
 Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no headings:
-- Top: the app name linking to `/`, then the `Workspace` switcher (a native `<select>`) and
+- Top: the app name linking to `/`, then the `Workspace` switcher (the shared Select) and
   **+ New workspace**, which reveals a name field and posts `POST /api/workspaces` (§6.1).
 - Then the selected workspace's projects. Each project is a disclosure button that opens
   **Board**, **Code**, **Reviews** (with its count of tasks waiting on me or escalated, a
@@ -57,12 +63,12 @@ Every page has a left sidebar (§8.4), one `<nav aria-label="Sidebar">` with no 
   under a divider, **Delete**. From `md` up a `⋯` is hidden by opacity only, never `display`, so
   Tab still reaches it: it shows while its row is hovered or holds focus, or while its menu is
   open. Below `md` it always shows.
-- **Rename** replaces the project's name, or the workspace `<select>`, with a text field holding
+- **Rename** replaces the project's name, or the workspace Select, with a text field holding
   the name, focused and selected. Enter sends the PATCH (§6.1), even with the name unchanged.
   Esc or leaving the field cancels with no request. A refusal shows its detail beside the field,
   which stays. After a save or Esc, focus is on the row's `⋯`.
 - **Move to workspace** sends `PATCH /api/projects/{id}` with the chosen `workspace_id`, then
-  focus goes to the workspace `<select>`. A refusal shows its detail in the sidebar.
+  focus goes to the workspace Select. A refusal shows its detail in the sidebar.
 - **Delete** opens a modal `<dialog>` (§8.4) with **Cancel** first, then **Delete** filled
   `danger` with `surface` text. It is never disabled ahead of time: the server decides, and its
   409 detail shows inside the dialog, which stays open. A deleted project's app goes to
@@ -258,7 +264,7 @@ Loading, failures, times, and motion are the same on every page:
      `✓ APPROVE`, `✗ CHANGES`, `! failed`, `▲ escalated`, and a condition's answer as `→ yes` or
      `→ no`. Its accessible name is its title and state. Where the run is now (every running node,
      else round C's failed or escalated one) has an accent ring and `aria-current="step"`; the
-     running dot pulses only without `prefers-reduced-motion`. A native **Round** `<select>`
+     running dot pulses only without `prefers-reduced-motion`. A **Round** picker, the shared Select,
      lists the rounds and defaults to the latest; picking one refetches with `?round=`, and with
      no pick it follows a new latest round. The flow refetches every 3 s while the run runs, and
      once when it stops. Clicking a node, or Enter on it (each node is a tab stop), opens its
@@ -270,8 +276,8 @@ Loading, failures, times, and motion are the same on every page:
      `/factory-submit`) has no Factory section.
    - Description, then **Blocked by**: one row per task this one waits on, done ones included,
      by id: its `#id` link, title, status pill, and a **Remove** button; `No blockers.` with none.
-     Under the rows, a native `<select>` of the project's other tasks, minus the current blockers,
-     and **Add**. Add sends `PUT /api/tasks/{id}/blocked-by/{picked}`, Remove
+     Under the rows, **Wait on**, the shared Select, of the project's other tasks, minus the
+     current blockers, and **Add**; a pick that becomes a blocker falls back to the first task. Add sends `PUT /api/tasks/{id}/blocked-by/{picked}`, Remove
      `DELETE /api/tasks/{id}/blocked-by/{blocker}` (§6.2), then the page reloads. A refusal (a
      cycle, say) shows its detail inside the section, and the select keeps its pick. Then
      **Blocks**: the `#id` link and title of each task waiting on this one, or `Blocks nothing.`;
@@ -291,7 +297,7 @@ Loading, failures, times, and motion are the same on every page:
    - "Take over in terminal" command, in the run's own account's config dir.
    - A link to Review.
 5. **Code review** (`/tasks/{id}/review`): GitHub-style (wireframes below).
-   - Round selector, defaulting to latest. The diff is a table built from the backend's diff
+   - Round selector (`round`, the shared Select), defaulting to latest. The diff is a table built from the backend's diff
      rows, with one row per line and anchor `path:side:line`, and highlight.js colors it.
    - Clicking a line number opens an inline comment form.
    - Files changed has the file tree (§8.3) beside the diffs: each file links to its diff and
@@ -321,7 +327,7 @@ Loading, failures, times, and motion are the same on every page:
    - The landing view renders `README.md`.
    - Clicking a file opens a highlighted view with line numbers. Binary files and files
      over 1 MB show "not shown".
-   - The header has a **Branch** picker, a native `<select>`: first the checked-out branch (or
+   - The header has a **Branch** picker, the shared Select: first the checked-out branch (or
      `detached HEAD`), which is the working tree, then the other listed branches (local ones,
      then `origin/<name>` for each origin branch with no local twin). Picking one sets
      `?branch=` and opens that branch's README landing, and file links and `?path=` deep links
@@ -796,7 +802,7 @@ project ⋯                  workspace ⋯
 └───────────────────┘
 
 Rename in place (Enter saves, Esc or blur cancels)
-│ ▾ [api-server______]   ⋯ │  ← the name, focused and selected; the workspace's replaces its <select>
+│ ▾ [api-server______]   ⋯ │  ← the name, focused and selected; the workspace's replaces its Select
 │   name must not be blank │  ← a refusal, beside the field, which stays
 
 ┌ Delete project api-server? ─────────────────────────────────────────────┐
@@ -846,7 +852,7 @@ tree: Preline Tree View's rows, as in §8.3. The file shown (app/limits.py) is t
   [+] opens a directory and [−] closes it; another file opens its own and leaves the rest as they were.
 viewer: the file's path, then a highlighted view with an aria-hidden gutter of line numbers; binary
   files and files over 1 MB show "not shown". The landing (no ?path=) renders README.md.
-Branch [main ▾]: a native <select>, the checked-out branch first (the working tree), then the other
+Branch [main ▾]: the shared Select, the checked-out branch first (the working tree), then the other
   listed branches. Picking one sets ?branch= and opens its README landing; ?path= links keep ?branch=.
 ```
 
