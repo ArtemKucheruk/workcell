@@ -386,7 +386,8 @@ function WorkspaceRow({ workspaces, workspace, selected, onSelect, selectId, onR
 }
 
 /**
- * docs/ui.md §8.4: the app name, the workspace area, then Dashboard, Agents, the fctl reference, and the badge.
+ * docs/ui.md §8.4: the app name, the workspace area, then Dashboard, Usage, Agents, the fctl reference, Settings
+ * (111), and the badge.
  * Q15: one landmark with no headings. Layout owns the state, so the column and the drawer show the same thing.
  */
 export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onReload }) {
@@ -478,6 +479,12 @@ export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onR
           <li>
             <NavLink to="/docs/fctl" end className={navLink}>
               fctl reference
+            </NavLink>
+          </li>
+          <li>
+            {/* 111: after fctl reference */}
+            <NavLink to="/settings" end className={navLink}>
+              Settings
             </NavLink>
           </li>
         </ul>

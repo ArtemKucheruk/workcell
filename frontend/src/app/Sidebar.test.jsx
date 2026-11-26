@@ -754,7 +754,7 @@ test('095 AC23: no snapshot shows the no-data text, expanded or as a line; no ac
   expect(usageLink()).toBeNull()
 })
 
-test('095 AC24: the bottom nav is Dashboard, Usage, Agents, fctl reference', async () => {
+test('095 AC24, 111 AC1: the bottom nav is Dashboard, Usage, Agents, fctl reference, Settings', async () => {
   await open('/', withUsage([acct(1, 'me@x.io', true)]))
   const nav = [...sidebar().getByRole('link', { name: 'Dashboard' }).closest('ul').querySelectorAll('a')]
   expect(nav.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
@@ -762,5 +762,43 @@ test('095 AC24: the bottom nav is Dashboard, Usage, Agents, fctl reference', asy
     ['Usage', '/usage'],
     ['Agents', '/agents'],
     ['fctl reference', '/docs/fctl'],
+    ['Settings', '/settings'],
   ])
+})
+
+// --- 111: Settings in the bottom nav ---------------------------------------------------
+
+/** 111 Q1: the bottom nav list, so the project's and the ⋯ menus' Settings links don't match. */
+const bottomNav = () => within(sidebar().getByRole('link', { name: 'Dashboard' }).closest('ul'))
+const PRO = { auth_method: 'claude.ai', plan: 'pro', runs_enabled: true, email: null }
+
+test('111 AC2: Settings is the last bottom-nav item, right after fctl reference', async () => {
+  await open('/')
+  const settings = bottomNav().getByRole('link', { name: 'Settings' })
+  const li = settings.closest('li')
+  expect(li.previousElementSibling).toBe(bottomNav().getByRole('link', { name: 'fctl reference' }).closest('li'))
+  expect(li.nextElementSibling).toBeNull()
+})
+
+test('111 AC3: on /settings the bottom-nav Settings link is the current page, Dashboard is not', async () => {
+  await open('/settings', body(), SIDEBAR, {
+    'GET /api/auth': [200, PRO],
+    'GET /api/auth/accounts': [200, []],
+    'GET /api/settings': [200, {}],
+  })
+  const settings = bottomNav().getByRole('link', { name: 'Settings' })
+  expect(settings.getAttribute('aria-current')).toBe('page')
+  expect(settings.className).toMatch(accent)
+  expect(bottomNav().getByRole('link', { name: 'Dashboard' }).hasAttribute('aria-current')).toBe(false)
+})
+
+test('111 AC4: on / the bottom-nav Settings link is not the current page', async () => {
+  await open('/')
+  expect(bottomNav().getByRole('link', { name: 'Settings' }).hasAttribute('aria-current')).toBe(false)
+})
+
+test('111 AC5: the auth badge still links to /settings', async () => {
+  await open('/', body(), SIDEBAR, { 'GET /api/auth': [200, PRO] })
+  const badge = await sidebar().findByRole('link', { name: 'Claude: Pro ✓' })
+  expect(badge.getAttribute('href')).toBe('/settings')
 })
