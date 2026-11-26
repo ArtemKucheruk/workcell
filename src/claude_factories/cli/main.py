@@ -10,7 +10,7 @@ from .commands.submit import diff, submit
 from .commands.tasks import export, import_bundle, task_add, task_block, task_delete, task_ids, task_retry
 from .output import fail
 
-SKILLS = ("factory-connect", "factory-submit")  # docs/claude-code.md §7.1, shipped in global_skills/
+SKILLS = ("factory-connect", "factory-submit", "fctl")  # docs/claude-code.md §7.1, shipped in global_skills/
 
 
 def setup(args):
@@ -98,7 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=4545, help="port to listen on (default: 4545)")
     p.set_defaults(func=serve)
     add_service(commands)
-    p = commands.add_parser("setup", help="write the /factory-connect and /factory-submit skills to ~/.claude")
+    p = commands.add_parser("setup", help="write the /factory-connect, /factory-submit, and fctl skills to ~/.claude")
     p.set_defaults(func=setup)
     p = commands.add_parser("seed", help="fill an empty FCTL_HOME with demo workspaces, projects, and tasks")
     p.set_defaults(func=seed)

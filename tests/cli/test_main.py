@@ -119,11 +119,23 @@ def test_setup_writes_skills(server):  # 015 AC1
     main(["setup"])
     assert skill("factory-connect").is_file()
     assert skill("factory-submit").is_file()
+    assert skill("fctl").is_file()
 
 
 def test_setup_output(server, capsys):  # 015 AC2
     main(["setup"])
-    assert capsys.readouterr().out == f"Wrote {skill('factory-connect')}\nWrote {skill('factory-submit')}\n"
+    assert capsys.readouterr().out == "".join(f"Wrote {skill(n)}\n" for n in ("factory-connect", "factory-submit", "fctl"))
+
+
+def test_setup_fctl_skill(server):  # the fctl skill: frontmatter, and the commands it teaches exist
+    main(["setup"])
+    front, body = frontmatter(skill("fctl").read_text())
+    assert "name: fctl" in front.splitlines()
+    assert re.search(r"^description: \S", front, re.M)
+    for words in ("show", "diff", "round", "context set", "connect", "task add", "task block", "run", "rework",
+                  "approve", "submit", "export", "import", "spec", "verdict", "comment", "decide", "stage"):
+        assert f"fctl {words}" in body, words
+    assert "fctl task add" in body and "--description - <<'EOF'" in body
 
 
 def test_setup_is_offline(server, monkeypatch):  # 015 AC3

@@ -10,7 +10,7 @@ agents read and write the app. Every command but `fctl serve`, `fctl setup`, `fc
 
 ```sh
 uv tool install ~/personalProjects/claude-factories   # puts fctl on PATH (~/.local/bin)
-fctl setup     # writes ~/.claude/skills/factory-connect and ~/.claude/skills/factory-submit
+fctl setup     # writes ~/.claude/skills/factory-connect, factory-submit, and fctl
 ```
 
 Use the path of your own checkout. With `--editable`
@@ -19,12 +19,13 @@ checkout, so a `git pull` is enough to update it. Without it, `uv tool install -
 the same path picks up new code. If `fctl` isn't found afterwards, run `uv tool update-shell` and
 open a new terminal. `uv tool uninstall claude-factories` removes it.
 
-`fctl setup` installs the two global skills into Claude Code, once per machine:
+`fctl setup` installs the three global skills into Claude Code, once per machine:
 
 | Skill | Written to |
 |---|---|
 | `/factory-connect` | `~/.claude/skills/factory-connect/SKILL.md` |
 | `/factory-submit` | `~/.claude/skills/factory-submit/SKILL.md` |
+| `fctl` (loaded when you work with fctl) | `~/.claude/skills/fctl/SKILL.md` |
 
 The factory itself, the `/factory` skill and its 7 agents, is written into each repo by
 **Create factory** on the project's Settings page, not by `fctl`.
@@ -170,7 +171,8 @@ fctl serve --port 5000
 
 ## fctl setup
 
-Installs the `/factory-connect` and `/factory-submit` skills for Claude Code. No HTTP.
+Installs the `/factory-connect`, `/factory-submit`, and `fctl` skills for Claude Code. No HTTP. The
+`fctl` skill teaches a Claude Code session the app, its commands, and their errors.
 
 **Synopsis**
 
@@ -193,6 +195,7 @@ One line per skill:
 ```
 Wrote /Users/me/.claude/skills/factory-connect/SKILL.md
 Wrote /Users/me/.claude/skills/factory-submit/SKILL.md
+Wrote /Users/me/.claude/skills/fctl/SKILL.md
 ```
 
 `fctl` owns each `SKILL.md` and overwrites it, so running `fctl setup` again after an update

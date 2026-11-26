@@ -10,6 +10,7 @@ Part of the [MVP design](MVP.md). Section numbers continue from it.
 | `fctl` CLI | `~/.local/bin/fctl` | `uv tool install` |
 | `/factory-connect` skill | `~/.claude/skills/factory-connect/SKILL.md` | `fctl setup` |
 | `/factory-submit` skill | `~/.claude/skills/factory-submit/SKILL.md` | `fctl setup` |
+| `fctl` skill (how to use fctl and the app) | `~/.claude/skills/fctl/SKILL.md` | `fctl setup` |
 | `/factory` orchestrator skill | `<repo>/.claude/skills/factory/SKILL.md` | Create factory, or a design's Write to repo (§7.3) |
 | 7 agents | `<repo>/.claude/agents/{spec-writer,builder,review-security,review-ux,review-ui,review-code,approver}.md` | Create factory, or a design's Write to repo (§7.3) |
 
@@ -24,7 +25,7 @@ Each command's full reference (flags, stdin, output, exit codes, an example) is 
 |---|---|---|
 | `fctl serve [--host 127.0.0.1] [--port 4545]` | me | starts the app |
 | `fctl service install\|uninstall\|start\|stop\|restart\|reload\|status\|logs` | me | none but `GET /api/pages/agents` (the active runs check and `status`): runs the backend and frontend as launchd / `systemd --user` services |
-| `fctl setup` | me, once | writes the 2 global skills |
+| `fctl setup` | me, once | writes the 3 global skills |
 | `fctl seed` | me | none: writes demo data straight into an empty `FCTL_HOME` |
 | `fctl connect --workspace W [--test-cmd C]` | `/factory-connect` | `POST /api/projects/connect`, then `POST /api/projects/{id}/import-factory` `{}` when `factory/board.json` or `factory/backlog.md` is a file |
 | `fctl context` | me | `GET /api/projects/{id}/context` → prints `context_md` as stored |

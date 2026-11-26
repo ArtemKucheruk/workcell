@@ -75,7 +75,7 @@ docker compose exec backend claude auth login             # once, in a second te
 The app opens at `http://127.0.0.1:3000`. `fctl` also goes on the host:
 ```
 uv tool install ~/personalProjects/claude-factories   # puts `fctl` on PATH
-fctl setup     # writes ~/.claude/skills/factory-connect and ~/.claude/skills/factory-submit
+fctl setup     # writes ~/.claude/skills/factory-connect, factory-submit, and fctl
 ```
 The `/factory-connect` and `/factory-submit` skills run `fctl` on the host against the
 backend on `127.0.0.1:4545`.
