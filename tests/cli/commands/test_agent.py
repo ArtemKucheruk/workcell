@@ -18,6 +18,12 @@ def test_show(server, capsys):  # 006 AC29
     ]
 
 
+def test_show_module(server, capsys):  # 112 AC25: the server's Module: line, printed as is
+    server.reply = (200, "text/markdown; charset=utf-8", "# #12 x\nStatus: backlog\nModule: frontend\n".encode())
+    main(["show", "12"])
+    assert capsys.readouterr().out == "# #12 x\nStatus: backlog\nModule: frontend\n"
+
+
 def test_spec(server, monkeypatch, capsys):  # 006 AC30
     server.reply = reply({"id": 12, "status": "in_progress", "stage": "spec"})
     fctl(monkeypatch, "spec", "12", stdin="## Acceptance criteria\n- x\n")

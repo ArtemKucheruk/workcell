@@ -3,16 +3,24 @@ docs/claude-code.md §7.5)."""
 
 from ..domain.enums import STAGE_STATUS, Stage, Status
 from ..domain.errors import Conflict, Invalid, NotFound
+from ..dto.modules import ModuleRef
 from ..dto.tasks import (DecisionOut, Dep, RunOut, TaskBody, TaskCreated, TaskDeps, TaskItem, TaskOut, TaskPatch,
                          TaskPatched, TaskSubmitted)
+from ..repositories.modules import ModulesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.tasks import TasksRepo
+from .modules import check_module
 from .rounds import insert_round, round_summaries
 
 COLUMNS = tuple(Status)
+
+
+def module_ref(row) -> ModuleRef | None:
+    """112 AC14: a row's module_id and module (its name) as {id, name}, or None."""
+    return None if row["module_id"] is None else ModuleRef(id=row["module_id"], name=row["module"])
 
 
 def latest_run(runs: RunsRepo, task_id: int) -> RunOut | None:
@@ -47,7 +55,7 @@ def list_tasks(projects: ProjectsRepo, tasks: TasksRepo, rounds: RoundsRepo, rev
             round=last.get("n"), verdicts=last.get("verdicts"),
             additions=last.get("additions"), deletions=last.get("deletions"),
             run=latest_run(runs, t["id"]),
-            blocked_by=blocked_by.get(t["id"], []), blocks=blocks.get(t["id"], []),
+            blocked_by=blocked_by.get(t["id"], []), blocks=blocks.get(t["id"], []), module=module_ref(t),
         ))
     return items
 
@@ -62,9 +70,10 @@ def check_blocker(tasks: TasksRepo, project_id: int, blocker_id: int) -> None:
 
 
 def create_task(tasks: TasksRepo, projects: ProjectsRepo, rounds: RoundsRepo, reviews: ReviewsRepo,
-                project_id: int, body: TaskBody, base_url: str) -> TaskCreated | TaskSubmitted:
+                modules: ModulesRepo, project_id: int, body: TaskBody, base_url: str) -> TaskCreated | TaskSubmitted:
     """A Backlog task, or with `submit` a standalone task straight in Review with round 1 (003 Q3). 094 AC10: with
-    its `blocked_by` links, each checked before the task is added, and a repeated id stored once."""
+    its `blocked_by` links, each checked before the task is added, and a repeated id stored once. 112 AC11, AC12:
+    with its module, one of the project's, checked before the task is added."""
     title = body.title.strip()
     if not title:
         raise Invalid("title must not be blank")
@@ -75,8 +84,10 @@ def create_task(tasks: TasksRepo, projects: ProjectsRepo, rounds: RoundsRepo, re
     blockers = list(dict.fromkeys(body.blocked_by))
     for blocker_id in blockers:  # a new task has no dependents, so neither a self link nor a cycle can arise
         check_blocker(tasks, project_id, blocker_id)
+    if body.module_id is not None:
+        check_module(modules, project_id, body.module_id)
     position = tasks.bottom_position(project_id, status)
-    task_id = tasks.add(project_id, title, body.description_md, status, stage, position, now)
+    task_id = tasks.add(project_id, title, body.description_md, status, stage, position, now, body.module_id)
     tasks.add_event(task_id, actor, None, status, stage, now)
     for blocker_id in blockers:
         tasks.link(task_id, blocker_id)
@@ -94,7 +105,7 @@ def get_task(tasks: TasksRepo, rounds: RoundsRepo, reviews: ReviewsRepo, runs: R
         id=task["id"], title=task["title"], status=task["status"], stage=task["stage"], branch=task["branch"],
         rounds=round_summaries(rounds, reviews, task_id),
         decisions=[DecisionOut(**d) for d in reviews.task_decisions(task_id)],
-        run=latest_run(runs, task_id), **links(tasks, task_id),
+        run=latest_run(runs, task_id), module=module_ref(task), **links(tasks, task_id),
     )
 
 
@@ -142,17 +153,20 @@ def unblock(tasks: TasksRepo, task_id: int, blocker_id: int) -> TaskDeps:
 
 
 PATCH_GROUPS = ({"spec_md"}, {"stage"}, {"status", "position"}, {"title"}, {"description_md"},
-                {"title", "description_md"})
+                {"title", "description_md"}, {"module_id"})
 EDIT = {"title", "description_md"}
 
 
-def patch_task(tasks: TasksRepo, runs: RunsRepo, task_id: int, body: TaskPatch) -> TaskPatched:
+def patch_task(tasks: TasksRepo, runs: RunsRepo, modules: ModulesRepo, task_id: int, body: TaskPatch) -> TaskPatched:
     """The spec, a stage (status from §5.2, actor orchestrator), a manual move (status and position,
-    stage cleared, actor me, refused while a run is active), or an edit (title and/or description, any status,
-    048 Q1–Q3). One event per status or stage change."""
+    stage cleared, actor me, refused while a run is active), an edit (title and/or description, any status,
+    048 Q1–Q3), or 112's module (null clears it). One event per status or stage change."""
     sent = body.model_fields_set
     if sent not in PATCH_GROUPS:
-        raise Invalid("send exactly one of: spec_md, stage, status with position, or title and/or description_md")
+        raise Invalid("send exactly one of: spec_md, stage, status with position, title and/or description_md,"
+                      " or module_id")
+    if sent == {"module_id"}:
+        return set_module(tasks, modules, task_id, body.module_id)
     if any(getattr(body, key) is None for key in sent):
         raise Invalid(f"{', '.join(sorted(sent))} must not be null")
     title = None if body.title is None else body.title.strip()
@@ -181,6 +195,18 @@ def patch_task(tasks: TasksRepo, runs: RunsRepo, task_id: int, body: TaskPatch) 
     if (status, stage) != (task["status"], task["stage"]):
         tasks.add_event(task_id, actor, task["status"], status, stage, now)
     return TaskPatched(id=task_id, status=status, stage=stage)
+
+
+def set_module(tasks: TasksRepo, modules: ModulesRepo, task_id: int, module_id: int | None) -> TaskPatched:
+    """112 AC13: the task's module, one of its project's, or none. Q7: status and stage stay, so no event."""
+    now = tasks.lock()  # the check and the update commit together
+    task = tasks.get(task_id)
+    if task is None:
+        raise NotFound()
+    if module_id is not None:
+        check_module(modules, task["project_id"], module_id)
+    tasks.set_module(task_id, module_id, now)
+    return TaskPatched(id=task_id, status=task["status"], stage=task["stage"])
 
 
 def delete_task(tasks: TasksRepo, runs: RunsRepo, task_id: int) -> None:

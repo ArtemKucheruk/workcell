@@ -8,6 +8,7 @@ import { DashboardPage } from '../pages/dashboard/DashboardPage.jsx'
 import { FactoriesPage } from '../pages/factories/FactoriesPage.jsx'
 import { FactoryPage } from '../pages/factory/FactoryPage.jsx'
 import { FctlDocsPage } from '../pages/docs/FctlDocsPage.jsx'
+import { ModulesPage } from '../pages/modules/ModulesPage.jsx'
 import { ProjectSettingsPage } from '../pages/project-settings/ProjectSettingsPage.jsx'
 import { ReviewPage } from '../pages/review/ReviewPage.jsx'
 import { ReviewsPage } from '../pages/reviews/ReviewsPage.jsx'
@@ -36,6 +37,7 @@ export const routes = [
       // 042 FE37: lists and forms, so main keeps its max width
       { path: '/projects/:id/reviews', element: <ReviewsPage /> },
       { path: '/projects/:id/context', element: <ContextPage /> },
+      { path: '/projects/:id/modules', element: <ModulesPage /> }, // 112: a list, not wide
       { path: '/projects/:id/settings', element: <ProjectSettingsPage /> },
       { path: '/projects/:id/factories', element: <FactoriesPage /> }, // 051: a list, not wide
       { path: '/projects/:id/factories/:fid', element: <FactoryPage />, handle: { wide: true } },

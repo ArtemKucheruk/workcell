@@ -14,6 +14,7 @@ from ..adapters.git import Git, SubprocessGit
 from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.context_items import ContextItemsRepo
 from ..repositories.factories import FactoriesRepo
+from ..repositories.modules import ModulesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.reviews import ReviewsRepo
 from ..repositories.rounds import RoundsRepo
@@ -83,6 +84,10 @@ def get_context_items(conn: Conn) -> ContextItemsRepo:
     return ContextItemsRepo(conn)
 
 
+def get_modules(conn: Conn) -> ModulesRepo:
+    return ModulesRepo(conn)
+
+
 def get_usage(conn: Conn) -> UsageRepo:
     return UsageRepo(conn)
 
@@ -106,6 +111,7 @@ Settings = Annotated[SettingsRepo, Depends(get_settings)]
 Factories = Annotated[FactoriesRepo, Depends(get_factories)]
 ClaudeAccounts = Annotated[ClaudeAccountsRepo, Depends(get_claude_accounts)]
 ContextItems = Annotated[ContextItemsRepo, Depends(get_context_items)]
+Modules = Annotated[ModulesRepo, Depends(get_modules)]
 Usage = Annotated[UsageRepo, Depends(get_usage)]
 GitAdapter = Annotated[Git, Depends(get_git)]
 ClaudeAdapter = Annotated[Claude, Depends(get_claude)]

@@ -31,7 +31,7 @@ PRO_EMAIL = '{"authMethod":"claude.ai","subscriptionType":"pro","email":"artem@e
 APP_PY = "diff --git a/app.py b/app.py\nnew file mode 100644\n--- /dev/null\n+++ b/app.py\n@@ -0,0 +1 @@\n+x = 1\n"
 B_PY = "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1,2 +1,2 @@\n keep\n-x\n+y\n"
 TASK_KEYS = {"id", "project_id", "project", "workspace_id", "workspace", "title", "status", "stage", "branch",
-             "worktree_path", "description_md", "description_html", "spec_md", "spec_html"}
+             "worktree_path", "description_md", "description_html", "spec_md", "spec_html", "module"}  # 112 AC14
 SUMMARY_KEYS = {"n", "trigger", "files", "additions", "deletions", "verdicts"}
 CONSOLE = '{"authMethod":"console"}'
 UNCOMMITTED = ("factory isn't committed on main: on main, run git add .claude/skills/factory .claude/agents"
@@ -1228,6 +1228,7 @@ def test_board_card(client, project):  # AC9
         "additions": 5, "deletions": 2, "run": {"id": run, "status": "running"}, "started_at": STARTED,
         "waiting": False, "escalated": False, "stalled": False, "branch": None, "description_md": "",
         "blocked": False, "blocked_by": [], "blocks": [],  # 094 AC15
+        "module": None,  # 112 AC14
     }
     assert [found[bare][k] for k in ("round", "verdicts", "additions", "deletions", "run", "started_at")] == [None] * 6
 
@@ -1264,7 +1265,7 @@ def test_task_list_keys(client, project):  # 042 BE4: the card's branch and posi
     review_task(project, branch="factory/12-x")
     [item] = api(client, f"/api/projects/{project}/tasks")
     assert set(item) == {"id", "title", "status", "stage", "round", "verdicts", "additions", "deletions", "run",
-                         "blocked", "blocked_by", "blocks"}  # 094 AC8
+                         "blocked", "blocked_by", "blocks", "module"}  # 094 AC8, 112 AC14
 
 
 def link(task_id, *blockers):
@@ -1463,7 +1464,7 @@ def test_task(client, project):  # AC13
         "workspace": "personal", "title": "T", "status": "review",
         "stage": "human_review", "branch": "factory/1-t", "worktree_path": "/code/api/.claude/worktrees/12-x",
         "description_md": "Max **5**", "description_html": "<p>Max <strong>5</strong></p>\n",
-        "spec_md": "## Goal", "spec_html": "<h2>Goal</h2>\n",
+        "spec_md": "## Goal", "spec_html": "<h2>Goal</h2>\n", "module": None,  # 112 AC14
     }
     assert (page["can_run"], page["hint"]) == (True, None)
     task = api(client, f"/api/pages/tasks/{bare}")["task"]

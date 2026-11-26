@@ -167,7 +167,7 @@ test('FE10 (Q8): Cancel or Esc hides the field and returns focus to + New worksp
   expect(toggle.getAttribute('aria-expanded')).toBe('false')
 })
 
-test('FE11, 042 FE34, 051 FE6, 101 AC10, 104 AC23: each project is a disclosure button for Board, Code, Reviews, Context, Workflows, Scheduler, and Settings', async () => {
+test('FE11, 042 FE34, 051 FE6, 101 AC10, 104 AC23, 112 AC15: each project is a disclosure button for Board, Code, Reviews, Context, Modules, Workflows, Scheduler, and Settings', async () => {
   await open('/')
   const button = projectButton('api-server')
   expect(button.getAttribute('aria-expanded')).toBe('false')
@@ -181,6 +181,7 @@ test('FE11, 042 FE34, 051 FE6, 101 AC10, 104 AC23: each project is a disclosure 
     ['Code', '/projects/3/code'],
     ['Reviews', '/projects/3/reviews'],
     ['Context', '/projects/3/context'],
+    ['Modules', '/projects/3/modules'],
     ['Workflows', '/projects/3/factories'],
     ['Scheduler', '/projects/3/scheduler'],
     ['Settings', '/projects/3/settings'],
