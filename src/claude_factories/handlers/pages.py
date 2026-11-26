@@ -56,7 +56,8 @@ TILES = {
 }
 RECENT = 20  # 053: the Agents page's ended runs
 LOGIN: dict = {}  # 014 Q3: {"at": monotonic(), "dir": the active config dir it was filled for (056), "value": …}
-# 039: the one `claude auth login` waiting for its code, {"proc", "url", "account_id"}.
+# 039: the one `claude auth login` waiting for its code, {"proc", "url", "account_id", "new"}; 110: "new" if
+# login_start added the account's row.
 # ponytail: no lock (Q9): one user, one pending login, and a new login stops the old one first
 PENDING: dict = {}
 LOGIN_CODE_TIMEOUT = 60  # 039 Q4: seconds for claude to exchange the code and exit
@@ -131,23 +132,25 @@ def login_start(claude: Claude, accounts: ClaudeAccountsRepo, account_id: int | 
         if account_id is None:
             shutil.rmtree(config_dir, ignore_errors=True)
         raise
-    if account_id is None:
+    new = account_id is None
+    if new:
         account_id = accounts.add(config_dir)
-    PENDING.update(proc=proc, url=url, account_id=account_id)
+    PENDING.update(proc=proc, url=url, account_id=account_id, new=new)
     return {"url": url, "account_id": account_id}
 
 
 def login_code(claude: Claude, accounts: ClaudeAccountsRepo, code: str, account_id: int | None) -> dict:
     """039 Q1: write `<code>#<state>` to the pending login's stdin, kept open, and wait for claude to exit.
     Exit 0 answers /api/auth afresh; otherwise claude's `Login failed: …` line is the 422's detail (Q4).
-    056 Q5: an `account_id` other than the pending login's is a 409, and that login stays pending."""
+    056 Q5: an `account_id` other than the pending login's is a 409, and that login stays pending.
+    110: then one fresh status (Q3); an email another row holds is refused (`refuse_duplicate`)."""
     found = pending()
     if found is None or account_id is not None and account_id != found["account_id"]:
         raise Conflict("no login in progress")
     code = code.strip()
     if len(code) > 2048 or not CODE.fullmatch(code):  # AC12: claude would only re-prompt; the login stays
         raise Invalid("code must be <code>#<state>, as the sign-in page shows it")
-    proc, login_account = found["proc"], found["account_id"]  # pending() below clears `found`
+    proc, login_account, new = found["proc"], found["account_id"], found["new"]  # pending() below clears it
     with suppress(BrokenPipeError):  # it exited just now: its exit code still answers
         proc.stdin.write(code + "\n")
         proc.stdin.flush()
@@ -161,9 +164,37 @@ def login_code(claude: Claude, accounts: ClaudeAccountsRepo, code: str, account_
     if returncode:
         raise Invalid(last_line(out) or f"claude auth login exited with code {returncode}")
     signed_in = accounts.get(login_account)
-    if signed_in and not signed_in["active"]:  # 095 AC11: the active one's email is stored by auth() below
-        checked(claude, accounts, signed_in)
+    if signed_in:
+        info = status(claude, signed_in["config_dir"])
+        refuse_duplicate(claude, accounts, signed_in, info, new)
+        remember(accounts, signed_in["id"], info)  # 095 AC11
+        if signed_in["active"]:  # 110 Q3: the fresh status fills the cache, so auth() below calls claude no more
+            LOGIN.update(at=monotonic(), dir=signed_in["config_dir"], value=info)
     return auth(claude, accounts)
+
+
+DUPLICATE = ("already connected as {email} (account #{id}); to add a different account, open the sign-in link"
+             " in a private window or sign out of claude.ai first")
+
+
+def refuse_duplicate(claude: Claude, accounts: ClaudeAccountsRepo, row, info: dict | None, new: bool) -> None:
+    """110: claude.ai's sign-in page signs in the browser's account, so a login may land on an account already
+    connected. Q1, Q2: compared with the other rows' stored emails, trimmed and case-insensitive; a status
+    with no email isn't checked (AC5), and a row never matches itself (AC6). A match is a 409 naming the
+    lowest such id (Q6), after `claude auth logout` in the row's dir (AC2, AC3); a new account's row and
+    app-made dir go too, as in delete_account. Q4: a failed logout is its 500, and the row and dir stay."""
+    email = (info or {}).get("email")
+    if not isinstance(email, str) or not email.strip():
+        return
+    key = email.strip().casefold()
+    held = [r["id"] for r in accounts.all() if r["id"] != row["id"] and (r["email"] or "").strip().casefold() == key]
+    if not held:
+        return
+    logout(claude, row["config_dir"])
+    if new:
+        remove_dir(row["config_dir"])
+        accounts.delete(row["id"], commit=True)  # the 409 below would roll it back
+    raise Conflict(DUPLICATE.format(email=email, id=min(held)))
 
 
 def status(claude: Claude, config_dir: str) -> dict | None:
@@ -264,7 +295,14 @@ def delete_account(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo,
         raise Conflict("a run is active")
     if PENDING.get("account_id") == account_id:
         login_stop(claude)
-    config_dir = found["config_dir"]
+    logout(claude, found["config_dir"])
+    remove_dir(found["config_dir"])
+    accounts.delete(account_id)
+
+
+def logout(claude: Claude, config_dir: str) -> None:
+    """055/056: `claude auth logout` in `config_dir`; 055 Q4: the auth cache is cleared either way, since claude
+    may have logged out partway. Shared by delete_account and 110's refuse_duplicate."""
     try:
         returncode, out = claude.logout(str(config.data_dir()), env(config_dir))
     except OSError as e:
@@ -277,6 +315,11 @@ def delete_account(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo,
         line = last_line(out)
         raise Failed(f"claude auth logout failed: {line}" if line
                      else f"claude auth logout exited with code {returncode}")
+
+
+def remove_dir(config_dir: str) -> None:
+    """056 Q2: delete an account's dir only if the app made it, inside FCTL_HOME/claude-accounts/ and not a
+    symlink; already missing is fine."""
     path = Path(config_dir)
     if not path.is_symlink() and (config.data_dir() / "claude-accounts").resolve() in path.resolve().parents:
         try:
@@ -285,7 +328,6 @@ def delete_account(claude: Claude, accounts: ClaudeAccountsRepo, runs: RunsRepo,
             pass
         except OSError as e:
             raise Failed(f"can't delete {config_dir}: {e.strerror or e}") from None
-    accounts.delete(account_id)
 
 
 def settings(settings: SettingsRepo) -> dict:

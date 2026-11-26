@@ -198,7 +198,13 @@ export function SettingsPage() {
     try {
       await sendLoginCode(code.trim(), accountId)
     } catch (err) {
-      setFailure(err) // 039: the form and the typed code stay
+      setFailure(err) // 039: on a 422 the form and the typed code stay
+      if (err.status === 409) {
+        // 110 Q7: the login is over (a duplicate account was refused, or none was pending): the form goes and
+        // the list reloads, since a refused new account's row is gone and an existing one is signed out
+        setPending(null)
+        await reload()
+      }
       return
     } finally {
       setBusy(false)
@@ -230,6 +236,10 @@ export function SettingsPage() {
           Open the Claude sign-in page
         </a>
         <span className={muted}>, sign in, then paste the code it shows.</span>
+      </p>
+      <p className={muted}>
+        The page signs in the claude.ai account your browser is signed into. For a different account, open the link
+        in a private window or sign out of claude.ai first.
       </p>
       <label className="grid gap-1">
         Code

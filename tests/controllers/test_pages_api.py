@@ -299,8 +299,8 @@ while line := sys.stdin.readline():
     if mode == "reject":
         print("Login failed: Invalid code", file=sys.stderr)
         sys.exit(1)
-    if line == "good#state\n":
-        put("fake-status", 'PRO_EMAIL', where=config_dir)
+    if line == "good#state\n":  # 110: the `signs-in` file is the status the sign-in writes
+        put("fake-status", open(os.path.join(d, "signs-in")).read(), where=config_dir)
         print("Login successful.")
         sys.exit(0)
     print("Invalid code", file=sys.stderr)
@@ -316,8 +316,9 @@ def put_status(config_dir, status):
 
 @pytest.fixture
 def fake_login(tmp_path, monkeypatch):
-    """039: fake_login(mode, status, logout) sets the fake's behaviour, `status` as account 1's (056), whose dir
-    is conftest's CLAUDE_CONFIG_DIR; starts(), statuses(), stdin(), and logouts() read what it saw."""
+    """039: fake_login(mode, status, logout, signs_in) sets the fake's behaviour, `status` as account 1's (056),
+    whose dir is conftest's CLAUDE_CONFIG_DIR, and `signs_in` as the status a `good#state` login writes (110);
+    starts(), statuses(), stdin(), and logouts() read what it saw."""
     d, one = tmp_path / "login", os.environ["CLAUDE_CONFIG_DIR"]
     d.mkdir()
     monkeypatch.setenv("FAKE_LOGIN_DIR", str(d))
@@ -325,9 +326,10 @@ def fake_login(tmp_path, monkeypatch):
     claude.write_text(f"#!{sys.executable}{LOGIN_FAKE}")
     claude.chmod(0o755)
 
-    def install(mode="ok", status=CONSOLE, logout="ok"):
+    def install(mode="ok", status=CONSOLE, logout="ok", signs_in=PRO_EMAIL):
         (d / "mode").write_text(mode)
         (d / "logout").write_text(logout)
+        (d / "signs-in").write_text(signs_in)
         put_status(one, status)
 
     def lines(name):
@@ -643,9 +645,114 @@ def test_status_checks_store_email(client, fake_login, monkeypatch):  # 095 AC11
     put_status(account_dir(two), TWO.replace("two@", "new@"))
     activate(client, two)
     assert emails()[two] == "new@example.com"
-    start(client, account=three)  # the login code, for an inactive account: the fake's sign-in writes PRO_EMAIL
+    fake_login(status=CONSOLE, signs_in=THREE)  # 110: not account 1's stored email, so not a duplicate
+    start(client, account=three)  # the login code, for an inactive account
     send(client, "good#state", account=three)
-    assert emails()[three] == "artem@example.com"
+    assert emails()[three] == "three@example.com"
+
+
+# --- 110: a login landing on an account already connected -----------------------------------------
+
+THREE = TWO.replace("two@", "three@")
+
+
+def duplicate(email, id):
+    return {"detail": f"already connected as {email} (account #{id}); to add a different account, open the"
+                      " sign-in link in a private window or sign out of claude.ai first"}
+
+
+def test_new_login_duplicate_refused(client, fake_login):  # 110 AC1, Q2, Q6
+    fake_login(status=PRO_EMAIL.replace("artem@", "Artem@"))
+    api(client, "/api/auth")  # stores account 1's email
+    later = add_account()
+    sql("UPDATE claude_accounts SET email = 'artem@example.com' WHERE id = ?", (later,))
+    start(client, account=None)
+    assert send(client, "good#state", 409) == duplicate("artem@example.com", 1)
+
+
+def test_new_login_duplicate_removed(client, fake_login, providers):  # 110 AC2
+    fake_login(status=PRO_EMAIL)
+    api(client, "/api/auth")
+    new = start(client, account=None)["account_id"]
+    path = account_dir(new)
+    send(client, "good#state", 409)
+    [seen] = fake_login.logouts()
+    in_account(seen, path)
+    assert [a["id"] for a in api(client, "/api/auth/accounts")] == [1]
+    assert not path.exists()
+
+
+def test_login_again_duplicate_refused(client, fake_login, providers):  # 110 AC3
+    fake_login(status=PRO_EMAIL)
+    api(client, "/api/auth")
+    two = add_account(TWO)
+    api(client, "/api/auth/accounts")  # stores account 2's own email
+    start(client, account=two)
+    assert send(client, "good#state", 409, account=two) == duplicate("artem@example.com", 1)
+    [seen] = fake_login.logouts()
+    in_account(seen, account_dir(two))
+    [listed] = [a for a in api(client, "/api/auth/accounts") if a["id"] == two]
+    assert listed["signed_in"] is False
+    assert account_dir(two).is_dir()
+
+
+@pytest.mark.parametrize("account", [None, "two"])
+def test_login_distinct_email(client, fake_login, account):  # 110 AC4
+    fake_login(status=PRO_EMAIL, signs_in=THREE)
+    api(client, "/api/auth")
+    two = add_account(TWO)
+    login = start(client, account=None if account is None else two)["account_id"]
+    assert send(client, "good#state", account=login) == {"auth_method": "claude.ai", "plan": "pro",
+                                                          "runs_enabled": True, "email": "artem@example.com"}
+    assert fake_login.logouts() == []
+    assert emails()[login] == "three@example.com"
+
+
+def test_login_without_email(client, fake_login):  # 110 AC5
+    fake_login(status=PRO_EMAIL, signs_in=CONSOLE)
+    api(client, "/api/auth")
+    new = start(client, account=None)["account_id"]
+    assert send(client, "good#state")["runs_enabled"] is True
+    assert fake_login.logouts() == []
+    assert emails() == {1: "artem@example.com", new: None}
+
+
+def test_login_again_same_account(client, fake_login):  # 110 AC6
+    fake_login(status=PRO_EMAIL)
+    api(client, "/api/auth")
+    start(client)
+    assert send(client, "good#state")["email"] == "artem@example.com"
+    assert fake_login.logouts() == []
+
+
+def test_duplicate_ends_login(client, fake_login, monkeypatch):  # 110 AC7
+    monkeypatch.setattr(pages, "monotonic", lambda: 1000.0)
+    fake_login(status=PRO_EMAIL)
+    api(client, "/api/auth")
+    start(client, account=None)
+    send(client, "good#state", 409)
+    assert send(client, "good#state", 409) == NO_LOGIN
+    before = len(fake_login.statuses())
+    assert api(client, "/api/auth")["email"] == "artem@example.com"
+    assert len(fake_login.statuses()) == before + 1  # not served from the cache
+
+
+def test_duplicate_documented():  # 110 AC11
+    api_doc = " ".join((REPO / "docs/data-model-and-api.md").read_text().replace("#", " ").split())
+    assert "already connected as <email> (account N); to add a different account" in api_doc
+    assert "a new account's row is removed with its app-made dir, an existing account's row stays" in api_doc
+    ui = " ".join((REPO / "docs/ui.md").read_text().split())
+    assert "For a different account, open the link in a private window or sign out of claude.ai first." in ui
+    assert "a 409 (the account is already connected, or no login is pending) shows its detail in the alert," \
+           " closes the form, and reloads the list" in ui
+
+
+def test_duplicate_logout_fails(client, fake_login):  # 110 Q4
+    fake_login(status=PRO_EMAIL, logout="fail")
+    api(client, "/api/auth")
+    new = start(client, account=None)["account_id"]
+    assert send(client, "good#state", 500) == {"detail": "claude auth logout failed: Error: keychain locked"}
+    assert account_dir(new).is_dir() and account_count() == 2
 
 
 def test_accounts_refused_while_running(client, project, fake_login):  # 056 BE12, 055 BE4
