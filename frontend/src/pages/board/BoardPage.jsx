@@ -14,6 +14,7 @@ import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { Select } from '../../components/Select.jsx'
 import { Block, ButtonBlock, ProjectHeaderSkeleton, Skeleton } from '../../components/Skeleton.jsx'
 import { button, danger, field, muted, popover, smallButton } from '../../components/styles.js'
+import { NoMatch, TaskFilter, useTaskFilter } from '../../components/TaskFilter.jsx'
 import { Time } from '../../components/Time.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
@@ -156,7 +157,7 @@ function MoveMenu({ card, moves, nudges, onEdit }) {
         <p className={`px-2 py-1 text-xs ${muted}`}>{`Move #${card.id}`}</p>
         {moves.map(([label, pick]) => item(label, pick))}
         {nudges.length > 0 && <hr className="my-1 border-line" />}
-        {nudges.map(([label, pick]) => item(label, pick))}
+        {nudges.map(([label, pick, more]) => item(label, pick, more))}
         <hr className="my-1 border-line" />
         {item('Edit', () => onEdit(card))}
       </div>
@@ -438,6 +439,11 @@ export function BoardPage() {
   const [editing, setEditing] = useState(null) // 048: the card the + New task form edits, else null
   const [doomed, setDoomed] = useState(null) // 048: the card the delete dialog is about
   const dialog = useRef(null)
+  // 117 AC10: a change of the filter, not a poll, says how many cards match; clearing it empties the region
+  const filter = useTaskFilter(modules?.modules ?? [], (on, keep) => {
+    const n = Object.values(page?.columns ?? {}).flat().filter(keep).length
+    setSaid(on ? `${plural(n, 'task')} ${n === 1 ? 'matches' : 'match'}.` : '')
+  })
   const name = page?.project.name
   useEffect(() => {
     if (name) document.title = `${name} · Claude Factories`
@@ -523,7 +529,10 @@ export function BoardPage() {
     setDoomed(null)
   }
 
-  /** FE9: the other columns, each to its bottom (Q2); in Backlog, Up and Down one place, at the midpoint rule's position (Q3). */
+  /**
+   * FE9: the other columns, each to its bottom (Q2); in Backlog, Up and Down one place, at the midpoint rule's position (Q3).
+   * 117 AC11, Q3: while filtered, Up and Down are disabled, since hidden cards sit between the shown ones.
+   */
   function menu(card, from, cards) {
     const moves = Object.entries(LABELS)
       .filter(([status]) => status !== from)
@@ -531,6 +540,10 @@ export function BoardPage() {
         const there = page.columns[status] ?? []
         return [label, () => move(card, status, position(there, there.length, card.id), `to ${label}`, card.id)]
       })
+    if (filter.on) {
+      const more = { disabled: true, title: 'Clear the filter to reorder' }
+      return { moves, nudges: from === 'backlog' ? [['Up', null, more], ['Down', null, more]] : [] }
+    }
     const k = cards.indexOf(card)
     const nudges = []
     if (from === 'backlog' && k > 0) nudges.push(['Up', () => move(card, from, position(cards, k - 1, card.id), 'up', card.id)])
@@ -544,7 +557,7 @@ export function BoardPage() {
     dragged.current = { card, from }
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', String(card.id)) // Firefox starts no drag without data
-    setDrag({ id: card.id })
+    setDrag({ id: card.id, from })
     // Q9: dim after this event, once the browser has taken the drag image, so the image isn't dimmed too
     setTimeout(() => setDrag((d) => (d?.id === card.id ? { ...d, dim: true } : d)))
   }
@@ -566,7 +579,11 @@ export function BoardPage() {
     event.preventDefault()
     setDrag(null)
     const { card, from } = dragged.current
-    const at = position(cards, gapAt(event), card.id)
+    // 117 AC11: while filtered, a drop into its own column does nothing, and one into another goes to its full bottom
+    const full = page.columns[status] ?? []
+    const at = !filter.on ? position(cards, gapAt(event), card.id)
+      : from === status ? null
+      : position(full, full.length, card.id)
     if (at != null) move(card, status, at, `${from === status ? 'within' : 'to'} ${LABELS[status]}`)
   }
 
@@ -593,12 +610,18 @@ export function BoardPage() {
       <p role="status" className="sr-only">
         {said}
       </p>
+      <TaskFilter filter={filter} modules={modules?.modules ?? []} />
+      {filter.on && !Object.values(page.columns).flat().some(filter.keep) && <NoMatch text="No tasks match." filter={filter} />}
       <div className="mt-2 grid items-start gap-4 md:grid-cols-4">
         {Object.entries(LABELS).map(([status, label]) => {
-          const cards = page.columns[status] ?? []
-          // FE4, FE5: the gap under the pointer gets a line only where a drop would move the card
+          // 117 AC6: the column shows, and counts, only the cards that match
+          const cards = (page.columns[status] ?? []).filter(filter.keep)
+          // FE4, FE5: the gap under the pointer gets a line only where a drop would move the card. 117 AC11: while
+          // filtered, none in the card's own column, and after the last shown card in another, where it lands
           const over = drag?.over === status
-          const gap = over && position(cards, drag.gap, drag.id) != null ? drag.gap : null
+          const gap = !over ? null
+            : filter.on ? (drag.from === status ? null : cards.length)
+            : position(cards, drag.gap, drag.id) != null ? drag.gap : null
           return (
             <section
               key={status}
@@ -633,7 +656,7 @@ export function BoardPage() {
                     />
                   ))}
                 </ol>
-              ) : status === 'backlog' ? (
+              ) : status === 'backlog' && !filter.on ? (
                 <p className={`text-sm ${muted}`}>
                   No tasks. Add one with + New task, or run <code>fctl task add "title"</code> in the repo.
                 </p>
