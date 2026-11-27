@@ -12,7 +12,7 @@ things only on their word.
 | `fctl: 403 Host must be 127.0.0.1 or localhost` | `FCTL_URL` names another host. | Use `http://127.0.0.1:<port>`. |
 | `fctl: 403 X-Requested-By: fctl header required` | A write reached the API without `fctl` (curl, a script). | Use the `fctl` command. |
 | `fctl: not inside a git repository: <cwd>` | The command works on the current repo. | Run it from inside the repo (any subdirectory or worktree works). |
-| `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>` | The repo isn't connected. | `/factory-connect <workspace>`. |
+| `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page` | The repo isn't connected, or its checkout moved since it was. | `/factory-connect <workspace>`; after a move, ask the user to change the path on the project's Settings page instead, which keeps its tasks. |
 | `fctl: 404 Not Found` | Unknown task id, usually. | Check the id with the user, or on the board. |
 | `fctl: 422 [...]` (a JSON list) | Request validation failed, e.g. `--line 0`. | Fix the argument. |
 | exit `2` with a usage line | Bad command, argument, or flag combination; nothing was sent. | Read the usage line; `fctl <command> --help`. |

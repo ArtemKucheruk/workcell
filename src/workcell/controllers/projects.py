@@ -37,8 +37,8 @@ def find_project(path: str, projects: Projects, git: GitAdapter) -> ProjectOut:
 
 @router.patch("/api/projects/{project_id}")
 def patch_project(project_id: int, body: ProjectPatch, workspaces: Workspaces, projects: Projects,
-                  tasks: Tasks) -> ProjectPatched:
-    return handler.patch_project(workspaces, projects, tasks, project_id, body)
+                  tasks: Tasks, runs: Runs, git: GitAdapter) -> ProjectPatched:
+    return handler.patch_project(workspaces, projects, tasks, runs, git, project_id, body)
 
 
 @router.delete("/api/projects/{project_id}", status_code=204)

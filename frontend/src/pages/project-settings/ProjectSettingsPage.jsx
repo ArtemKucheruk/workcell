@@ -81,10 +81,57 @@ function ProjectForm({ project, onSaved }) {
   )
 }
 
-/** Q9: the repo facts `fctl connect` set, read-only; a null value says so in words. */
+/**
+ * 119 AC16, AC17: the main checkout's path after a move, sent as typed (`PATCH {path}`); `onSaved` reloads, and the
+ * parent keys this form by the stored path, so the input then shows it. A refusal shows in the form and keeps what was
+ * typed (Q7: no other success message, as Move). A subgrid row of the Repository grid.
+ */
+function PathForm({ project, onSaved }) {
+  const [error, setError] = useState(null)
+  const [busy, setBusy] = useState(false)
+  async function submit(event) {
+    event.preventDefault()
+    const path = new FormData(event.currentTarget).get('path')
+    setBusy(true)
+    try {
+      await patchProject(project.id, { path })
+      setError(null)
+      onSaved()
+    } catch (err) {
+      setError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form onSubmit={submit} className="col-span-2 grid grid-cols-subgrid items-center gap-y-2">
+      <label htmlFor="project-path" className={muted}>
+        Path
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          id="project-path"
+          name="path"
+          defaultValue={project.path}
+          spellCheck={false}
+          className={`${field} w-full max-w-md font-mono text-sm/6`}
+        />
+        <button disabled={busy} className={button}>
+          Change path
+        </button>
+      </div>
+      {error && (
+        <div className="col-start-2">
+          <ErrorMessage error={error} />
+        </div>
+      )}
+    </form>
+  )
+}
+
+/** Q9: the repo facts `fctl connect` set, read-only; a null value says so in words. 119: Path is PathForm's now. */
 function Repository({ project }) {
   const rows = [
-    ['Path', project.path],
     ['Remote', project.remote_url, 'none'],
     ['Default branch', project.default_branch],
   ]
@@ -564,12 +611,14 @@ function ProjectSettings({ id }) {
                 reloadSidebar() // Q13: no navigation, so the sidebar's name follows here
               }}
             />
+            {/* 119: keyed by the stored path, so a reload after Change path shows it */}
+            <PathForm key={project.path} project={project} onSaved={refresh} />
             <Repository project={project} />
           </div>
-          {/* Q5 */}
+          {/* Q5, 119 AC18 */}
           <p className={`text-sm ${muted}`}>
-            Path, remote, and default branch come from <code>fctl connect</code>. Rerunning it in the repo also resets the
-            name, and the test command when it passes one.
+            Remote and default branch come from <code>fctl connect</code>. Rerunning it in the repo also resets the name,
+            and the test command when it passes one. If the checkout moves, change the path here.
           </p>
         </Section>
         <Section id="settings-factory" title="Factory">

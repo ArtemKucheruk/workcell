@@ -145,6 +145,17 @@ Run it from this checkout, next to `compose.yaml`.
 3. In the app, open the project's Settings → **Create factory**, then commit `.claude/` on the
    default branch. Runs refuse until the factory is committed there.
 
+### Moving a checkout
+
+The app knows a project by its main checkout's path. To move or rename that folder and keep the
+project's tasks and history:
+
+1. Wait until none of the project's runs are going, then move the folder.
+2. In the moved folder, run `git worktree repair` so git finds any remaining task worktrees again.
+3. In the app, open the project's Settings and change **Path** to the new folder.
+4. If it is this app's own checkout, also run `uv tool install --editable --reinstall .` and
+   `fctl service install` from the new folder.
+
 ## A first task and run
 
 1. Add a task: **+ New task** on the board, or in the repo

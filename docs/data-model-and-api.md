@@ -289,13 +289,25 @@ PATCH /api/projects/3                                             (Settings, sid
 → {"plane_api_url":"https://api.plane.so","plane_workspace":"acme","plane_project_id":"…","plane_api_key":"…",
    "plane_mark_done":true}                                        (109: Settings, Plane's Save; {"plane_api_key":""}
                                                                    is its Clear)
-→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "test_cmd": "pytest -q", "github_label": "bug",
-  "plane_api_url", "plane_workspace", "plane_project_id", "plane_api_key" (str), "plane_mark_done" (bool)},
-  applied together
-← 200 {"id":3,"workspace_id":4,"name":"api-server","test_cmd":"pytest -q","github_label":"bug",
-       "plane_api_url":"https://api.plane.so","plane_workspace":"acme","plane_project_id":"…","plane_mark_done":true,
-       "plane_key_set":true}
-  # the project after the update; id, workspace_id: int; name: str; test_cmd, github_label: str | null
+→ {"path":"/code/api"}                                            (119: Settings, Change path after a move)
+→ any non-empty subset of {"workspace_id": 4, "name": "api-server", "path": "/code/api",
+  "test_cmd": "pytest -q", "github_label": "bug", "plane_api_url", "plane_workspace", "plane_project_id",
+  "plane_api_key" (str), "plane_mark_done" (bool)}, applied together
+← 200 {"id":3,"workspace_id":4,"name":"api-server","path":"/code/api","test_cmd":"pytest -q",
+       "github_label":"bug","plane_api_url":"https://api.plane.so","plane_workspace":"acme","plane_project_id":"…",
+       "plane_mark_done":true,"plane_key_set":true}
+  # the project after the update; id, workspace_id: int; name, path: str; test_cmd, github_label: str | null
+  # 119: path is the main checkout after a move, stored as its realpath (symlinks resolved, MVP §4.5). In the same
+  #   transaction, every stored path equal to the old path or under `<old>/` moves to the same suffix under the new
+  #   one: the project's tasks.worktree_path, runs.worktree_path of its automations' runs, and its
+  #   context_items.source_path (a plain compare on a / boundary, so /old/api2 stays when the old path is /old/api).
+  #   An automation run whose automation was deleted keeps its path. Nothing on disk changes: move the folder and
+  #   run `git worktree repair` first. The project's own current path is a 200 that rewrites nothing.
+  # 422 {"detail":"path must not be blank"}, {"detail":"path must be absolute"}, {"detail":"no folder at /x"},
+  #   {"detail":"/x is not a git repository"}, {"detail":"/x is not a main checkout; use /repo"} (a linked worktree
+  #   or a subdirectory); nothing written
+  # 409 {"detail":"project #5 already has path /x"}; 409 {"detail":"run #41 active"} while a task run of one of its
+  #   tasks or an automation run of one of its automations is running (its worktree is under the old path)
   # 109: plane_api_url, plane_workspace, plane_project_id: str | null; plane_mark_done, plane_key_set: bool. Never
   #   plane_api_key itself: it is write-only. Leaving plane_api_key out keeps the stored key; "" clears it
   # name is trimmed: 422 {"detail":"name must not be blank"} if nothing is left
@@ -303,11 +315,11 @@ PATCH /api/projects/3                                             (Settings, sid
   #   plane_api_url also loses its trailing /
   # 422 {"detail":"plane_api_url must be an http(s) URL like https://api.plane.so"}: not http:// or https:// with a
   #   host, or with user:pass@, a query, or a fragment; nothing written
-  # 422 {"detail":"send at least one of: workspace_id, name, test_cmd, github_label, plane_api_url, plane_workspace,
-  #   plane_project_id, plane_api_key, plane_mark_done"} for {} (or only unknown keys)
+  # 422 {"detail":"send at least one of: workspace_id, name, path, test_cmd, github_label, plane_api_url,
+  #   plane_workspace, plane_project_id, plane_api_key, plane_mark_done"} for {} (or only unknown keys)
   # 422 FastAPI's list detail: any field sent as null or the wrong type, or workspace_id out of SQLite's range
   # 404 {"detail":"Not Found"} for an unknown project or workspace_id (unchanged), with nothing written
-  # allowed in any state, also while a run is going (no 409)
+  # allowed in any state, also while a run is going (no 409), except a path change (119, above)
   # fctl connect, rerun in the repo, sets the name back to the directory's, and the test command when it passes one
 
 DELETE /api/projects/3                                            (sidebar Delete, project Settings Danger zone)

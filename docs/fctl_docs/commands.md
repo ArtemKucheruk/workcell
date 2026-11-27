@@ -91,7 +91,7 @@ Prints the current repo's pinned project context exactly as stored (nothing for 
 Needs the repo. `GET /api/projects?path=…`, then `GET /api/projects/{id}/context`. Context cards
 are not included; the full `fctl show` prints those.
 
-- Errors: `404 no project at <path>; in that repo, run fctl connect --workspace <name>`.
+- Errors: `404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`.
 - Who: the user's session, before `fctl context set`.
 
 ---

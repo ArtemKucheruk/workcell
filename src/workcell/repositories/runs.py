@@ -50,6 +50,14 @@ class RunsRepo:
             "SELECT id FROM runs WHERE factory_id = ? AND status = 'running' ORDER BY id LIMIT 1", (factory_id,)
         ).fetchone()
 
+    def running_for_project(self, project_id: int) -> sqlite3.Row | None:
+        """119 AC12, AC13: a running run of the project, a task run of one of its tasks or an automation run of one of
+        its factories; its lowest id."""
+        return self.conn.execute(
+            "SELECT r.id FROM runs r LEFT JOIN tasks t ON t.id = r.task_id LEFT JOIN factories f ON f.id = r.factory_id"
+            " WHERE r.status = 'running' AND (t.project_id = :p OR f.project_id = :p) ORDER BY r.id LIMIT 1",
+            {"p": project_id}).fetchone()
+
     def add(self, task_id: int | None, session_id: str, now: str, account_id: int | None = None,
             kind: str = "factory", factory_id: int | None = None, worktree_path: str | None = None,
             trigger: str = "manual") -> int:

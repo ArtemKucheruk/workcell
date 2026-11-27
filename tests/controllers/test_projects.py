@@ -123,7 +123,9 @@ def test_find_project_keys(client):  # AC10
 
 def test_find_project_unknown(client):  # AC11
     r = client.get("/api/projects", params={"path": "/nope"})
-    assert (r.status_code, r.json()) == (404, {"detail": "no project at /nope; in that repo, run fctl connect --workspace <name>"})
+    assert (r.status_code, r.json()) == (404, {"detail": "no project at /nope; in that repo, run fctl connect --workspace"
+                                                         " <name>, or if the checkout moved, change the path on the"
+                                                         " project's Settings page"})  # 119 AC15
 
 
 def factory(client, path):
@@ -221,7 +223,7 @@ def test_move_project(client):  # 020 AC30
     pid = connect(client)["id"]
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = client.patch(f"/api/projects/{pid}", json={"workspace_id": work}, headers=H)
-    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "api",
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "api", "path": "/code/api",
                                               "test_cmd": "pytest -q", "github_label": None,
                                               **NO_PLANE})  # 049 BE9: the whole project
     assert project_workspace(pid) == work
@@ -264,7 +266,7 @@ def test_rename_project(client):  # 049 BE1
     before = stored(pid)
     r = patch(client, pid, {"name": "  api2  "})
     assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": before[0], "name": "api2",
-                                              "test_cmd": "pytest -q", "github_label": None, **NO_PLANE})
+                                              "path": "/code/api", "test_cmd": "pytest -q", "github_label": None, **NO_PLANE})
     assert stored(pid) == (before[0], "api2", *before[2:])
 
 
@@ -282,8 +284,8 @@ def test_patch_all_three(client):  # 049 BE3
     pid = connect(client)["id"]
     work = client.post("/api/workspaces", json={"name": "work"}, headers=H).json()["id"]
     r = patch(client, pid, {"workspace_id": work, "name": "x", "test_cmd": "y"})
-    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "x", "test_cmd": "y",
-                                              "github_label": None, **NO_PLANE})
+    assert (r.status_code, r.json()) == (200, {"id": pid, "workspace_id": work, "name": "x", "path": "/code/api",
+                                              "test_cmd": "y", "github_label": None, **NO_PLANE})
     assert stored(pid)[:2] == (work, "x")
     assert stored(pid)[5] == "y"
 
@@ -296,7 +298,8 @@ def test_rename_project_blank(client):  # 049 BE4
     assert stored(pid) == before
 
 
-@pytest.mark.parametrize("body", [{"name": None}, {"test_cmd": None}, {"workspace_id": None}, {"name": 3}])
+@pytest.mark.parametrize("body", [{"name": None}, {"test_cmd": None}, {"workspace_id": None}, {"name": 3},
+                                  {"path": None}])  # 119 AC14
 def test_patch_project_null_or_wrong_type(client, body):  # 049 BE5
     pid = connect(client)["id"]
     before = stored(pid)
@@ -311,10 +314,32 @@ def test_patch_project_nothing_sent(client, body):  # 049 BE6
     pid = connect(client)["id"]
     before = stored(pid)
     r = patch(client, pid, body)
-    assert (r.status_code, r.json()) == (422, {"detail": "send at least one of: workspace_id, name, test_cmd,"
+    assert (r.status_code, r.json()) == (422, {"detail": "send at least one of: workspace_id, name, path, test_cmd,"
                                                          " github_label, plane_api_url, plane_workspace,"
                                                          " plane_project_id, plane_api_key,"
-                                                         " plane_mark_done"})  # 108 AC4, 109 Q2
+                                                         " plane_mark_done"})  # 108 AC4, 109 Q2, 119 AC14
+    assert stored(pid) == before
+
+
+def test_patch_path(client, repo, tmp_path):  # 119 AC1, AC2: the PATCH body over HTTP
+    pid = connect(client, path=os.path.realpath(repo))["id"]
+    moved = tmp_path / "moved"
+    git(tmp_path, "init", "-q", "-b", "main", str(moved))
+    r = patch(client, pid, {"path": str(moved), "name": "api2"})
+    assert r.status_code == 200, r.text
+    assert (r.json()["path"], r.json()["name"]) == (os.path.realpath(moved), "api2")
+    assert stored(pid)[1:3] == ("api2", os.path.realpath(moved))
+
+
+def test_patch_path_refused(client, tmp_path):  # 119 AC7, AC11: the refusals' statuses over HTTP
+    pid = connect(client)["id"]
+    other = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "main", str(other))
+    connect(client, path=os.path.realpath(other), name="other")
+    before = stored(pid)
+    assert (patch(client, pid, {"path": "repo"}).json(), stored(pid)) == ({"detail": "path must be absolute"}, before)
+    r = patch(client, pid, {"path": str(other)})
+    assert (r.status_code, r.json()["detail"].endswith(f"already has path {os.path.realpath(other)}")) == (409, True)
     assert stored(pid) == before
 
 

@@ -267,7 +267,7 @@ when the app refused; most name the fix. Exit `2` is a usage error. Don't retry 
 | Message | Do |
 |---|---|
 | `can't reach http://127.0.0.1:4545 — is "fctl serve" running?` | Ask the user to start the app, or fix `FCTL_URL`. |
-| `404 no project at <path>; in that repo, run fctl connect --workspace <name>` | Connect the repo first. |
+| `404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page` | Connect the repo first, or after a move change the path in Settings. |
 | `not inside a git repository: <cwd>` | `cd` into the repo. |
 | `404 Not Found` | Unknown task id. |
 | `409 run #41 is already running on #12; …` | Wait, or the user stops it in the app. |

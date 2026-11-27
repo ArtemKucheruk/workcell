@@ -1,6 +1,7 @@
-"""Projects: connect, find by path, patch (move, rename, test command), delete, and the project context
+"""Projects: connect, find by path, patch (move, rename, test command, 119's path), delete, and the project context
 (docs/data-model-and-api.md §6.1)."""
 
+import os
 from urllib.parse import urlsplit
 
 from .. import config
@@ -31,7 +32,8 @@ def connect(workspaces: WorkspacesRepo, projects: ProjectsRepo, body: ConnectBod
 def find_project(projects: ProjectsRepo, git: Git, path: str) -> ProjectOut:
     p = projects.by_path(path)
     if p is None:
-        raise NotFound(f"no project at {path}; in that repo, run fctl connect --workspace <name>")
+        raise NotFound(f"no project at {path}; in that repo, run fctl connect --workspace <name>, or if the"
+                       " checkout moved, change the path on the project's Settings page")  # 119 AC15
     return ProjectOut(id=p["id"], name=p["name"], default_branch=p["default_branch"],
                       factory=factory_state(git, p["path"], p["default_branch"]))
 
@@ -47,13 +49,35 @@ def api_url(url: str) -> bool:
             and not parts.query and not parts.fragment and not any(c.isspace() for c in url))
 
 
-def patch_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, tasks: TasksRepo, project_id: int,
-                  body: ProjectPatch) -> ProjectPatched:
-    """049 Q1–Q4: the sent fields together, in any state. Both 404s keep 020's `Not Found`."""
+def main_checkout(git: Git, path: str) -> str:
+    """119 AC7–AC10: `path`'s realpath (MVP §4.5) when it is a git repo's main checkout; Invalid saying what's wrong
+    otherwise. Q3: a linked worktree or a subdirectory is refused, naming the main checkout to use instead."""
+    if not path:
+        raise Invalid("path must not be blank")
+    if not os.path.isabs(path):
+        raise Invalid("path must be absolute")
+    if not os.path.isdir(path):
+        raise Invalid(f"no folder at {path}")
+    real = os.path.realpath(path)
+    main = git.main_checkout(real)
+    if main is None:
+        raise Invalid(f"{path} is not a git repository")
+    if main != real:
+        raise Invalid(f"{path} is not a main checkout; use {main}")
+    return real
+
+
+def patch_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, tasks: TasksRepo, runs: RunsRepo, git: Git,
+                  project_id: int, body: ProjectPatch) -> ProjectPatched:
+    """049 Q1–Q4: the sent fields together, in any state. Both 404s keep 020's `Not Found`. 119: a new `path` is
+    checked before the lock (git runs), then refused if taken or while a run of the project is active, and the
+    project's stored paths under the old root move with it, all in this transaction."""
     fields = {key: getattr(body, key) for key in body.model_fields_set}
     if not fields:
-        raise Invalid("send at least one of: workspace_id, name, test_cmd, github_label, plane_api_url,"
+        raise Invalid("send at least one of: workspace_id, name, path, test_cmd, github_label, plane_api_url,"
                       " plane_workspace, plane_project_id, plane_api_key, plane_mark_done")
+    if "path" in fields:
+        fields["path"] = main_checkout(git, fields["path"].strip())
     if "name" in fields:
         fields["name"] = fields["name"].strip()
         if not fields["name"]:
@@ -72,9 +96,19 @@ def patch_project(workspaces: WorkspacesRepo, projects: ProjectsRepo, tasks: Tas
     tasks.lock()  # so the workspace can't go between its check and the update
     if "workspace_id" in fields and not workspaces.exists(fields["workspace_id"]):
         raise NotFound()
-    row = projects.patch(project_id, fields)
-    if row is None:
+    old = projects.path(project_id)
+    if old is None:
         raise NotFound()
+    moved = "path" in fields and fields["path"] != old  # AC11: its own path changes nothing
+    if moved:
+        taken = projects.by_path(fields["path"])
+        if taken:
+            raise Conflict(f"project #{taken['id']} already has path {fields['path']}")
+        if run := runs.running_for_project(project_id):  # AC12, AC13: its worktree is under the old path
+            raise Conflict(f"run #{run['id']} active")
+    row = projects.patch(project_id, fields)
+    if moved:
+        projects.move_paths(project_id, old, fields["path"])
     return ProjectPatched(**row)
 
 
