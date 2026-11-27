@@ -122,6 +122,21 @@ def test_claude_dir_is_not_machine_local():  # AC10
     assert [rel for rel, text in claude.items() if HOME in text or "/home/" in text or "@" + "gmail" in text] == []
 
 
+OLD_NAME = re.compile("claude" + r"[-_ ]factor", re.I)  # 120 AC8: split so this file doesn't match itself
+OLD_NAME_SKIP = ("uv.lock", "frontend/package-lock.json")
+
+
+def old_name_hits(files: dict[str, str]) -> list[str]:
+    return [rel for rel, text in files.items()
+            if not rel.startswith(".claude/") and rel not in OLD_NAME_SKIP and OLD_NAME.search(text)]
+
+
+def test_no_old_app_name():  # 120 AC8: the upgrade path from the old name is gone, and so is the name
+    assert old_name_hits(tracked()) == []
+    assert old_name_hits({"docs/x.md": "run " + "claude-" + "factories", ".claude/x.md": "Claude " + "Factories",
+                          "uv.lock": "claude_" + "factories"}) == ["docs/x.md"]
+
+
 def test_readme_sections_in_order():  # AC11
     want = ["Requirements", "Install", "Run the app", "Connect a repo", "A first task and run", "Security", "License"]
     heads = sections(README)

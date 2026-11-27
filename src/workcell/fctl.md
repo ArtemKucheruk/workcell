@@ -315,10 +315,6 @@ fctl service install [--backend-port PORT] [--frontend-port PORT]
 It serves the checkout of the editable install (`uv tool install --editable <checkout>`), found
 from the installed package, so it works from any directory. It:
 
-0. Upgrades from before the rename to Workcell (README "Upgrading"): stops and deletes the
-   old-named services where their files exist (`fctl service reload` does this too), then, with
-   `FCTL_HOME` unset, moves the old data dir to `~/.workcell` and leaves a symlink at the old path.
-   `fctl serve` makes the same move on startup.
 1. Looks up the absolute paths of `fctl`, `node`, `npm`, and `git` (required) and `claude`, `uv`,
    `gh`, and `wt` (only warned about), and builds the services' `PATH`: each found binary's folder,
    then the current `PATH`. `FCTL_HOME` and `CLAUDE_CONFIG_DIR` go into the backend's env when set.
