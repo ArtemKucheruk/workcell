@@ -103,15 +103,27 @@ Press Ctrl-C to stop it. The frontend server runs next to it:
 You need Docker with Compose. In the repo:
 
 ```sh
-cp compose.override.example.yaml compose.override.yaml && docker compose up --build
+docker compose up --build
 ```
 
-Before the first `up`, edit `compose.override.yaml`: set `user:` to your `id -u`:`id -g`, and
-mount every folder that holds a connected project at its own path (`/path/to/code:/path/to/code`).
-That file is gitignored, and it publishes both servers on 127.0.0.1 only.
-
 The app opens at http://127.0.0.1:3000. The backend is on `127.0.0.1:4545` as before, so
-`fctl` on the host needs no change. Its data lives in the `fctl-home` Docker volume, not in
+`fctl` on the host needs no change. Both are published on 127.0.0.1 only.
+
+An override file is optional. It's for other host ports, your uid:gid, project mounts, and a
+custom image:
+
+```sh
+cp compose.override.example.yaml compose.override.yaml
+```
+
+A project can be connected from Docker only once its root is mounted, so before you connect
+one, edit `compose.override.yaml`: set `user:` to your `id -u`:`id -g`, and mount every folder
+that holds a connected project at its own path (`/path/to/code:/path/to/code`). That file is
+gitignored. To use other ports, change the left number of its `ports: !override` items (Docker
+Compose v2.24.4 or later). If you change the backend port, `fctl` on the host needs
+`FCTL_URL=http://127.0.0.1:<port>`.
+
+The app's data lives in the `fctl-home` Docker volume, not in
 `~/.workcell`. `docker compose down` stops it, and `docker compose down -v` also
 deletes the data. `fctl service` doesn't apply here: run `docker compose up -d` to keep the app in
 the background, and `docker compose restart` after a pull.

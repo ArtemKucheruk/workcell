@@ -1,10 +1,14 @@
-# docs/MVP.md §4.6. Publishes nothing: copy compose.override.example.yaml to
-# compose.override.yaml, which publishes both servers on 127.0.0.1 only (§4.5).
+# docs/MVP.md §4.6. `docker compose up --build` serves the app as is: the backend on
+# 127.0.0.1:4545 and the frontend on 127.0.0.1:3000, loopback only (§4.5). 118: for other host
+# ports, your uid:gid, project mounts, or a custom image, copy compose.override.example.yaml
+# to compose.override.yaml (gitignored) and edit it.
 services:
   backend:
     build: .
     image: workcell-backend   # what a custom image builds FROM (compose.override.example.yaml)
     init: true   # Docker's init is PID 1: it reaps what a stopped run leaves and forwards SIGTERM (028 Q8)
+    ports:
+      - "127.0.0.1:4545:4545"   # fctl on the host uses 127.0.0.1:4545
     volumes:
       - fctl-home:/data
       - backend-home:/home/fctl   # HOME: the claude login, ~/.claude.json, uv and npm caches (028 Q4)
@@ -16,6 +20,8 @@ services:
 
   frontend:
     build: ./frontend
+    ports:
+      - "127.0.0.1:3000:3000"   # the app: http://127.0.0.1:3000
     environment:
       HOST: "0.0.0.0"
       FCTL_API_URL: "http://backend:4545"

@@ -67,10 +67,12 @@ open the same path on `http://127.0.0.1:3000`.
 ## Using fctl with Docker
 
 With `docker compose up`, the backend runs `fctl serve --host 0.0.0.0` in its container, and
-`compose.override.yaml` (your copy of `compose.override.example.yaml`) publishes it on the host at
-`127.0.0.1:4545`. So:
+`compose.yaml` publishes it on the host at `127.0.0.1:4545` (the frontend at `127.0.0.1:3000`).
+`compose.override.yaml` (your copy of `compose.override.example.yaml`) is optional; its
+`ports: !override` only changes those host ports. So:
 
 - `fctl` on the host needs no setting: it keeps `FCTL_URL` at its default, `http://127.0.0.1:4545`.
+  If the override changes the backend port, set `FCTL_URL=http://127.0.0.1:<port>`.
 - Don't run `fctl serve` on the host while compose is up. Port 4545 is taken.
 - `FCTL_HOME` doesn't apply on the host. The data lives in the `fctl-home` volume, mounted at
   `/data` in the container, where the image sets `FCTL_HOME=/data`. `docker compose down -v`
