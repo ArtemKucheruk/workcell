@@ -12,15 +12,15 @@ from controllers.test_run_accounts import ByDir, snapshot
 from controllers.test_runs import OLD, add_running_run, add_task, cap, fake, project, wait  # noqa: F401
 from fastapi.testclient import TestClient
 
-from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.adapters.git import SubprocessGit
-from claude_factories.dto.schedules import SchedulePatch
-from claude_factories.handlers import runs as runs_handler
-from claude_factories.handlers import schedules as handler
-from claude_factories.lib.cron import next_after
-from claude_factories.repositories.schedules import SchedulesRepo
-from claude_factories.server.app import create_app
-from claude_factories.server.deps import transaction as tx
+from workcell.adapters.claude import SubprocessClaude
+from workcell.adapters.git import SubprocessGit
+from workcell.dto.schedules import SchedulePatch
+from workcell.handlers import runs as runs_handler
+from workcell.handlers import schedules as handler
+from workcell.lib.cron import next_after
+from workcell.repositories.schedules import SchedulesRepo
+from workcell.server.app import create_app
+from workcell.server.deps import transaction as tx
 
 REAL_START_LOOP = handler.start_loop  # before conftest swaps it for a no-op (Q10)
 BASE = "http://127.0.0.1:4545"

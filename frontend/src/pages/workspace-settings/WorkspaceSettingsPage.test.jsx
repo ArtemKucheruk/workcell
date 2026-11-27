@@ -53,7 +53,7 @@ test('049 FE20: the page shows the skeleton, then fetches the workspace view-mod
   await act(() => vi.advanceTimersByTimeAsync(0))
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('work')
   expect(main.queryByRole('status')).toBeNull()
-  expect(document.title).toBe('work · Settings · Claude Factories')
+  expect(document.title).toBe('work · Settings · Workcell')
   await act(() => vi.advanceTimersByTimeAsync(10_000))
   expect(loads(fetch)).toBe(1)
   expect(within(screen.getByRole('main')).queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull() // Q14

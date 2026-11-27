@@ -90,7 +90,7 @@ export function ReviewsPage() {
   })
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Reviews · Claude Factories`
+    if (name) document.title = `${name} · Reviews · Workcell`
   }, [name])
 
   if (error?.status === 404) return <NotFound detail={error.message} />

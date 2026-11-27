@@ -29,7 +29,7 @@ test('AC27, 046 FE7: /workspaces/2 shows the name, title, and one row per projec
   renderAt('/workspaces/2')
   expect(await screen.findByRole('heading', { level: 1, name: 'personal' })).toBeTruthy()
   expect(fetched(fetch)).toContain('/api/pages/workspaces/2')
-  await waitFor(() => expect(document.title).toBe('personal · Claude Factories')) // the title is set in an effect, after the heading renders
+  await waitFor(() => expect(document.title).toBe('personal · Workcell')) // the title is set in an effect, after the heading renders
   const rows = screen.getAllByRole('row').slice(1)
   expect(rows.map((tr) => [...tr.querySelectorAll('td')].map((td) => td.textContent))).toEqual([
     ['api', '/home/me/api', '2', '1', '0', '7', 'ready', '2d ago'],
@@ -52,13 +52,13 @@ test('059 FE3: a legacy row reads legacy in text-warning; a ready row reads read
   expect(factoryCells[1].className).toMatch(warning)
 })
 
-test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {
+test('FE20: main has no Breadcrumb nav and no Workcell link', async () => {
   mockFetch({ 'GET /api/pages/workspaces/2': workspace(2, 'personal', PROJECTS) })
   renderAt('/workspaces/2')
   await screen.findByRole('heading', { level: 1, name: 'personal' })
   const main = within(screen.getByRole('main'))
   expect(main.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
-  expect(main.queryByRole('link', { name: 'Claude Factories' })).toBeNull()
+  expect(main.queryByRole('link', { name: 'Workcell' })).toBeNull()
 })
 
 test('AC28: no projects says how to connect one to this workspace', async () => {

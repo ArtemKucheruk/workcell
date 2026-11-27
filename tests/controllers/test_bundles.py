@@ -11,14 +11,14 @@ from pathlib import Path
 import pytest
 from conftest import git, sql
 
-from claude_factories import config, db
-from claude_factories.handlers.transcripts import load
-from claude_factories.lib.patch import split_patch
-from claude_factories.repositories.reviews import ReviewsRepo
-from claude_factories.repositories.rounds import RoundsRepo
-from claude_factories.repositories.runs import RunsRepo
-from claude_factories.repositories.tasks import TasksRepo
-from claude_factories.repositories.transcripts import TranscriptsRepo
+from workcell import config, db
+from workcell.handlers.transcripts import load
+from workcell.lib.patch import split_patch
+from workcell.repositories.reviews import ReviewsRepo
+from workcell.repositories.rounds import RoundsRepo
+from workcell.repositories.runs import RunsRepo
+from workcell.repositories.tasks import TasksRepo
+from workcell.repositories.transcripts import TranscriptsRepo
 
 H = {"X-Requested-By": "fctl"}
 ROOT = Path(__file__).resolve().parents[2]

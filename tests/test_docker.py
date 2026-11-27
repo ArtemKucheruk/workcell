@@ -253,14 +253,14 @@ def test_compose_backend_home_volume():  # 028 AC13
 
 def test_compose_backend_image_name():  # 028 AC14
     backend = services("compose.yaml")["backend"]
-    assert re.search(r"^\s+image:\s*claude-factories-backend\s*(#.*)?$", backend, re.M)
+    assert re.search(r"^\s+image:\s*workcell-backend\s*(#.*)?$", backend, re.M)
     assert re.search(r"^\s+build:\s*\.\s*$", backend, re.M)
 
 
 def test_override_custom_image_recipe():  # 028 AC15
     backend = read("compose.override.example.yaml").split("\n  backend:\n", 1)[1].split("\n  frontend:\n", 1)[0]
     comments = [line.strip() for line in backend.splitlines() if line.lstrip().startswith("#")]
-    assert any("FROM claude-factories-backend" in c for c in comments)
+    assert any("FROM workcell-backend" in c for c in comments)
     assert any(c.startswith("# image: ") for c in comments)
     assert "# build: !reset null" in comments
 
@@ -278,7 +278,7 @@ def test_readme_demo_data():  # 038 AC38, Q8
     readme = read("README.md")
     start = readme.index("\n## Demo data\n")
     demo = readme[start:readme.index("\n## ", start + 1)]
-    for text in ("FCTL_HOME=~/.claude-factories-demo fctl seed", "FCTL_HOME=~/.claude-factories-demo fctl serve",
-                 "docker compose -p claude-factories-demo up",
-                 "docker compose -p claude-factories-demo exec backend fctl seed"):
+    for text in ("FCTL_HOME=~/.workcell-demo fctl seed", "FCTL_HOME=~/.workcell-demo fctl serve",
+                 "docker compose -p workcell-demo up",
+                 "docker compose -p workcell-demo exec backend fctl seed"):
         assert text in demo, text

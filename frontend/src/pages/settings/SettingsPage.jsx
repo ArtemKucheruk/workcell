@@ -162,7 +162,7 @@ export function SettingsPage() {
   const [asking, setAsking] = useState(null) // the Disconnect dialog's { account, opener }
   const addButton = useRef(null)
   useEffect(() => {
-    document.title = 'Settings · Claude Factories'
+    document.title = 'Settings · Workcell'
   }, [])
   const shown = list ?? loaded
 

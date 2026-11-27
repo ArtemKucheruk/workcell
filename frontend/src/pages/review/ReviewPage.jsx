@@ -493,7 +493,7 @@ export function ReviewPage() {
   const planeWarning = warned?.id === id ? warned.text : null
   const heading = page && `#${page.task.id} ${page.task.title}`
   useEffect(() => {
-    if (heading) document.title = `${heading} · Review · Claude Factories`
+    if (heading) document.title = `${heading} · Review · Workcell`
   }, [heading])
 
   // Q4: a deep link scrolls to its line (or file) once the view-model has rendered; it opens no form

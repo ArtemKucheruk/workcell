@@ -2,9 +2,9 @@
 
 from conftest import sql
 
-from claude_factories import db
-from claude_factories.repositories.usage import UsageRepo
-from claude_factories.server.deps import transaction
+from workcell import db
+from workcell.repositories.usage import UsageRepo
+from workcell.server.deps import transaction
 
 OLD = "2026-01-01T00:00:00Z"
 SNAP = {"five_hour": {"utilization": 0.1, "resets_at": 1, "status": "allowed"},

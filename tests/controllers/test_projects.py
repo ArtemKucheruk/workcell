@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 from conftest import git, sql
 
-from claude_factories.lib.markdown import render
-from claude_factories.server.deps import get_git
+from workcell.lib.markdown import render
+from workcell.server.deps import get_git
 
 from .test_tasks import OWNED, add_run, add_task, dump, full_task
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from claude_factories.lib.backlog import parse, title
+from workcell.lib.backlog import parse, title
 
 
 def test_line_under_heading():  # BE1, Q2

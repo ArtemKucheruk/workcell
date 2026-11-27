@@ -1,7 +1,7 @@
 import pytest
 from conftest import sql
 
-from claude_factories import db
+from workcell import db
 
 from .test_projects import H, connect, workspace_id
 

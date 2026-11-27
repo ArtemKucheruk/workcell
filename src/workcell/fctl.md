@@ -1,4 +1,4 @@
-`fctl` is the Claude Factories command line. It starts the app's backend, installs the global
+`fctl` is the Workcell command line. It starts the app's backend, installs the global
 skills, and is how you, the `/factory-connect` and `/factory-submit` skills, and the factory's
 agents read and write the app. Every command but `fctl serve`, `fctl setup`, `fctl seed`, and
 `fctl service` is a small HTTP client of the backend at `FCTL_URL`. `fctl --help` lists the commands, and
@@ -9,15 +9,15 @@ agents read and write the app. Every command but `fctl serve`, `fctl setup`, `fc
 `fctl` comes with the app's Python package. Install it on the host with uv, from your checkout:
 
 ```sh
-uv tool install ~/personalProjects/claude-factories   # puts fctl on PATH (~/.local/bin)
+uv tool install ~/personalProjects/workcell   # puts fctl on PATH (~/.local/bin)
 fctl setup     # writes ~/.claude/skills/factory-connect, factory-submit, and fctl
 ```
 
 Use the path of your own checkout. With `--editable`
-(`uv tool install --editable ~/personalProjects/claude-factories`), `fctl` runs the code in the
+(`uv tool install --editable ~/personalProjects/workcell`), `fctl` runs the code in the
 checkout, so a `git pull` is enough to update it. Without it, `uv tool install --reinstall` with
 the same path picks up new code. If `fctl` isn't found afterwards, run `uv tool update-shell` and
-open a new terminal. `uv tool uninstall claude-factories` removes it.
+open a new terminal. `uv tool uninstall workcell` removes it.
 
 `fctl setup` installs the three global skills into Claude Code, once per machine:
 
@@ -42,7 +42,7 @@ instead, `fctl serve` runs the backend, and the frontend server runs next to it:
 | Variable | Default | Read by | What it is |
 |---|---|---|---|
 | `FCTL_URL` | `http://127.0.0.1:4545` | every command that calls the app | the backend's address; a trailing `/` is dropped |
-| `FCTL_HOME` | `~/.claude-factories` | `fctl serve`, `fctl seed`, `fctl service` | the data dir: `factory.db`, `runs/<id>.jsonl` for each run's log, and for `fctl service` its `logs/` (`backend.log`, `frontend.log`) and `service.json` |
+| `FCTL_HOME` | `~/.workcell` | `fctl serve`, `fctl seed`, `fctl service` | the data dir: `factory.db`, `runs/<id>.jsonl` for each run's log, and for `fctl service` its `logs/` (`backend.log`, `frontend.log`) and `service.json` |
 
 Set `FCTL_URL` when the backend isn't on port 4545, for example after `fctl serve --port 5000`:
 
@@ -143,7 +143,7 @@ none
 One line, then uvicorn's request log on stderr until you stop it with Ctrl-C:
 
 ```
-Claude Factories → http://127.0.0.1:4545 (data: ~/.claude-factories)
+Workcell → http://127.0.0.1:4545 (data: ~/.workcell)
 ```
 
 The data dir is `FCTL_HOME`. Stopping `fctl serve` stops every run; at the next start, a run still
@@ -241,7 +241,7 @@ none
 One line:
 
 ```
-Seeded ~/.claude-factories-demo: 2 workspaces, 3 projects, 14 tasks, 7 runs
+Seeded ~/.workcell-demo: 2 workspaces, 3 projects, 14 tasks, 7 runs
 ```
 
 What it writes, all in one transaction:
@@ -285,17 +285,17 @@ me, to try the app or to work on its pages.
 **Example**
 
 ```sh
-FCTL_HOME=~/.claude-factories-demo fctl seed
-FCTL_HOME=~/.claude-factories-demo fctl serve
+FCTL_HOME=~/.workcell-demo fctl seed
+FCTL_HOME=~/.workcell-demo fctl serve
 ```
 
 With Docker, in a compose project of its own, so its volumes never touch your real data:
 
 ```sh
 docker compose down                          # your own app; its data stays in its volumes
-docker compose -p claude-factories-demo up --build -d
-docker compose -p claude-factories-demo exec backend fctl seed
-docker compose -p claude-factories-demo down -v   # later: deletes the demo
+docker compose -p workcell-demo up --build -d
+docker compose -p workcell-demo exec backend fctl seed
+docker compose -p workcell-demo down -v   # later: deletes the demo
 ```
 
 ## fctl service install
@@ -313,15 +313,19 @@ fctl service install [--backend-port PORT] [--frontend-port PORT]
 It serves the checkout of the editable install (`uv tool install --editable <checkout>`), found
 from the installed package, so it works from any directory. It:
 
+0. Upgrades from before the rename to Workcell (README "Upgrading"): stops and deletes the
+   old-named services where their files exist (`fctl service reload` does this too), then, with
+   `FCTL_HOME` unset, moves the old data dir to `~/.workcell` and leaves a symlink at the old path.
+   `fctl serve` makes the same move on startup.
 1. Looks up the absolute paths of `fctl`, `node`, `npm`, and `git` (required) and `claude`, `uv`,
    `gh`, and `wt` (only warned about), and builds the services' `PATH`: each found binary's folder,
    then the current `PATH`. `FCTL_HOME` and `CLAUDE_CONFIG_DIR` go into the backend's env when set.
    It all goes into `FCTL_HOME/service.json`.
 2. Builds the frontend when `frontend/dist/index.html` is missing: `npm --prefix <repo>/frontend ci`
    (only without `frontend/node_modules`), then `npm --prefix <repo>/frontend run build`.
-3. Writes `~/Library/LaunchAgents/com.claude-factories.backend.plist` and `…frontend.plist`, then
+3. Writes `~/Library/LaunchAgents/com.workcell.backend.plist` and `…frontend.plist`, then
    for each runs `launchctl bootout gui/<uid>/<label>` and `launchctl bootstrap gui/<uid> <plist>`.
-   On Linux it writes `~/.config/systemd/user/claude-factories-backend.service` and
+   On Linux it writes `~/.config/systemd/user/workcell-backend.service` and
    `…-frontend.service`, then runs `systemctl --user daemon-reload` and
    `systemctl --user enable --now <unit>`. Both bind `127.0.0.1` only; `KeepAlive` and
    `Restart=on-failure` restart a crash, not a clean exit.
@@ -344,10 +348,10 @@ none
 A warning line on stderr for each optional binary it didn't find, then:
 
 ```
-Wrote ~/Library/LaunchAgents/com.claude-factories.backend.plist
-Wrote ~/Library/LaunchAgents/com.claude-factories.frontend.plist
-Started backend → http://127.0.0.1:4545 (log: ~/.claude-factories/logs/backend.log)
-Started frontend → http://127.0.0.1:3000 (log: ~/.claude-factories/logs/frontend.log)
+Wrote ~/Library/LaunchAgents/com.workcell.backend.plist
+Wrote ~/Library/LaunchAgents/com.workcell.frontend.plist
+Started backend → http://127.0.0.1:4545 (log: ~/.workcell/logs/backend.log)
+Started frontend → http://127.0.0.1:3000 (log: ~/.workcell/logs/frontend.log)
 ```
 
 With a `--backend-port` other than 4545, a last line: `export FCTL_URL=http://127.0.0.1:<port>`.
@@ -407,7 +411,7 @@ none
 **Output**
 
 ```
-Uninstalled backend and frontend; logs kept in ~/.claude-factories/logs
+Uninstalled backend and frontend; logs kept in ~/.workcell/logs
 ```
 
 With `--force` and active runs, first `Stopping active runs: run #68 on #92`.
@@ -621,7 +625,7 @@ none
 npm's own output, then:
 
 ```
-Python dependencies changed; run: uv tool install --editable --reinstall ~/code/claude-factories
+Python dependencies changed; run: uv tool install --editable --reinstall ~/code/workcell
 Restarted backend → http://127.0.0.1:4545
 Restarted frontend → http://127.0.0.1:3000
 ```
@@ -738,9 +742,9 @@ none
 Each log under a header, as `tail` prints them:
 
 ```
-==> ~/.claude-factories/logs/backend.log <==
-Claude Factories → http://127.0.0.1:4545 (data: ~/.claude-factories)
-no log yet: ~/.claude-factories/logs/frontend.log
+==> ~/.workcell/logs/backend.log <==
+Workcell → http://127.0.0.1:4545 (data: ~/.workcell)
+no log yet: ~/.workcell/logs/frontend.log
 ```
 
 `no log yet: <path>` for a log that doesn't exist.
@@ -992,7 +996,7 @@ fctl import-factory --job 014-run-ui
 
 ## fctl export
 
-Writes a task as a zip bundle that another Claude Factories app can import with
+Writes a task as a zip bundle that another Workcell app can import with
 [fctl import](#fctl-import): its spec, each round's build notes, diff, and reviews, my change
 requests, the approver's decision, and a `task.json` with the title, description, status, events,
 and comments. Calls `GET /api/tasks/{id}/export`.

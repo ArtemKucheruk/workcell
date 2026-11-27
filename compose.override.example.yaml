@@ -3,7 +3,7 @@
 services:
   backend:
     # Runs get git, uv, node, and npm. For more tools, write a Dockerfile of your own (028 Q10):
-    #   FROM claude-factories-backend
+    #   FROM workcell-backend
     #   RUN apt-get update && apt-get install -y --no-install-recommends make && rm -rf /var/lib/apt/lists/*
     # run `docker compose build backend`, then `docker build -t my-backend .` in that Dockerfile's
     # folder, and uncomment these two lines, so compose runs your image instead of building ours:

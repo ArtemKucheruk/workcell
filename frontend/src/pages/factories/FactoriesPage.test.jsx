@@ -90,9 +90,9 @@ test('FE1: the board view-model and the list load once each, never polled; a ske
   expect(view.container.querySelector('main').className.split(/\s+/)).toEqual(expect.arrayContaining(['mx-auto', 'max-w-6xl']))
 })
 
-test('101 AC17: the title is {project} · Workflows · Claude Factories', async () => {
+test('101 AC17: the title is {project} · Workflows · Workcell', async () => {
   await open()
-  expect(document.title).toBe('api-server · Workflows · Claude Factories')
+  expect(document.title).toBe('api-server · Workflows · Workcell')
 })
 
 test('FE1: a 404 from either request is the not-found page; any other failed first load is the red alert', async () => {

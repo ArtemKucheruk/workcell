@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from conftest import FAKE_WT, git, sql
 
-from claude_factories.cli import git as cli_git
-from claude_factories.cli.main import main
-from claude_factories.lib.slug import slug
+from workcell.cli import git as cli_git
+from workcell.cli.main import main
+from workcell.lib.slug import slug
 
 REVIEWERS = ("security", "ux", "ui", "code")
 
@@ -156,7 +156,7 @@ def test_context_cards(client, seeded):  # 057 BE22
     # the summary line counts only these, so it is unchanged: fctl.md's example line
     counts = [sql(f"SELECT COUNT(*) FROM {t}")[0][0] for t in ("workspaces", "projects", "tasks", "runs")]
     assert "{} workspaces, {} projects, {} tasks, {} runs".format(*counts) in (
-        Path(__file__).parents[2] / "src" / "claude_factories" / "fctl.md").read_text(encoding="utf-8")
+        Path(__file__).parents[2] / "src" / "workcell" / "fctl.md").read_text(encoding="utf-8")
 
 
 def test_ready_checkout_is_clean(client):  # AC12

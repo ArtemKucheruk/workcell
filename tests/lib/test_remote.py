@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from claude_factories.lib.remote import blob_url, web_url
+from workcell.lib.remote import blob_url, web_url
 
 REPO = "https://github.com/owner/repo"
 NONE = ["/home/me/repo", "../repo", "C:\\repo", "file:///srv/repo.git", None, "", "javascript:alert(1)",

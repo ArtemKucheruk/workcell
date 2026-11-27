@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import git, sql
 
-from claude_factories import config
+from workcell import config
 
 from .test_pull_requests import LOGGED_OUT, between, gh, gh_missing  # noqa: F401 (gh is the fixture)
 

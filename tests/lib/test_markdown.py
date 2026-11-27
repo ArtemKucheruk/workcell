@@ -1,4 +1,4 @@
-from claude_factories.lib.markdown import render_with_headings
+from workcell.lib.markdown import render_with_headings
 
 
 def test_heading_gets_id():  # 029 AC1

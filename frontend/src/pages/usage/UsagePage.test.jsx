@@ -47,7 +47,7 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20))
 
 test('AC25: one GET /api/usage, no polling; title, h1 Usage, not wide', async () => {
   const { fetch } = await open()
-  await waitFor(() => expect(document.title).toBe('Usage · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('Usage · Workcell'))
   expect(screen.getByRole('main').className).toMatch(cls('max-w-6xl'))
   await settle()
   expect(fetched(fetch).filter((u) => u.startsWith('/api/usage'))).toEqual([URL7])

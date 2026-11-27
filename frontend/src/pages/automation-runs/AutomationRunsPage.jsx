@@ -106,7 +106,7 @@ function AutomationRuns({ id, fid }) {
   const owned = page && String(page.automation.project_id) === id
   const title = owned && `${page.automation.name} runs · ${page.automation.project}`
   useEffect(() => {
-    if (title) document.title = `${title} · Claude Factories`
+    if (title) document.title = `${title} · Workcell`
   }, [title])
 
   if (error?.status === 404) return <NotFound detail={error.message} />

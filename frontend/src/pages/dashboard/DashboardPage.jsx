@@ -274,7 +274,7 @@ export function DashboardPage() {
   const load = useCallback(() => dashboardPage(show), [show])
   const { data: page, error } = usePoll(load)
   useEffect(() => {
-    document.title = 'Claude Factories'
+    document.title = 'Workcell'
   }, [])
 
   if (error) return error.status === 404 ? <NotFound detail={error.message} /> : <ErrorMessage error={error} />

@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 from conftest import sql
 
-from claude_factories.handlers.factories import preset_graph
+from workcell.handlers.factories import preset_graph
 
 from .test_projects import H, connect
 
 TIMESTAMP = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
-AGENTS_DIR = Path(__file__).resolve().parents[2] / "src" / "claude_factories" / "factory_templates" / "agents"
+AGENTS_DIR = Path(__file__).resolve().parents[2] / "src" / "workcell" / "factory_templates" / "agents"
 AGENT_IDS = ["spec-writer", "builder", "review-security", "review-ux", "review-ui", "review-code", "approver"]
 OLD = "2000-01-01T00:00:00Z"
 

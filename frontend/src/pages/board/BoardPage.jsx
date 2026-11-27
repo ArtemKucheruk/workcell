@@ -446,7 +446,7 @@ export function BoardPage() {
   })
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Claude Factories`
+    if (name) document.title = `${name} · Workcell`
   }, [name])
   // Q6: after a menu move's reload, focus the card's Move button, in its new column or in place
   useEffect(() => {

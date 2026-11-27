@@ -1,4 +1,4 @@
-# Claude Factories — UI
+# Workcell — UI
 
 Part of the [MVP design](MVP.md). Section numbers continue from it.
 
@@ -637,7 +637,7 @@ Loading, failures, times, and motion are the same on every page:
 15. **Agents** (`/agents`; wireframe §8.8)
     - Loads `GET /api/pages/agents` (`docs/data-model-and-api.md §6.4`) and polls it every 3 s,
       with the skeleton, the red alert for a failed first load, and the offline banner. The
-      title reads `Agents · Claude Factories`. Not a wide page. `h1` `Agents`, then `h2`s
+      title reads `Agents · Workcell`. Not a wide page. `h1` `Agents`, then `h2`s
       **Running** and **Recent**.
     - Each running run is a card: its kind (`factory` or `automation`), `#12 <title>`
       linking to `/tasks/12`, the project linking to `/projects/{id}`, the stage (as the board
@@ -667,7 +667,7 @@ Loading, failures, times, and motion are the same on every page:
       automation transcripts have no page yet.
 16. **Usage** (`/usage`; wireframe §8.10)
     - Loads `GET /api/usage?days=7` (`docs/data-model-and-api.md §6.4`) once, never polled, with
-      the skeleton and the red alert for a failed load. The title reads `Usage · Claude Factories`.
+      the skeleton and the red alert for a failed load. The title reads `Usage · Workcell`.
       Not a wide page. `h1` `Usage`.
     - **Accounts**: a card per account with its label, the `active` pill on the active one, the 5h
       and 7d rows as in the sidebar's usage block but larger, `as of <relative time> · run #N`,
@@ -866,7 +866,7 @@ tree: Preline Tree View's rows on the tokens; [−] is an open directory and [+]
 ### 8.4 Sidebar
 ```
 ┌──────────────────────────┐
-│ Claude Factories         │
+│ Workcell                 │
 │ Workspace [personal▾] ⋯  │  ← ⋯: the workspace menu
 │ + New workspace          │
 │                          │

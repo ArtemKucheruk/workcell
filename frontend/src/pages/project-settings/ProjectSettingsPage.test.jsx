@@ -641,7 +641,7 @@ test('FE31 (AC28): a refused move shows its detail in the Move form', async () =
 
 test('FE32: the title; a 404 is the not-found state; /projects/4/settings resets Move and clears results', async () => {
   const { router, responses } = await open(board(), { [`POST ${IMPORT}`]: [200, IMPORTED] })
-  await waitFor(() => expect(document.title).toBe('api · Settings · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('api · Settings · Workcell'))
   importFile(bundleFile())
   await screen.findByText(fullText('Imported #12 Rate-limit <login>'))
   pick(screen.getByRole('combobox', { name: 'Workspace' }), '4')

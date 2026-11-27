@@ -1,4 +1,4 @@
-from claude_factories.lib.diff import diff_rows
+from workcell.lib.diff import diff_rows
 
 
 def test_diff_rows_without_the_app():  # 036 AC8

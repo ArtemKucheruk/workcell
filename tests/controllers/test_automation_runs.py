@@ -18,10 +18,10 @@ from controllers.test_runs import (FCTL_ALLOWED, H, OLD, add_running_run, add_ta
 from fastapi.testclient import TestClient
 from handlers.test_transcripts import MAIN
 
-from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.lib.transcript import folder_name
-from claude_factories.server.app import create_app
-from claude_factories.server.deps import get_claude
+from workcell.adapters.claude import SubprocessClaude
+from workcell.lib.transcript import folder_name
+from workcell.server.app import create_app
+from workcell.server.deps import get_claude
 
 AUTO_SKILL = ".claude/skills/security-audit/SKILL.md"
 DISALLOWED = ["Bash(git commit *)", "Bash(git push *)", "Bash(git merge *)", "Bash(git rebase *)",

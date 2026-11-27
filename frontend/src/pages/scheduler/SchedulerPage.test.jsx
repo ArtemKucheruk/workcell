@@ -71,7 +71,7 @@ test('104 AC24: loads the header, the schedules, and the factories; one row per 
     [BOARD, FACTORIES, LIST].sort(),
   )
   expect(screen.getByRole('heading', { level: 1, name: 'api-server · personal' })).toBeTruthy()
-  await waitFor(() => expect(document.title).toBe('api-server · Scheduler · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('api-server · Scheduler · Workcell'))
   const [audit, coverage] = rows()
   expect(rows()).toHaveLength(2)
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from claude_factories.lib.github_issue import closes_line, description, issue_url, key, parse_key
+from workcell.lib.github_issue import closes_line, description, issue_url, key, parse_key
 
 URL = "https://github.com/o/r/issues/12"
 

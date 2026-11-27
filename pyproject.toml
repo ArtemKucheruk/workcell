@@ -1,5 +1,5 @@
 [project]
-name = "claude-factories"
+name = "workcell"
 version = "0.1.0"
 description = "A local software factory for Claude Code"
 license = "MIT"
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
-fctl = "claude_factories.cli.main:main"
+fctl = "workcell.cli.main:main"
 
 [build-system]
 requires = ["uv_build>=0.8.20,<0.9.0"]

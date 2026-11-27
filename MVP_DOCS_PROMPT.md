@@ -1,4 +1,4 @@
-# Task: write MVP documentation for "Claude Factories" (working name)
+# Task: write MVP documentation for "Workcell" (working name)
 
 Write design documentation only. Do not write application code, scaffold the project,
 or install anything. All output is markdown under `docs/`.

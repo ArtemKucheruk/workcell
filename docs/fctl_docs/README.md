@@ -1,6 +1,6 @@
 # fctl for Claude agents
 
-`fctl` is the command line of Claude Factories. Every bit of factory state (tasks, specs, rounds,
+`fctl` is the command line of Workcell. Every bit of factory state (tasks, specs, rounds,
 verdicts, comments, decisions, stages, project context) lives in the app's database, behind the
 backend's HTTP API. `fctl` is the only way an agent reads or writes it. Most commands are a thin
 HTTP client of the backend at `FCTL_URL` (default `http://127.0.0.1:4545`); markdown goes in on
@@ -61,7 +61,7 @@ may not touch, and what to do when a command fails.
 ## Source of truth
 
 The full per-command reference, every flag and every error message, is
-[`src/claude_factories/fctl.md`](../../src/claude_factories/fctl.md). The app serves it at
+[`src/workcell/fctl.md`](../../src/workcell/fctl.md). The app serves it at
 `/docs/fctl`, and `tests/test_fctl_md.py` checks it against the real parser. `fctl --help` and
 `fctl <command> --help` print the live flags. If anything in this folder disagrees with those,
 they win. The design behind the commands is in [`docs/claude-code.md` §7](../claude-code.md) and

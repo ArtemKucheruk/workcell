@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from conftest import commit, git, sql, write
 
-from claude_factories import config, db
-from claude_factories.lib.patch import split_patch
-from claude_factories.lib.transcript import folder_name
+from workcell import config, db
+from workcell.lib.patch import split_patch
+from workcell.lib.transcript import folder_name
 
 from .test_transcripts import assistant, jsonl, line, spawn, user
 
@@ -833,7 +833,7 @@ def test_backlog_docs():  # 058 BE32
     ui = (ROOT / "docs" / "ui.md").read_text()
     assert "factory/: " in ui[ui.index("3. **Project board**"):ui.index("4. **")]
     assert "Sync factory/" in ui[ui.index("12. **Project settings**"):ui.index("13. **")]
-    fctl = (ROOT / "src" / "claude_factories" / "fctl.md").read_text()
+    fctl = (ROOT / "src" / "workcell" / "fctl.md").read_text()
     connect = fctl[fctl.index("## fctl connect\n"):fctl.index("## fctl context\n")]
     assert "Synced factory/: 2 new, 1 updated, 3 skipped" in connect
     imports = fctl[fctl.index("## fctl import-factory\n"):fctl.index("## fctl export\n")]

@@ -6,9 +6,9 @@ import json
 import pytest
 from conftest import sql
 
-from claude_factories.handlers import usage as usage_handler
-from claude_factories.repositories.usage import UsageRepo
-from claude_factories.server.deps import get_claude, get_git, transaction
+from workcell.handlers import usage as usage_handler
+from workcell.repositories.usage import UsageRepo
+from workcell.server.deps import get_claude, get_git, transaction
 
 OLD = "2026-01-01T00:00:00Z"
 FAR = 4_000_000_000

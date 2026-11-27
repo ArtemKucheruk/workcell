@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from conftest import commit, git, write
 
-from claude_factories.cli import services
-from claude_factories.cli.main import build_parser, main
+from workcell.cli import services
+from workcell.cli.main import build_parser, main
 
 from ..conftest import reply
 
@@ -31,8 +31,8 @@ for rule in (json.load(open(rules)) if os.path.exists(rules) else []):
 FAKES = ("launchctl", "systemctl", "npm", "lsof", "ps", "fctl", "node")
 SUBS = ("install", "uninstall", "start", "stop", "restart", "reload", "status", "logs")
 DOMAIN = f"gui/{os.getuid()}"
-LABEL = {"backend": "com.claude-factories.backend", "frontend": "com.claude-factories.frontend"}
-UNIT = {"backend": "claude-factories-backend.service", "frontend": "claude-factories-frontend.service"}
+LABEL = {"backend": "com.workcell.backend", "frontend": "com.workcell.frontend"}  # 116 AC10
+UNIT = {"backend": "workcell-backend.service", "frontend": "workcell-frontend.service"}
 RUN_68 = {"id": 68, "task_id": 92, "title": "Rate-limit login"}
 RUN_70 = {"id": 70, "task_id": 95, "title": "Dark mode"}
 UNSUPPORTED = ("fctl: fctl service runs on macOS (launchd) or Linux (systemd --user); in Docker use docker compose"
@@ -201,6 +201,21 @@ def test_repo_path_from_direct_url(monkeypatch, tmp_path):  # AC4
     assert services.repo_path() == Path("/home/me/my repo")
 
 
+def test_repo_path_reads_the_workcell_distribution(monkeypatch):  # 116 AC3
+    url = {"url": "file:///home/me/workcell", "dir_info": {"editable": True}}
+    asked = []
+    monkeypatch.setattr(services.metadata, "distribution", lambda name: asked.append(name) or Dist(json.dumps(url)))
+    assert services.repo_path() == Path("/home/me/workcell")
+    assert asked == ["workcell"]
+
+
+def test_home_defaults_to_workcell(monkeypatch, tmp_path):  # 116 AC4
+    monkeypatch.delenv("FCTL_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert services.home() == tmp_path / ".workcell"
+    assert services.state_path() == tmp_path / ".workcell" / "service.json"
+
+
 @pytest.mark.parametrize("text", [
     None,
     json.dumps({"url": "file:///home/me/repo", "dir_info": {}}),
@@ -251,11 +266,11 @@ def test_backend_plist(svc):  # AC6
 def test_backend_plist_env_only_when_set(svc, monkeypatch):  # AC6
     monkeypatch.delenv("CLAUDE_CONFIG_DIR")
     monkeypatch.delenv("FCTL_HOME")
-    svc.home = Path.home() / ".claude-factories"
+    svc.home = Path.home() / ".workcell"
     svc.install()
     plist = plistlib.loads(svc.file("backend").read_bytes())
     assert set(plist["EnvironmentVariables"]) == {"PATH"}
-    assert plist["StandardOutPath"] == str(Path.home() / ".claude-factories" / "logs" / "backend.log")
+    assert plist["StandardOutPath"] == str(Path.home() / ".workcell" / "logs" / "backend.log")
 
 
 def test_plist_values_are_escaped(tmp_path):  # AC6
@@ -301,6 +316,7 @@ def test_linux_units(svc, monkeypatch):  # AC8
         for line in (f"WorkingDirectory={svc.repo}", f'Environment="PATH={path}"', "Restart=on-failure",
                      f"StandardOutput=append:{log}", f"StandardError=append:{log}", "WantedBy=default.target"):
             assert line in lines, (name, line)
+    assert "Description=Workcell backend" in backend and "Description=Workcell frontend" in frontend  # 116 AC10
     assert f'Environment="FCTL_HOME={os.environ["FCTL_HOME"]}"' in backend
     assert f'Environment="CLAUDE_CONFIG_DIR={os.environ["CLAUDE_CONFIG_DIR"]}"' in backend
     for line in ('Environment="HOST=127.0.0.1"', f'Environment="PORT={svc.ports["frontend"]}"',
@@ -396,6 +412,73 @@ def test_install_linux_calls(svc, monkeypatch):  # AC12
             ["systemctl", "--user", "enable", "--now", UNIT["frontend"]],
         ]
         svc.log.unlink()
+
+
+def old_files(plat: str) -> list[Path]:
+    """116 AC11: the services an install before the rename wrote."""
+    if plat == "darwin":
+        return [Path.home() / "Library" / "LaunchAgents" / f"{services.OLD_LABELS[n]}.plist" for n in services.NAMES]
+    return [Path.home() / ".config" / "systemd" / "user" / services.OLD_UNITS[n] for n in services.NAMES]
+
+
+def old_calls(plat: str) -> list[list[str]]:
+    if plat == "darwin":
+        return [["launchctl", "bootout", f"{DOMAIN}/com.claude-factories.{n}"] for n in services.NAMES]
+    return [*(["systemctl", "--user", "disable", "--now", f"claude-factories-{n}.service"] for n in services.NAMES),
+            ["systemctl", "--user", "daemon-reload"]]
+
+
+def plant_old_units(plat: str):
+    for path in old_files(plat):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("old")
+
+
+def test_install_removes_old_units(plat, svc):  # 116 AC11
+    plant_old_units(plat)
+    svc.rule("launchctl", "bootout", code=3)  # not loaded: ignored
+    svc.rule("systemctl", "disable", code=5)  # unit unknown: ignored
+    fctl("install", "--backend-port", str(svc.ports["backend"]), "--frontend-port", str(svc.ports["frontend"]))
+    calls = svc.calls("launchctl", "systemctl")
+    assert calls[:len(old_calls(plat))] == old_calls(plat)
+    assert not any(p.exists() for p in old_files(plat))
+    assert svc.file("backend").is_file() and svc.file("frontend").is_file()
+
+
+def test_reload_removes_old_units(plat, svc):  # 116 AC11
+    svc.install()
+    plant_old_units(plat)
+    fctl("reload")
+    assert svc.calls("launchctl", "systemctl")[:len(old_calls(plat))] == old_calls(plat)
+    assert not any(p.exists() for p in old_files(plat))
+
+
+def test_dangling_old_unit_link_is_removed(plat, svc):  # 116 AC11, security nit: lexists, not exists
+    for path in old_files(plat):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(path.parent / "gone")
+    fctl("install", "--backend-port", str(svc.ports["backend"]), "--frontend-port", str(svc.ports["frontend"]))
+    assert svc.calls("launchctl", "systemctl")[:len(old_calls(plat))] == old_calls(plat)
+    assert not any(os.path.lexists(p) for p in old_files(plat))
+
+
+def test_no_old_units_no_old_calls(plat, svc):  # 116 AC11
+    svc.install()
+    fctl("reload")
+    assert not any("claude-factories" in " ".join(c) for c in svc.calls(skip=()))
+
+
+def test_install_moves_the_old_data_dir(svc, monkeypatch):  # 116 AC9, Q2
+    monkeypatch.delenv("FCTL_HOME")
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    old, new = Path.home() / ".claude-factories", Path.home() / ".workcell"
+    old.mkdir()
+    (old / "factory.db").write_bytes(b"db")
+    svc.home = new
+    svc.install()
+    assert (new / "factory.db").read_bytes() == b"db"
+    assert (new / "service.json").is_file()
+    assert old.is_symlink() and old.resolve() == new.resolve()
 
 
 def test_install_prints_fctl_url_hint(svc, capsys):  # Q8

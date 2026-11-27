@@ -1,11 +1,11 @@
 ---
 name: factory-submit
-description: Send this working tree's changes to Claude Factories for review, as a new task straight in Review or as the next round of one already submitted. Use as "/factory-submit", or "/factory-submit <task-id>" for a new round.
+description: Send this working tree's changes to Workcell for review, as a new task straight in Review or as the next round of one already submitted. Use as "/factory-submit", or "/factory-submit <task-id>" for a new round.
 ---
 
 # /factory-submit $ARGUMENTS
 
-Submit the changes in this working tree to Claude Factories for my review.
+Submit the changes in this working tree to Workcell for my review.
 
 Never stage, commit, or stash. fctl captures the tree, tracked and untracked files alike,
 through a temp index and leaves the real one untouched.

@@ -83,6 +83,6 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import
   }
   const server = createServer(dist, apiUrl)
   server.listen(port, host, () => {
-    console.log(`Claude Factories frontend on http://${host}:${server.address().port} → ${apiUrl}`)
+    console.log(`Workcell frontend on http://${host}:${server.address().port} → ${apiUrl}`)
   })
 }

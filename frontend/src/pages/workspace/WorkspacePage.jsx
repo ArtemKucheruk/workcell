@@ -46,7 +46,7 @@ export function WorkspacePage() {
   const { data: page, error } = usePoll(load)
   const name = page?.workspace.name
   useEffect(() => {
-    if (name) document.title = `${name} · Claude Factories`
+    if (name) document.title = `${name} · Workcell`
   }, [name])
 
   if (error) return error.status === 404 ? <NotFound detail={error.message} /> : <ErrorMessage error={error} />

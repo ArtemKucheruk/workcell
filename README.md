@@ -1,4 +1,4 @@
-# Claude Factories
+# Workcell
 
 A local control center for Claude Code "software factories": a loop of subagents that
 specs a task, builds it in a git worktree, reviews it four ways (security, ux, ui, code),
@@ -35,8 +35,8 @@ macOS and Linux are supported. With Docker you need only Docker with Compose (se
 ## Install
 
 ```sh
-git clone https://github.com/ArtemKucheruk/claude-factories.git
-cd claude-factories
+git clone https://github.com/ArtemKucheruk/workcell.git
+cd workcell
 uv tool install --editable .     # puts `fctl` on your PATH (~/.local/bin)
 fctl --help
 ```
@@ -44,9 +44,24 @@ fctl --help
 With `--editable`, `fctl` always runs the code in your checkout, so a `git pull` is enough
 to update. If the dependencies in `pyproject.toml` change, run
 `uv tool install --editable --reinstall .`. To remove it, run
-`uv tool uninstall claude-factories`.
+`uv tool uninstall workcell`.
 
 If `fctl` isn't found, run `uv tool update-shell` and open a new terminal.
+
+### Upgrading from claude-factories
+
+The app used to be called Claude Factories. In your checkout, after pulling:
+
+```sh
+uv tool uninstall claude-factories
+uv tool install --editable .
+fctl service install      # removes the old com.claude-factories / claude-factories-* services first
+```
+
+The old backend keeps running on port 4545 until that last command stops it, so run all three.
+
+On the first start, the data in `~/.claude-factories` moves to `~/.workcell`, and the old
+path stays as a symlink to it, so signed-in accounts and every task's history carry over.
 
 ## Run the app
 
@@ -58,13 +73,13 @@ when you close the terminal:
 fctl service install      # builds the frontend if needed, then starts both
 fctl service reload       # after a git pull or merge: npm ci if the lockfile changed, build, restart
 fctl service status       # running or not, pid, uptime, URL, served commit vs main, active runs
-fctl service logs -f      # tail ~/.claude-factories/logs/{backend,frontend}.log
+fctl service logs -f      # tail ~/.workcell/logs/{backend,frontend}.log
 ```
 
 The app opens at http://127.0.0.1:3000. `stop`, `restart`, `reload`, and `uninstall` refuse
 while a run is active, since restarting the backend stops every run; `--force` goes on anyway.
 `fctl service install` needs the editable install above. Every subcommand is in
-[fctl.md](src/claude_factories/fctl.md).
+[fctl.md](src/workcell/fctl.md).
 
 Or run the backend in the foreground:
 
@@ -79,7 +94,7 @@ Press Ctrl-C to stop it. The frontend server runs next to it:
 
 | env var | default | used for |
 |---|---|---|
-| `FCTL_HOME` | `~/.claude-factories` | the data dir: `factory.db`, run logs, and the services' logs |
+| `FCTL_HOME` | `~/.workcell` | the data dir: `factory.db`, run logs, and the services' logs |
 | `FCTL_URL` | `http://127.0.0.1:4545` | where `fctl` sends its API calls; set it if you changed `--port` |
 | `FCTL_IN_DOCKER` | unset | `1` in the backend image, where the takeover command becomes `docker compose exec …` |
 
@@ -97,7 +112,7 @@ That file is gitignored, and it publishes both servers on 127.0.0.1 only.
 
 The app opens at http://127.0.0.1:3000. The backend is on `127.0.0.1:4545` as before, so
 `fctl` on the host needs no change. Its data lives in the `fctl-home` Docker volume, not in
-`~/.claude-factories`. `docker compose down` stops it, and `docker compose down -v` also
+`~/.workcell`. `docker compose down` stops it, and `docker compose down -v` also
 deletes the data. `fctl service` doesn't apply here: run `docker compose up -d` to keep the app in
 the background, and `docker compose restart` after a pull.
 
@@ -116,7 +131,7 @@ it, and `docker compose down -v` deletes it. Settings (`/settings`) can also log
 browser, and hold more Claude accounts, with one active for runs.
 
 Runs get git, uv, node, and npm. If a project's test command needs anything else, build your
-own image `FROM claude-factories-backend`. The steps are in the comments of
+own image `FROM workcell-backend`. The steps are in the comments of
 `compose.override.example.yaml`.
 
 To take over a stopped run, the task page gives a command like
@@ -146,7 +161,7 @@ Run it from this checkout, next to `compose.yaml`.
    starts a new builder round with your note.
 
 The full walkthrough is in [docs/MVP.md §3](docs/MVP.md#3-user-flows), and every command is in
-[fctl.md](src/claude_factories/fctl.md).
+[fctl.md](src/workcell/fctl.md).
 
 ## Security
 
@@ -168,25 +183,25 @@ that already has a workspace, so the demo always gets a data dir of its own.
 On the host, with your own `fctl serve` stopped (both use port 4545):
 
 ```sh
-FCTL_HOME=~/.claude-factories-demo fctl seed
-FCTL_HOME=~/.claude-factories-demo fctl serve
+FCTL_HOME=~/.workcell-demo fctl seed
+FCTL_HOME=~/.workcell-demo fctl serve
 ```
 
 Then start the frontend server next to it (`node frontend/server.js`, see
 [Developing the app](#developing-the-app)) and open http://127.0.0.1:3000. To delete the demo,
-stop the server and run `rm -rf ~/.claude-factories-demo`.
+stop the server and run `rm -rf ~/.workcell-demo`.
 
 With Docker, run the demo as a separate compose project. It gets its own `fctl-home` and
 `backend-home` volumes, so your real data is never touched:
 
 ```sh
 docker compose down                                   # your app; its data stays in its volumes
-docker compose -p claude-factories-demo up --build -d
-docker compose -p claude-factories-demo exec backend fctl seed
+docker compose -p workcell-demo up --build -d
+docker compose -p workcell-demo exec backend fctl seed
 ```
 
 Open http://127.0.0.1:3000. The demo container has no Claude login, so its header shows
-`Not signed in — runs disabled`. When you're done, `docker compose -p claude-factories-demo down -v`
+`Not signed in — runs disabled`. When you're done, `docker compose -p workcell-demo down -v`
 deletes the demo, and `docker compose up` brings your own app back.
 
 ## The factory loop
@@ -258,7 +273,7 @@ against a fake backend on 127.0.0.1.
 ## Layout
 
 ```
-src/claude_factories/   app (FastAPI), fctl CLI, schema.sql, factory templates
+src/workcell/   app (FastAPI), fctl CLI, schema.sql, factory templates
 frontend/               the React SPA and its server.js
 tests/
 docs/                   the design, which is the source of truth for what to build
@@ -276,7 +291,7 @@ docs/                   the design, which is the source of truth for what to bui
 | [`docs/claude-code.md`](docs/claude-code.md) | §7 Claude Code integration: `fctl`, skills, agent templates |
 | [`docs/ui.md`](docs/ui.md) | §8 screens and wireframes |
 | [`docs/fctl_docs/`](docs/fctl_docs/README.md) | a guide to `fctl` for people and agents |
-| [`src/claude_factories/fctl.md`](src/claude_factories/fctl.md) | every `fctl` command, also served at `/docs/fctl` |
+| [`src/workcell/fctl.md`](src/workcell/fctl.md) | every `fctl` command, also served at `/docs/fctl` |
 
 Specs cite these sections, for example `docs/data-model-and-api.md §6.2`.
 
@@ -284,4 +299,4 @@ Specs cite these sections, for example `docs/data-model-and-api.md §6.2`.
 
 MIT. See [LICENSE](LICENSE).
 
-Claude Factories is an independent project. It is not affiliated with or endorsed by Anthropic.
+Workcell is an independent project. It is not affiliated with or endorsed by Anthropic.

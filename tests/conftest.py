@@ -8,10 +8,10 @@ from contextlib import closing
 import pytest
 from fastapi.testclient import TestClient
 
-from claude_factories import db
-from claude_factories.handlers import schedules
-from claude_factories.handlers.pages import LOGIN
-from claude_factories.server.app import create_app
+from workcell import db
+from workcell.handlers import schedules
+from workcell.handlers.pages import LOGIN
+from workcell.server.app import create_app
 
 ORIGINAL_PATH = os.environ["PATH"]  # 099 AC10: where the real wt is found, before the fakes go first
 

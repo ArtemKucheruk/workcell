@@ -6,8 +6,8 @@ import tomllib
 
 import pytest
 
-from claude_factories.adapters import git as adapter
-from claude_factories.domain.errors import Conflict
+from workcell.adapters import git as adapter
+from workcell.domain.errors import Conflict
 
 
 def test_every_subprocess_has_argv_and_timeout(monkeypatch):  # 099 AC6

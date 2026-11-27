@@ -4,21 +4,21 @@ from contextlib import closing
 import pytest
 from conftest import commit
 
-from claude_factories import db
-from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.adapters.git import SubprocessGit
-from claude_factories.domain.errors import NotFound
-from claude_factories.handlers import code, pages
-from claude_factories.repositories.claude_accounts import ClaudeAccountsRepo
-from claude_factories.repositories.projects import ProjectsRepo
-from claude_factories.repositories.reviews import ReviewsRepo
-from claude_factories.repositories.rounds import RoundsRepo
-from claude_factories.repositories.runs import RunsRepo
-from claude_factories.repositories.settings import SettingsRepo
-from claude_factories.repositories.tasks import TasksRepo
-from claude_factories.repositories.transcripts import TranscriptsRepo
-from claude_factories.repositories.usage import UsageRepo
-from claude_factories.repositories.workspaces import WorkspacesRepo
+from workcell import db
+from workcell.adapters.claude import SubprocessClaude
+from workcell.adapters.git import SubprocessGit
+from workcell.domain.errors import NotFound
+from workcell.handlers import code, pages
+from workcell.repositories.claude_accounts import ClaudeAccountsRepo
+from workcell.repositories.projects import ProjectsRepo
+from workcell.repositories.reviews import ReviewsRepo
+from workcell.repositories.rounds import RoundsRepo
+from workcell.repositories.runs import RunsRepo
+from workcell.repositories.settings import SettingsRepo
+from workcell.repositories.tasks import TasksRepo
+from workcell.repositories.transcripts import TranscriptsRepo
+from workcell.repositories.usage import UsageRepo
+from workcell.repositories.workspaces import WorkspacesRepo
 
 
 @pytest.fixture

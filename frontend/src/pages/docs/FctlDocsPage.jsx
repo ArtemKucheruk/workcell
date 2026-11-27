@@ -15,7 +15,7 @@ export function FctlDocsPage() {
   const { data: doc, error } = usePoll(fctlDoc)
   const { hash } = useLocation()
   useEffect(() => {
-    document.title = 'fctl reference · Claude Factories'
+    document.title = 'fctl reference · Workcell'
   }, [])
 
   // Q9: ReviewPage's Q4 deep link, copied: scroll to the hash's heading once the content has rendered

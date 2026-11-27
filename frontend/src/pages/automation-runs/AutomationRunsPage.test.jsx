@@ -70,7 +70,7 @@ test('103 AC11: loads the page data; the breadcrumb, the h1, and the tab title',
   const current = within(crumbs).getByText('Security audit')
   expect([current.getAttribute('aria-current'), current.closest('a')]).toEqual(['page', null])
   expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Security audit')
-  await waitFor(() => expect(document.title).toBe('Security audit runs · api-server · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('Security audit runs · api-server · Workcell'))
 })
 
 test("103 AC12: a 404 is the not-found page, and so is an automation of another project", async () => {

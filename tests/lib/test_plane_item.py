@@ -1,6 +1,6 @@
 """109: lib/plane_item (AC9, Q3, Q5)."""
 
-from claude_factories.lib.plane_item import description, key, parse_key
+from workcell.lib.plane_item import description, key, parse_key
 
 
 def test_key_round_trip():  # AC9, Q3

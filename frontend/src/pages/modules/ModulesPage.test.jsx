@@ -39,7 +39,7 @@ test('AC16: each module with its name, description, and counts, then a No module
   expect(within(frontend).getByText('1 backlog · 0 in progress · 0 review · 0 done')).toBeTruthy()
   expect(within(none).getByRole('heading', { level: 3 }).textContent).toBe('No module')
   expect(within(none).getByText('3 backlog · 0 in progress · 1 review · 0 done')).toBeTruthy()
-  expect(document.title).toBe('api-server · Modules · Claude Factories')
+  expect(document.title).toBe('api-server · Modules · Workcell')
 })
 
 test('AC16: with no modules, an empty note and the No module row', async () => {

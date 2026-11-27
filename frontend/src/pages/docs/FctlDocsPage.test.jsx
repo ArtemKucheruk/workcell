@@ -45,7 +45,7 @@ test('AC16: fetches once, no polling; the h1, the title, and body_html through M
   const serve = await within(main).findByRole('heading', { level: 2, name: 'fctl serve' })
   expect(serve.id).toBe('fctl-serve')
   expect(serve.closest('.markdown')).toBeTruthy()
-  await waitFor(() => expect(document.title).toBe('fctl reference · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('fctl reference · Workcell'))
   await new Promise((r) => setTimeout(r, 50)) // no polling, so nothing more arrives
   expect(loads(fetch)).toEqual([API])
 })

@@ -2,10 +2,10 @@
 
 import pytest
 
-from claude_factories.domain.errors import Invalid
-from claude_factories.handlers.factories import default_graph
-from claude_factories.handlers.factory import TEMPLATES
-from claude_factories.lib.factory_compile import compile_files
+from workcell.domain.errors import Invalid
+from workcell.handlers.factories import default_graph
+from workcell.handlers.factory import TEMPLATES
+from workcell.lib.factory_compile import compile_files
 
 TEMPLATE = (TEMPLATES / "skills" / "factory" / "SKILL.md").read_text(encoding="utf-8")
 VALUES = {"name": "api-server", "default_branch": "main", "test_cmd": "make check"}

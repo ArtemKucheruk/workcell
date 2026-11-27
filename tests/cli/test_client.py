@@ -4,7 +4,7 @@ import urllib.request
 
 import pytest
 
-from claude_factories.cli.client import api
+from workcell.cli.client import api
 
 
 def test_api_sends_header_and_json(server):  # AC24

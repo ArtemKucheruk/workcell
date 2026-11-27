@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from claude_factories.domain.errors import Invalid
-from claude_factories.lib import cron
+from workcell.domain.errors import Invalid
+from workcell.lib import cron
 
 
 @pytest.fixture

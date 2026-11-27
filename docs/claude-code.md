@@ -1,4 +1,4 @@
-# Claude Factories — Claude Code integration
+# Workcell — Claude Code integration
 
 Part of the [MVP design](MVP.md). Section numbers continue from it.
 
@@ -19,7 +19,7 @@ approver; sonnet for ux, ui, and code.
 
 ### 7.2 Commands
 Each command's full reference (flags, stdin, output, exit codes, an example) is the app's
-`/docs/fctl` page, rendered from [`../src/claude_factories/fctl.md`](../src/claude_factories/fctl.md).
+`/docs/fctl` page, rendered from [`../src/workcell/fctl.md`](../src/workcell/fctl.md).
 
 | Command | Used by | Calls |
 |---|---|---|

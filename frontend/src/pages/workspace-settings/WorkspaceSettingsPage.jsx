@@ -82,7 +82,7 @@ function WorkspaceSettings({ id }) {
   const { data: page, error } = usePoll(load)
   const name = page?.workspace.name
   useEffect(() => {
-    if (name) document.title = `${name} · Settings · Claude Factories`
+    if (name) document.title = `${name} · Settings · Workcell`
   }, [name])
 
   if (error?.status === 404) return <NotFound detail={error.message} />

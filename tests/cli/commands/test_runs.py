@@ -3,7 +3,7 @@ import urllib.parse
 
 import pytest
 
-from claude_factories.cli.main import main
+from workcell.cli.main import main
 
 from ..conftest import PROJECT, RUN, reply, requests
 

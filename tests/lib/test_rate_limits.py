@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from claude_factories.lib.rate_limits import latest, window
+from workcell.lib.rate_limits import latest, window
 
 
 def event(five=0.34, seven=0.12, status="allowed", five_status="allowed", seven_status="allowed", overage=False,

@@ -278,7 +278,7 @@ function ProjectContext({ id }) {
   const [groupAlert, setGroupAlert] = useState(null) // and the group modal's
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Context · Claude Factories`
+    if (name) document.title = `${name} · Context · Workcell`
   }, [name])
 
   const missing = [pageError, contextError, itemsError].find((e) => e?.status === 404)

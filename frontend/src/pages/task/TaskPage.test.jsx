@@ -103,7 +103,7 @@ test('AC1, 047 FE2: /tasks/12 shows the title, the breadcrumb personal › api �
   const current = within(crumbs).getByText('#12')
   expect([current.getAttribute('aria-current'), current.closest('a')]).toEqual(['page', null])
   expect(within(header()).getByRole('link', { name: 'Review' }).getAttribute('href')).toBe('/tasks/12/review')
-  await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Workcell'))
 })
 
 const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)

@@ -255,7 +255,7 @@ function FactoryDesign({ id, fid }) {
   // Q13: a factory of another project at this URL is not found here
   const ours = factory && String(factory.project_id) === id
   useEffect(() => {
-    if (ours) document.title = `${factory.name} · ${factory.project} · Claude Factories`
+    if (ours) document.title = `${factory.name} · ${factory.project} · Workcell`
   }, [ours, factory])
 
   if (error?.status === 404) return <NotFound detail={error.message} />

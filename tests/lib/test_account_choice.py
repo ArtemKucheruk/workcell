@@ -5,11 +5,11 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from claude_factories.lib.account_choice import FIVE_HOUR_LOW, SEVEN_DAY_LOW, is_low, rank, refusal, when
+from workcell.lib.account_choice import FIVE_HOUR_LOW, SEVEN_DAY_LOW, is_low, rank, refusal, when
 
 NOW = 1_800_000_000
 LATER = NOW + 3600  # an unreset window's resets_at
-PKG = Path(__file__).resolve().parents[2] / "src" / "claude_factories"
+PKG = Path(__file__).resolve().parents[2] / "src" / "workcell"
 
 
 def acct(i, active=False):

@@ -11,11 +11,11 @@ from controllers.test_pages_api import add_round
 from controllers.test_runs import (H, LEGACY, LEGACY_HINT, OLD, SKILL, add_running_run, add_task,  # noqa: F401
                                    cap, cap_detail, events, fake, project, run, run_row, started, task_row, wait)
 
-from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.adapters.git import SubprocessGit
-from claude_factories.handlers import runs as runs_handler
-from claude_factories.server.app import create_app
-from claude_factories.server.deps import transaction
+from workcell.adapters.claude import SubprocessClaude
+from workcell.adapters.git import SubprocessGit
+from workcell.handlers import runs as runs_handler
+from workcell.server.app import create_app
+from workcell.server.deps import transaction
 
 BASE = "http://127.0.0.1:4545"
 NOTE = "Make the limit configurable via settings."

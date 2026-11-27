@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from claude_factories.handlers.factories import default_graph
-from claude_factories.lib.run_log import run_agents
-from claude_factories.lib.task_flow import current_round, in_round, is_stalled, node_states
+from workcell.handlers.factories import default_graph
+from workcell.lib.run_log import run_agents
+from workcell.lib.task_flow import current_round, in_round, is_stalled, node_states
 
 GRAPH = default_graph().model_dump()
 ALL = {"security": "PASS", "ux": "PASS", "ui": "PASS", "code": "PASS"}

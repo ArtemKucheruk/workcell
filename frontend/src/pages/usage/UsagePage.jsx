@@ -210,7 +210,7 @@ export function UsagePage() {
   const [page, setPage] = useState(null)
   const [error, setError] = useState(null)
   useEffect(() => {
-    document.title = 'Usage · Claude Factories'
+    document.title = 'Usage · Workcell'
   }, [])
   useEffect(() => {
     let live = true

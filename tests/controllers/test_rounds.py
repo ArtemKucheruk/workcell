@@ -4,7 +4,7 @@ import os
 import pytest
 from conftest import commit, sql, write
 
-from claude_factories.cli.git import capture
+from workcell.cli.git import capture
 
 H = {"X-Requested-By": "fctl"}
 OLD = "2026-01-01T00:00:00Z"

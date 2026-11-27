@@ -33,7 +33,7 @@ def serve(args):
     from ..config import data_dir
     from ..server.app import create_app
 
-    print(f"Claude Factories → http://{args.host}:{args.port} (data: {data_dir()})", flush=True)
+    print(f"Workcell → http://{args.host}:{args.port} (data: {data_dir()})", flush=True)
     uvicorn.run(create_app(port=args.port), host=args.host, port=args.port)  # 104 Q4: the scheduler's FCTL_URL
 
 
@@ -91,7 +91,7 @@ def add_service(commands):
 
 def build_parser() -> argparse.ArgumentParser:
     """Every command and its flags. 029 Q11: tests/test_fctl_md.py walks it against fctl.md."""
-    parser = argparse.ArgumentParser(prog="fctl", description="Claude Factories CLI.")
+    parser = argparse.ArgumentParser(prog="fctl", description="Workcell CLI.")
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("serve", help="start the app's backend")
     p.add_argument("--host", default="127.0.0.1", help="address to bind (default: 127.0.0.1; 0.0.0.0 is for the container)")

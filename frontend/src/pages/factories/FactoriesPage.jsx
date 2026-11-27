@@ -296,7 +296,7 @@ function Factories({ id }) {
   const [deleting, setDeleting] = useState(null) // {factory, opener}
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Workflows · Claude Factories`
+    if (name) document.title = `${name} · Workflows · Workcell`
   }, [name])
 
   const missing = [pageError, error].find((e) => e?.status === 404)

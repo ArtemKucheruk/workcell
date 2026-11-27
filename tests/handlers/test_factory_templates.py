@@ -5,11 +5,11 @@ import re
 import pytest
 from controllers.test_factories import template
 
-from claude_factories import config
-from claude_factories.handlers.factories import PRESETS, default_graph, preset_graph
-from claude_factories.handlers.factory import TEMPLATES
-from claude_factories.lib.factory_compile import compile_files
-from claude_factories.lib.factory_graph import AGENTS, SLUG, check
+from workcell import config
+from workcell.handlers.factories import PRESETS, default_graph, preset_graph
+from workcell.handlers.factory import TEMPLATES
+from workcell.lib.factory_compile import compile_files
+from workcell.lib.factory_graph import AGENTS, SLUG, check
 
 KEYS = ["standard", "bug-fix", "security-audit", "ml-experiment", "test-coverage"]
 NEW_AGENTS = ["bug-spec-writer", "security-auditor", "data-check", "review-eval", "coverage-planner", "review-tests"]

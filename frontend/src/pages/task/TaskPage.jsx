@@ -336,7 +336,7 @@ export function TaskPage() {
   const [actionError, setActionError] = useState(null)
   const heading = page && `#${page.task.id} ${page.task.title}`
   useEffect(() => {
-    if (heading) document.title = `${heading} · Claude Factories`
+    if (heading) document.title = `${heading} · Workcell`
   }, [heading])
 
   // Q10: a 404 is always not-found; other errors replace the page only until the first good load

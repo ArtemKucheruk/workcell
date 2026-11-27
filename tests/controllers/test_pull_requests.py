@@ -14,9 +14,9 @@ from types import SimpleNamespace
 import pytest
 from conftest import commit, git, sql, write, wt_calls
 
-from claude_factories import config
-from claude_factories.adapters import git as adapter
-from claude_factories.domain.errors import Failed
+from workcell import config
+from workcell.adapters import git as adapter
+from workcell.domain.errors import Failed
 
 H = {"X-Requested-By": "fctl"}
 URL = "https://github.com/o/r.git"
@@ -216,7 +216,7 @@ def refused(r, status=409) -> str:
 
 
 def test_pr_url_column():  # AC1 (the old-DB half is tests/db/test_db.py::test_old_db_gets_pr_url)
-    from claude_factories import db
+    from workcell import db
     db.init()
     assert "pr_url" in [r[1] for r in sql("PRAGMA table_info(tasks)")]
 
@@ -679,7 +679,7 @@ def test_docs():  # AC46
 
 
 def test_fctl_unchanged():  # AC47: no fctl pr; tests/test_fctl_md.py checks fctl.md against the CLI
-    fctl_md = (Path(__file__).resolve().parents[2] / "src" / "claude_factories" / "fctl.md").read_text()
+    fctl_md = (Path(__file__).resolve().parents[2] / "src" / "workcell" / "fctl.md").read_text()
     assert "fctl pr" not in fctl_md and "pr/merge" not in fctl_md
 
 

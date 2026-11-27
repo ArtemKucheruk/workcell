@@ -416,7 +416,7 @@ export function Sidebar({ auth, sidebar, selected, onSelect, open, onToggle, onR
   return (
     <nav aria-label="Sidebar" className="flex min-h-full flex-col gap-6 p-4 text-sm">
       <Link to="/" className="px-2 text-base font-semibold text-inherit hover:no-underline">
-        Claude Factories
+        Workcell
       </Link>
       {/* Q12: nothing while loading; a failure is muted, as the page reports a backend that's down */}
       <div className="grid gap-2">

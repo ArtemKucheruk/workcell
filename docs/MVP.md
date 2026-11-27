@@ -1,6 +1,6 @@
-# Claude Factories — MVP design
+# Workcell — MVP design
 
-Status: draft · Working name: Claude Factories · CLI name: `fctl`
+Status: draft · Working name: Workcell · CLI name: `fctl`
 
 Built on the loop of the file-based bootstrap factory that built this app's first jobs (now
 retired). The loop, the agents, and the rules stay the same except where this document lists a
@@ -77,7 +77,7 @@ docker compose exec backend claude auth login             # once, in a second te
 ```
 The app opens at `http://127.0.0.1:3000`. `fctl` also goes on the host:
 ```
-uv tool install ~/personalProjects/claude-factories   # puts `fctl` on PATH
+uv tool install ~/personalProjects/workcell   # puts `fctl` on PATH
 fctl setup     # writes ~/.claude/skills/factory-connect, factory-submit, and fctl
 ```
 The `/factory-connect` and `/factory-submit` skills run `fctl` on the host against the
@@ -88,7 +88,7 @@ up new code.
 
 Without Docker, the one-time install is `fctl service install` (098), after
 `uv tool install --editable <checkout>`: the backend (127.0.0.1:4545, data in
-`~/.claude-factories/`) and the frontend server (127.0.0.1:3000) become launchd agents (macOS) or
+`~/.workcell/`) and the frontend server (127.0.0.1:3000) become launchd agents (macOS) or
 `systemd --user` units (Linux) that start at login and restart on a crash. After a merge,
 `fctl service reload` rebuilds the frontend and restarts both; `fctl service status` and
 `fctl service logs` show them. In the foreground instead, run `fctl serve` plus the frontend server:
@@ -440,7 +440,7 @@ Then the spawn:
 ```
 cd ~/code/api-server/.claude/worktrees/12-rate-limit-login
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN FCTL_URL=http://127.0.0.1:4545 \
-    CLAUDE_CONFIG_DIR=~/.claude-factories/claude-accounts/… \
+    CLAUDE_CONFIG_DIR=~/.workcell/claude-accounts/… \
 claude -p "/factory 12" \
   --session-id 6f1c2e0a-…  --output-format stream-json --verbose --forward-subagent-text \
   --permission-mode acceptEdits --permission-prompts none \
@@ -450,7 +450,7 @@ claude -p "/factory 12" \
                  "Bash(pytest *)" \
   --disallowedTools "Bash(git commit *)" "Bash(git push *)" "Bash(git merge *)" \
                     "Bash(git rebase *)" "Bash(git reset *)" "Bash(git checkout *)" \
-  < /dev/null  > ~/.claude-factories/runs/41.jsonl 2>&1
+  < /dev/null  > ~/.workcell/runs/41.jsonl 2>&1
 ```
 - `env -u` stands for the app removing these variables from the run's environment. The app
   removes every `CLAUDE_CODE_USE_*` variable as well (§4.3).
@@ -620,10 +620,10 @@ Single user and no auth still need these, because the API can start processes th
   `docker compose exec -w <worktree> -e CLAUDE_CONFIG_DIR=<account dir> backend claude --resume <session-id>`.
 
 ### 4.7 Code layout
-The backend under `src/claude_factories/` is split into layers:
+The backend under `src/workcell/` is split into layers:
 
 ```
-src/claude_factories/
+src/workcell/
 ├── server/         create_app(), lifespan, the §4.5 middleware, domain error → HTTP mapping, deps.py providers
 ├── controllers/    one APIRouter per resource: reads the request, calls a handler
 ├── handlers/       use cases as plain functions, one module per resource
@@ -665,7 +665,7 @@ Rules:
   the handler returns and rolls back if it raises, before the response goes out. Run handlers
   commit before a spawn and record the exit after the request, so they open one transaction
   per step through `transaction()` in `server/deps.py`.
-- tests/ mirrors `src/claude_factories/`, for example `tests/controllers/test_projects.py`.
+- tests/ mirrors `src/workcell/`, for example `tests/controllers/test_projects.py`.
   Each test subdirectory has an `__init__.py`.
 - `tests/test_architecture.py` reads every module with `ast` and fails on a wrong import
   direction, fastapi outside server/ and controllers/, or SQL outside repositories/ and db/.

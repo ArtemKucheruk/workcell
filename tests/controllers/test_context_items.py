@@ -6,7 +6,7 @@ import re
 import pytest
 from conftest import sql
 
-from claude_factories.lib.markdown import render
+from workcell.lib.markdown import render
 
 from .test_projects import H, connect
 
