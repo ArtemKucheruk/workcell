@@ -1397,13 +1397,16 @@ for `next` `POST /api/projects/{id}/run-next`.
 
 ```
 fctl run <id> [--account <id|email>]
-fctl run next
+fctl run next [--module <name>]
 ```
 
 **Arguments and flags**
 
 - `<id>`: the task to run. It works from any directory.
 - `next`: the top ready task of the current repo's Backlog, skipping blocked ones. It needs the repo.
+- `--module <name>`: with `next` only, the top ready task of that module's Backlog ("work on
+  frontend"). The name is matched trimmed and in any case against `GET /api/projects/{id}/modules`,
+  as `fctl task add --module` does, and sent as `{"module_id": 7}`. Without it, no body is sent.
 - `--account <id|email>`: the Claude account to run in, by its id or its email (matched exactly,
   ignoring case, against `GET /api/auth/accounts`), sent as `{"account_id": 2}`. The run uses it even
   when it is near or at its limits. Without the flag, no body is sent and the app picks with **Auto**:
@@ -1474,6 +1477,11 @@ worktrunk`.
 - `next` only: `fctl: 409 all backlog tasks are blocked: #15 waits on #12, #14`: `next` skips
   blocked tasks and takes the top ready one; with none ready it names the top Backlog task and the
   tasks it waits on, exit `1`.
+- `next --module` only: `fctl: 404 module frontend has no backlog tasks`,
+  `fctl: 409 all backlog tasks in frontend are blocked: #15 waits on #12, #14`, and
+  `fctl: no module nope in api; known: backend, frontend` (or `known: none`; nothing is posted),
+  exit `1`.
+- `--module` without `next`: `fctl run: error: --module only works with next`, exit `2`.
 - A target that is neither a number nor `next`:
   `fctl run: error: target must be a task id or next, not 'abc'`, exit `2`.
 
@@ -1488,6 +1496,7 @@ approve its own work or start other runs.
 
 ```sh
 fctl run next
+fctl run next --module frontend
 fctl run 12 --account b@y
 ```
 

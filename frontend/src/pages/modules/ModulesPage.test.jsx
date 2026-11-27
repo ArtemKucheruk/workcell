@@ -106,6 +106,46 @@ test('AC18: Cancel leaves the module unchanged, with no request', async () => {
   expect(calls(fetch, 'PATCH', '/api/modules/5')).toEqual([])
 })
 
+const RUN_NEXT = '/api/projects/3/run-next'
+
+test('113 AC11, AC12: Run next on a module row posts its module_id and reloads; the No module row has none', async () => {
+  const { fetch } = await open(LISTED, { [`POST ${RUN_NEXT}`]: [202, { task_id: 14, run_id: 50, account_id: 1, account: 'a@x' }] })
+  const [, frontend, none] = items()
+  expect(within(none).queryByRole('button', { name: /Run next/ })).toBeNull()
+  const button = within(frontend).getByRole('button', { name: 'Run next in frontend' })
+  expect(button.textContent).toBe('Run next ▶')
+  fireEvent.click(button)
+  expect((await screen.findByRole('status')).textContent).toBe('Started #14.')
+  expect(sent(fetch, 'POST', RUN_NEXT)).toEqual({ module_id: 7 })
+  await waitFor(() => expect(fetched(fetch).filter((u) => u === LIST)).toHaveLength(2))
+})
+
+test('113 AC13: with can_run false every Run next is disabled, titled and noted with the cap hint', async () => {
+  mockFetch({
+    [`GET ${BOARD}`]: [200, { ...board(), can_run: false, runs_active: 2 }],
+    [`GET ${LIST}`]: [200, LISTED],
+  })
+  renderAt('/projects/3/modules')
+  const buttons = await screen.findAllByRole('button', { name: /^Run next in / })
+  expect(buttons).toHaveLength(2)
+  for (const b of buttons) {
+    expect(b.disabled).toBe(true)
+    expect(b.title).toBe('2 of 2 runs active')
+  }
+  expect(screen.getByText('2 of 2 runs active', { selector: 'p' })).toBeTruthy()
+})
+
+test('113 AC14: a refusal shows in one page alert, which the next Run next clears', async () => {
+  const { responses } = await open(LISTED, { [`POST ${RUN_NEXT}`]: [404, { detail: 'module frontend has no backlog tasks' }] })
+  fireEvent.click(screen.getByRole('button', { name: 'Run next in frontend' }))
+  expect((await screen.findByRole('alert')).textContent).toBe('module frontend has no backlog tasks')
+  responses[`POST ${RUN_NEXT}`] = [409, { detail: 'all backlog tasks in backend are blocked: #3 waits on #2' }]
+  fireEvent.click(screen.getByRole('button', { name: 'Run next in backend' }))
+  await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch('in backend are blocked'))
+  expect(screen.getAllByRole('alert')).toHaveLength(1)
+  expect(screen.getByRole('status').textContent).toBe('')
+})
+
 test('AC19: Delete opens the delete dialog saying its tasks stay; confirming removes the row and reloads the counts', async () => {
   const { fetch, responses } = await open(LISTED, { 'DELETE /api/modules/5': [204] })
   fireEvent.click(screen.getByRole('button', { name: 'Delete backend' }))

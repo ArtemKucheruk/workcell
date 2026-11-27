@@ -152,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("target", help='a task id, or "next"')
     p.add_argument("--account", metavar="ID|EMAIL",
                    help="the Claude account to run in, by id or email (default: Auto; not with next)")
+    p.add_argument("--module", metavar="NAME", help="with next: the top of this module's Backlog, e.g. frontend")
     p.set_defaults(func=run, usage_error=p.error)
     p = commands.add_parser("automation", help="run an automation: a design that works on the repo, with no task")
     automation_commands = p.add_subparsers(dest="automation_command", required=True)

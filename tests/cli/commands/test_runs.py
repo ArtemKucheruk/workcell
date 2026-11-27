@@ -108,6 +108,40 @@ def test_run_usage_errors(server, capsys, argv):  # 015 AC14
     assert server.requests == []
 
 
+# --- 113: fctl run next --module ----------------------------------------------------------------------
+
+MODULES = {"modules": [{"id": 5, "name": "backend"}, {"id": 7, "name": "frontend"}], "no_module": {}}
+
+
+def test_run_next_module(server, repo, monkeypatch, capsys):  # 113 AC8
+    server.replies = [reply(PROJECT), reply(MODULES), reply({"task_id": 14, "run_id": 42, "account_id": 1,
+                                                             "account": "a@x"}, 202)]
+    monkeypatch.chdir(repo)
+    main(["run", "next", "--module", " Frontend "])
+    assert requests(server)[1:] == [("GET", "/api/projects/3/modules", None),
+                                    ("POST", "/api/projects/3/run-next", {"module_id": 7})]
+    assert capsys.readouterr().out == f"Run #42 on #14 as a@x → {os.environ['FCTL_URL']}/tasks/14\n"
+
+
+@pytest.mark.parametrize("listed, known", [(MODULES, "backend, frontend"), ({"modules": [], "no_module": {}}, "none")])
+def test_run_next_unknown_module(server, repo, monkeypatch, capsys, listed, known):  # 113 AC9
+    server.replies = [reply(PROJECT), reply(listed)]
+    monkeypatch.chdir(repo)
+    with pytest.raises(SystemExit) as e:
+        main(["run", "next", "--module", "nope"])
+    assert e.value.code == 1
+    assert capsys.readouterr() == ("", f"fctl: no module nope in api; known: {known}\n")
+    assert [m for m, *_ in requests(server)] == ["GET", "GET"]
+
+
+def test_run_task_module_usage_error(server, capsys):  # 113 AC10
+    with pytest.raises(SystemExit) as e:
+        main(["run", "14", "--module", "frontend"])
+    assert e.value.code == 2
+    assert "--module only works with next" in capsys.readouterr().err
+    assert server.requests == []
+
+
 # --- 102: fctl automation run ---------------------------------------------------------------------------
 
 AUTOMATION_RUN = {"run_id": 43, "session_id": "1a2b3c4d-0000", "account_id": 2, "account": "b@y",

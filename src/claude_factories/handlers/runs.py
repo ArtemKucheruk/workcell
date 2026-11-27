@@ -26,12 +26,14 @@ from ..lib.run_log import last_result, log_items
 from ..lib.slug import slug
 from ..repositories.claude_accounts import ClaudeAccountsRepo
 from ..repositories.factories import FactoriesRepo
+from ..repositories.modules import ModulesRepo
 from ..repositories.projects import ProjectsRepo
 from ..repositories.runs import RunsRepo
 from ..repositories.settings import SettingsRepo
 from ..repositories.tasks import TasksRepo
 from ..repositories.usage import UsageRepo
 from .factory import commit_hint, factory_hint, factory_state, skill_committed
+from .modules import check_module
 from .transcripts import collect
 from .usage import label
 
@@ -408,19 +410,28 @@ def record_usage(tx, run_id: int, log_path: str) -> None:
             UsageRepo(conn).record(run_id, snap)
 
 
-def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str) -> RunNextOut:
+def run_next(tx, git: Git, claude: Claude, project_id: int, base_url: str,
+             module_id: int | None = None) -> RunNextOut:
     """Q13: the top backlog card, lowest position then lowest id, through all of start's checks. 094: the top
     ready one; with every card blocked, a 409 naming the top card's open blockers (Q5). 096 Q10: a card with a
-    running run is skipped; start's checks refuse it at the cap (AC17). 097 AC19: always Auto."""
+    running run is skipped; start's checks refuse it at the cap (AC17). 097 AC19: always Auto. 113 AC1 to AC5:
+    with `module_id`, only that module's cards; the messages name it by its stored name (Q4)."""
     with tx() as conn:
         if not ProjectsRepo(conn).exists(project_id):
             raise NotFound()
+        name = None
+        if module_id is not None:
+            modules = ModulesRepo(conn)
+            check_module(modules, project_id, module_id)
+            name = modules.get(module_id)["name"]
         tasks = TasksRepo(conn)
-        top = tasks.top_backlog(project_id)
+        top = tasks.top_backlog(project_id, module_id)
         if top is not None and not top["ready"]:
-            raise Conflict(f"all backlog tasks are blocked: #{top['id']} waits on {open_blockers(tasks, top['id'])}")
+            where = f" in {name}" if name else ""
+            raise Conflict(f"all backlog tasks{where} are blocked: #{top['id']} waits on"
+                           f" {open_blockers(tasks, top['id'])}")
     if top is None:
-        raise NotFound("backlog is empty")
+        raise NotFound(f"module {name} has no backlog tasks" if name else "backlog is empty")
     started = start(tx, git, claude, top["id"], base_url)
     return RunNextOut(task_id=top["id"], run_id=started.run_id, account_id=started.account_id,
                       account=started.account)

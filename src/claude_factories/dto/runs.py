@@ -6,6 +6,11 @@ class RunBody(BaseModel):
     account_id: int | None = None
 
 
+class RunNextBody(BaseModel):
+    """113 AC1, AC6: POST /api/projects/{id}/run-next's optional body; null or missing is the whole project."""
+    module_id: int | None = None
+
+
 class RunStarted(BaseModel):
     run_id: int
     session_id: str
