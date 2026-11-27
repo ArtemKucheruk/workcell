@@ -1,5 +1,5 @@
 """031: fctl import-factory. The bootstrap factory's records, `<project>/factory/board.json` and
-`factory/jobs/<id>/` (FACTORY.md "Target file system"), become tasks with their events, rounds, round_files,
+`factory/jobs/<id>/` (docs/data-model-and-api.md §6.2), become tasks with their events, rounds, round_files,
 verdicts, and decisions, and each job's Claude Code transcripts are copied the 030 way. A rerun rewrites the
 same rows, keyed on `tasks.import_key` `factory:<job id>` (Q3). Everything is read and checked before the
 first write, so a refusal writes nothing (Q7).
@@ -113,7 +113,7 @@ def board_jobs(text: str) -> list:
 
 
 def checked(job) -> dict:
-    """AC28: one board entry, else 422 naming the job and what's wrong. Status and stage are FACTORY.md's set,
+    """AC28: one board entry, else 422 naming the job and what's wrong. Status and stage are the retired file-based factory's set,
     stored as given (§5.2)."""
     if not isinstance(job, dict):
         raise Invalid("factory/board.json: every job must be an object")

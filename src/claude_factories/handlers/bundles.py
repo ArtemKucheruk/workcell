@@ -1,4 +1,4 @@
-"""032: a task as a zip bundle. Export writes 031's job-folder layout (FACTORY.md "Target file system") and a
+"""032: a task as a zip bundle. Export writes 031's job-folder layout (docs/data-model-and-api.md §6.2) and a
 task.json with what the folders can't hold. Import checks every entry, unpacks the zip into a temp folder, and
 runs it through 031's reader and writer, keyed on `tasks.import_key` (docs/data-model-and-api.md §6.1, §6.2;
 docs/MVP.md §4.5). Every check comes before the first write, so a refusal writes nothing (Q7)."""
