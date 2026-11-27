@@ -69,9 +69,10 @@ and what is waiting on me.
 ## 3. User flows
 
 ### 3.0 One-time install
-The app runs in Docker (§4.6). In the repo:
+The app runs in Docker (§4.6). compose.yaml publishes `127.0.0.1:4545` and `127.0.0.1:3000`
+itself; the override is optional, and needed before connecting a project (mounts, uid:gid). In the repo:
 ```
-cp compose.override.example.yaml compose.override.yaml   # then edit the project roots and uid:gid
+cp compose.override.example.yaml compose.override.yaml   # optional: project roots, uid:gid, ports
 docker compose up --build                                 # the app, from now on
 docker compose exec backend claude auth login             # once, in a second terminal
 ```
@@ -531,8 +532,9 @@ claude -p "/security-audit" --session-id 1a2b3c4d-…  …    # the same flags a
 ### 4.5 Local safety
 Single user and no auth still need these, because the API can start processes that edit code.
 - Both servers, `fctl serve` and the frontend server, bind `127.0.0.1` by default.
-- Docker: inside their containers both bind `0.0.0.0`. `compose.yaml` publishes no ports,
-  and `compose.override.yaml` publishes them only on `127.0.0.1` (§4.6).
+- Docker: inside their containers both bind `0.0.0.0`. `compose.yaml` publishes them only on
+  `127.0.0.1` (`127.0.0.1:4545`, `127.0.0.1:3000`), and an override that changes them with
+  `ports: !override` keeps `127.0.0.1` (§4.6).
 - Every mutating request must carry `X-Requested-By: fctl`, and the `Host` must be
   `127.0.0.1` or `localhost`. That blocks CSRF from web pages and DNS rebinding. `fctl` and
   the SPA's fetch wrapper both send the header. One GET writes: the board's view-model
@@ -591,11 +593,14 @@ Single user and no auth still need these, because the API can start processes th
 `docker compose up` runs the app (§3.0).
 - **compose.yaml** has two services. `backend` runs `fctl serve --host 0.0.0.0` with
   `FCTL_HOME` on a named volume. `frontend` runs `node server.js` with `HOST=0.0.0.0` and
-  `FCTL_API_URL=http://backend:4545`. Both have healthchecks. compose.yaml publishes no
-  ports.
-- **Override.** `compose.override.example.yaml` is copied to `compose.override.yaml`, which
-  is gitignored. It publishes `127.0.0.1:3000:3000` and `127.0.0.1:4545:4545`, so `fctl` on
-  the host keeps using 4545.
+  `FCTL_API_URL=http://backend:4545`. Both have healthchecks. compose.yaml publishes
+  `127.0.0.1:4545:4545` and `127.0.0.1:3000:3000` itself, so `fctl` on the host keeps using 4545
+  and no override is needed to reach the app (118).
+- **Override.** Optional: `compose.override.example.yaml` is copied to `compose.override.yaml`,
+  which is gitignored, for other host ports, the uid:gid, project mounts, and a custom image.
+  Compose concatenates `ports` across files, so the example writes `ports: !override` (Compose
+  v2.24.4+) to replace the defaults rather than add to them. A changed backend port means host
+  `fctl` needs `FCTL_URL=http://127.0.0.1:<port>`.
 - **Mounts.** The override mounts my project roots at the same absolute path, because
   projects store host paths from `fctl connect`. The backend runs as my uid:gid, so worktree
   files stay mine and git doesn't refuse them with "dubious ownership".

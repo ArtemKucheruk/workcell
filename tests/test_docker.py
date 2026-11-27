@@ -130,8 +130,22 @@ def test_compose_services():  # AC11
     assert re.search(r"^\s+build:\s*\./frontend\s*$", svc["frontend"], re.M)
 
 
-def test_compose_publishes_no_ports():  # AC12
-    assert not re.search(r"^\s*ports\s*:", read("compose.yaml"), re.M)
+def compose_ports(name) -> dict[str, list[str]]:
+    return {svc: items(blocks(body, 4).get("ports", "")) for svc, body in services(name).items()}
+
+
+def test_compose_backend_default_port():  # 118 AC1
+    assert compose_ports("compose.yaml")["backend"] == ['"127.0.0.1:4545:4545"']
+
+
+def test_compose_frontend_default_port():  # 118 AC2
+    assert compose_ports("compose.yaml")["frontend"] == ['"127.0.0.1:3000:3000"']
+
+
+def test_compose_ports_loopback_only():  # AC12 → 118 AC3: MVP §4.5, never 0.0.0.0 on the host
+    ports = [p for ps in compose_ports("compose.yaml").values() for p in ps]
+    assert ports and all(p.strip('"').startswith("127.0.0.1:") for p in ports)
+    assert "0.0.0.0:" not in read("compose.yaml")
 
 
 def test_compose_frontend_env_and_depends_on():  # AC13
@@ -169,6 +183,24 @@ def test_override_ports_on_loopback_only():  # AC16
     assert len(re.findall(r"^\s*ports\s*:", text, re.M)) == 2
 
 
+def test_override_ports_replace_defaults():  # 118 AC4
+    text = read("compose.override.example.yaml")
+    assert len(re.findall(r"^\s*ports:\s*!override\s*$", text, re.M)) == 2
+    assert not re.search(r"^\s*ports:\s*(#.*)?$", text, re.M)
+
+
+def test_override_explains_override_tag():  # 118 AC6
+    comments = "\n".join(line.split("#", 1)[1] for line in read("compose.override.example.yaml").splitlines()
+                         if "#" in line)
+    assert "!override" in comments
+    assert re.search(r"concatenat|replace", comments)
+    assert "v2.24.4" in comments
+
+
+def test_override_backend_port_needs_fctl_url():  # 118 AC7
+    assert "FCTL_URL=http://127.0.0.1:" in read("compose.override.example.yaml")
+
+
 def test_override_backend_user_and_same_path_mount():  # AC17
     backend = services("compose.override.example.yaml")["backend"]
     assert re.search(r"^\s+user:\s*\"\d+:\d+\"\s*(#.*)?$", backend, re.M)
@@ -184,10 +216,34 @@ def test_gitignore_override_only():  # AC18
     assert [line for line in lines if line.startswith("compose.override")] == ["compose.override.yaml"]
 
 
-def test_readme_docker_quick_start():  # AC19
+def docker_section() -> str:
+    """README's "Run with Docker", up to the next ## or ### heading."""
     readme = read("README.md")
-    assert "cp compose.override.example.yaml compose.override.yaml && docker compose up --build" in readme
-    assert "http://127.0.0.1:3000" in readme
+    start = readme.index("\n### Run with Docker\n")
+    return readme[start:re.compile(r"\n#{2,3} ").search(readme, start + 1).start()]
+
+
+def test_readme_docker_quick_start():  # AC19 → 118 AC9: no override needed for the first `up`
+    docker = docker_section()
+    assert re.search(r"```sh\n(.*?)```", docker, re.S)[1] == "docker compose up --build\n"
+    assert "http://127.0.0.1:3000" in docker
+    assert "optional" in docker
+    assert "cp compose.override.example.yaml compose.override.yaml" in docker
+
+
+def test_readme_docker_connect_needs_mount():  # 118 AC10
+    docker = docker_section()
+    assert "compose.override.yaml" in docker and "/path/to/code:/path/to/code" in docker
+
+
+def test_readme_docker_backend_port_fctl_url():  # 118 AC11
+    assert "FCTL_URL=http://127.0.0.1:" in docker_section()
+
+
+def test_mvp_default_ports_documented():  # 118 AC12
+    mvp = " ".join(read("docs/MVP.md").split())
+    assert "publishes no ports" not in mvp and "publishes no" not in mvp
+    assert "ports: !override" in mvp and "127.0.0.1:4545" in mvp and "127.0.0.1:3000" in mvp
 
 
 # --- 028: runs inside the backend container --------------------------------------

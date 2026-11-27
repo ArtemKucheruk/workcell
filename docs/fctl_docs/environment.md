@@ -169,9 +169,11 @@ The unit tests (`uv run pytest -q`) already use temp homes and fakes; prefer the
 ## Docker
 
 When the app runs with `docker compose up`, the backend container runs `fctl serve --host 0.0.0.0`
-and `compose.override.yaml` publishes it on the host at `127.0.0.1:4545`. So:
+and `compose.yaml` publishes it on the host at `127.0.0.1:4545` (the frontend at `127.0.0.1:3000`).
+The optional `compose.override.yaml` only changes those host ports, with `ports: !override`. So:
 
-- `fctl` on the host needs no settings (default `FCTL_URL`).
+- `fctl` on the host needs no settings (default `FCTL_URL`). If the override changes the backend
+  port, set `FCTL_URL=http://127.0.0.1:<port>`.
 - Don't run `fctl serve` on the host while compose is up; 4545 is taken.
 - The data lives in the `fctl-home` volume (`FCTL_HOME=/data` in the container), not on the host.
 - Runs use the image's `fctl`, inside the container.
