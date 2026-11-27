@@ -8,26 +8,21 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-import pytest
 
 from workcell.cli.main import build_parser
 
 REPO = Path(__file__).resolve().parents[1]
 README = (REPO / "README.md").read_text(encoding="utf-8")
-# 114 AC6: the retired bootstrap factory. The build couldn't delete these (no approval for rm); until
-# they are gone they are the only files allowed to hold the old links and local paths.
-PENDING_DELETE = ("factory/", "FACTORY.md", "MVP_DOCS_PROMPT.md", ".claude/agents/builder-backend.md",
-                  ".claude/agents/builder-frontend.md")
 HOME = "/" + "Users/"  # split so this file doesn't match itself
 
 
 def tracked() -> dict[str, str]:
-    """Every tracked file that still exists, minus PENDING_DELETE, as {path: text}."""
+    """Every tracked file that still exists, as {path: text}."""
     out = subprocess.run(["git", "ls-files", "-z"], cwd=REPO, capture_output=True, text=True, check=True).stdout
     files = {}
     for rel in filter(None, out.split("\0")):
         path = REPO / rel
-        if rel.startswith(PENDING_DELETE) or not path.is_file():
+        if not path.is_file():
             continue
         try:
             files[rel] = path.read_text(encoding="utf-8")
@@ -82,12 +77,6 @@ def test_frontend_license():  # AC3: npm ci in the test command checks the lockf
     assert json.loads((REPO / "frontend" / "package.json").read_text())["license"] == "MIT"
     lock = json.loads((REPO / "frontend" / "package-lock.json").read_text())
     assert lock["packages"][""]["license"] == "MIT"
-
-
-@pytest.mark.xfail(strict=True, reason="114 AC6: rm was denied in the build session. Delete PENDING_DELETE by hand; "
-                                       "this then XPASSes and fails: drop this marker and PENDING_DELETE")
-def test_bootstrap_files_are_deleted():  # AC6: the tripwire that ends the exemption above
-    assert [p for p in PENDING_DELETE if (REPO / p).exists()] == []
 
 
 def test_nothing_reads_the_bootstrap_files():  # AC5
