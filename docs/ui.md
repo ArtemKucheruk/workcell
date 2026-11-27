@@ -476,9 +476,14 @@ Loading, failures, times, and motion are the same on every page:
       with one **Save** sending both as typed (`PATCH /api/projects/{id}`). A blank test command
       clears it, shown as `not set`. A refusal shows its detail in the form, which keeps what was
       typed. A save also reloads the sidebar.
-    - Path, remote, and default branch, read-only, with the note: "Path, remote, and default
-      branch come from `fctl connect`. Rerunning it in the repo also resets the name, and the
-      test command when it passes one."
+    - Under it, a second form (119): a **Path** input prefilled with the project's path, and
+      **Change path**, which sends `PATCH /api/projects/{id}` `{path}` as typed. On 200 the page
+      reloads and the input shows the stored path (its realpath). A refusal (422 not absolute, no
+      folder, not a git repository, not a main checkout; 409 taken or a run active) shows its
+      detail in this form, which keeps what was typed. Nothing on disk moves.
+    - Remote and default branch, read-only, with the note: "Remote and default branch come from
+      `fctl connect`. Rerunning it in the repo also resets the name, and the test command when it
+      passes one. If the checkout moves, change the path here."
     - The factory state with its hint, plus **Create factory** (with *Overwrite*) unless
       ready, and its written and skipped lists and commit hint (§3.2). For `legacy` only, between
       the hint and **Create factory**, this line:

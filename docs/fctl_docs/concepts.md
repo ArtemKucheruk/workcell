@@ -13,7 +13,9 @@ What `fctl` reads and writes, and how the pieces fit. Field names match the API
   work "on the current repo" resolve the project from the main checkout, so they work the same from
   a worktree or a subdirectory (`git rev-parse --git-common-dir`, then
   `GET /api/projects?path=…`). An unconnected repo gets
-  `404 no project at <path>; in that repo, run fctl connect --workspace <name>`.
+  `404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout
+  moved, change the path on the project's Settings page`. After a move, the Settings page's Path form
+  points the existing project at the new folder and keeps its tasks and history (119).
 
 ## Tasks
 

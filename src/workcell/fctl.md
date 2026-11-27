@@ -860,7 +860,7 @@ The stored `context_md` exactly, with nothing added. An empty context prints not
 
 **Exit codes and errors**
 
-- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`, exit `1`.
 - `fctl: not inside a git repository: <cwd>`, exit `1`.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
@@ -908,7 +908,7 @@ Context saved on api-server (1234 bytes)
 
 - `fctl: context is empty; pass it on stdin`, exit `1`.
 - `fctl: 413 context over 16 KB`: over 16384 UTF-8 bytes, exit `1`.
-- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`, exit `1`.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 
@@ -981,7 +981,7 @@ Skipped 2 lines in factory/backlog.md
 - `fctl: 413 <job>/round-<n>/diff.patch over 5 MB` or `fctl: 413 backlog.md over 5 MB`, exit `1`.
 - `fctl: 409 factory:<id> is imported in project #<n>`: another repo already imported that job id,
   exit `1`.
-- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`, exit `1`.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 
@@ -1086,7 +1086,7 @@ Imported #12 Rate-limit login endpoint (new, backlog, 2 rounds, 0 transcripts)
   can't be read, or a bad `task.json` field. Nothing is imported, exit `1`.
 - `fctl: 409 <key> is imported in project #<n>`, or `fctl: 409 run #<id> active` while that task
   runs, exit `1`.
-- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`, exit `1`.
 
 See [Exit codes and errors](#exit-codes-and-errors) for the rest.
 
@@ -1159,7 +1159,7 @@ Run #41 on #12 as b@y → http://127.0.0.1:4545/tasks/12
   added, exit `1`.
 - `fctl: no module nope in api-server; known: backend, frontend` (or `known: none` when the
   project has no modules): no task is added, exit `1`.
-- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+- `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`, exit `1`.
 - With `--run`, any refusal of [fctl run](#fctl-run), exit `1`. The task stays in Backlog and the
   `Added` line is already printed. A task added with open blockers is refused as blocked.
 
@@ -1479,7 +1479,7 @@ worktrunk`.
 - `--account` with `next`: argparse's usage error, exit `2`.
 - `fctl: 500 can't start claude: <reason>`, exit `1`.
 - `next` only: `fctl: 404 backlog is empty` and
-  `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>`, exit `1`.
+  `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page`, exit `1`.
 - `next` only: `fctl: 409 all backlog tasks are blocked: #15 waits on #12, #14`: `next` skips
   blocked tasks and takes the top ready one; with none ready it names the top Backlog task and the
   tasks it waits on, exit `1`.
@@ -1727,7 +1727,7 @@ The first line is `--new`'s, the second `<id>`'s.
 - `fctl: HEAD has no commit yet; commit once before submitting` and
   `fctl: git <step> failed: <git's error>`, exit `1`.
 - `fctl: 422 no changes to submit` and `fctl: 413 patch over 5 MB`, exit `1`. Nothing is created.
-- `--new`: `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>` and
+- `--new`: `fctl: 404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page` and
   `fctl: 422 title must not be blank`, exit `1`.
 - `<id>`: `fctl: 404 Not Found` for an unknown task, exit `1`.
 

@@ -146,6 +146,7 @@ class Git(Protocol):
     def commit_all(self, path: str, message: str) -> None: ...
     def capture(self, path: str) -> tuple[str, str]: ...
     def merge_parent(self, root: str, pr: int) -> str | None: ...
+    def main_checkout(self, path: str) -> str | None: ...  # 119
     # 093: Create PR and Merge PR. Each answers (exit code, stdout, stderr); the handler words the refusal
     def origin_url(self, root: str) -> Ran: ...
     def porcelain(self, path: str) -> Ran: ...
@@ -269,6 +270,19 @@ class SubprocessGit:
                             "--format=%P", "-n", "1")
         parents = out.split() if out else []
         return parents[0].decode() if parents else None
+
+    def main_checkout(self, path: str) -> str | None:
+        """119: the realpath of the main checkout `path` is in, also from a linked worktree or a subdirectory (as
+        cli/git.py main_checkout finds it); None when `path` isn't in a git repository's work tree."""
+        out, _ = git_stdout(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        common = out.decode(errors="replace").strip() if out else ""
+        if not common:
+            return None
+        if os.path.basename(common) == ".git":
+            return os.path.realpath(os.path.dirname(common))
+        top, _ = git_stdout(path, "rev-parse", "--show-toplevel")  # a separate git dir; a bare repo has none
+        top = top.decode(errors="replace").strip() if top else ""
+        return os.path.realpath(top) if top else None
 
     # --- 093: Create PR and Merge PR, run only when I click one (docs/MVP.md §3.7) ---------------
 

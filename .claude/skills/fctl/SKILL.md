@@ -1,11 +1,11 @@
 ---
 name: fctl
-description: How to work with Claude Factories through its fctl CLI. Use whenever the user mentions fctl, Claude Factories, the factory, the board, the backlog, a factory task or run (e.g. "#12", "run 12", "what's in review"), or asks to connect a repo, add/list/inspect tasks, start or follow a run, read a round's diff or verdicts, approve or request changes, block/unblock tasks, set project context, export/import a task, or run the app (fctl serve, fctl service).
+description: How to work with Workcell through its fctl CLI. Use whenever the user mentions fctl, Workcell, the factory, the board, the backlog, a factory task or run (e.g. "#12", "run 12", "what's in review"), or asks to connect a repo, add/list/inspect tasks, start or follow a run, read a round's diff or verdicts, approve or request changes, block/unblock tasks, set project context, export/import a task, or run the app (fctl serve, fctl service).
 ---
 
-# fctl: working with Claude Factories
+# fctl: working with Workcell
 
-Claude Factories is a local app that runs a software factory on a repo's tasks: spec → build →
+Workcell is a local app that runs a software factory on a repo's tasks: spec → build →
 four agent reviews → approver → the user's review. All of its state (workspaces, projects, tasks,
 specs, rounds, verdicts, decisions, runs) lives in the app's database behind its backend. `fctl` is
 the command line for it: most commands are a small HTTP client of the backend at `FCTL_URL`
@@ -144,10 +144,16 @@ fctl task unblock 15 --by 12    # → #15 has no blockers
 fctl run 12                     # Auto picks the account → Run #41 on #12 as b@y → …/tasks/12
 fctl run 12 --account b@y       # this account (id or email), even near its limits
 fctl run next                   # top ready Backlog task of this repo (always Auto)
+fctl run next --module frontend # top ready Backlog task of module frontend
 fctl show 12                    # where it is: status, stage, spec, rounds
 fctl round 12                   # round 2: security=PASS ux=PASS ui=pending code=PASS (3/4)
 fctl diff 12                    # latest round's patch; --round N for another
 ```
+
+**"Work on <module>"** (e.g. "work on frontend") means `fctl run next --module frontend` in the repo:
+it starts that module's top ready Backlog task. The project's modules are on its Modules page
+(`/projects/{id}/modules`); an unknown name fails with `no module nope in api; known: backend, frontend`
+and starts nothing, so that error also lists them.
 
 `fctl run <id>` on a task already in progress continues from its stage. Before re-running a
 stalled task, make sure no other run or terminal session still drives it: two orchestrators on one
@@ -239,7 +245,7 @@ With Docker (`docker compose up`), the backend is already on `127.0.0.1:4545`; d
 | `fctl connect --workspace W [--test-cmd C]` | | needs the repo |
 | `fctl task add "title" [--description TEXT\|-] [--blocked-by IDS] [--run]` | with `-`: description | needs the repo |
 | `fctl task block\|unblock <id> --by <id>` | | |
-| `fctl run <id> [--account <id\|email>]` / `fctl run next` | | `next` needs the repo |
+| `fctl run <id> [--account <id\|email>]` / `fctl run next [--module <name>]` | | `next` needs the repo |
 | `fctl rework <id> "note"` / `fctl approve <id>` | | task must be in `review` |
 | `fctl submit --new --title T` / `fctl submit <id>` | description / build notes | diffs the current tree |
 | `fctl export <id> [-o FILE] [--transcripts]` / `fctl import FILE` | | import needs the repo |
@@ -261,7 +267,7 @@ when the app refused; most name the fix. Exit `2` is a usage error. Don't retry 
 | Message | Do |
 |---|---|
 | `can't reach http://127.0.0.1:4545 — is "fctl serve" running?` | Ask the user to start the app, or fix `FCTL_URL`. |
-| `404 no project at <path>; in that repo, run fctl connect --workspace <name>` | Connect the repo first. |
+| `404 no project at <path>; in that repo, run fctl connect --workspace <name>, or if the checkout moved, change the path on the project's Settings page` | Connect the repo first, or after a move change the path in Settings. |
 | `not inside a git repository: <cwd>` | `cd` into the repo. |
 | `404 Not Found` | Unknown task id. |
 | `409 run #41 is already running on #12; …` | Wait, or the user stops it in the app. |
@@ -290,5 +296,5 @@ new round, so submit once per round. Only the orchestrator runs `fctl stage`. Ed
 `.claude/` are denied in a run. If you start a server, use `$FCTL_BACKEND_PORT` /
 `$FCTL_FRONTEND_PORT` and a temp `FCTL_HOME`, never the user's.
 
-Inside the claude-factories checkout itself, `docs/fctl_docs/` has the full agent docs and
-`src/claude_factories/fctl.md` the full reference.
+Inside the workcell checkout itself, `docs/fctl_docs/` has the full agent docs and
+`src/workcell/fctl.md` the full reference.

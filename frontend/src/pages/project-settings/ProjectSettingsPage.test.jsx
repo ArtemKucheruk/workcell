@@ -63,11 +63,13 @@ test('FE25: the page fetches the board view-model once, and 10 s fetch nothing m
 })
 
 const Q5 =
-  'Path, remote, and default branch come from fctl connect. Rerunning it in the repo also resets the name, and the test command when it passes one.'
+  'Remote and default branch come from fctl connect. Rerunning it in the repo also resets the name, and the test command when it passes one. If the checkout moves, change the path here.'
 const nameBox = () => within(section('Repository')).getByRole('textbox', { name: 'Name' })
 const testBox = () => within(section('Repository')).getByRole('textbox', { name: 'Test command' })
+const pathBox = () => within(section('Repository')).getByRole('textbox', { name: 'Path' })
+const changePath = () => within(section('Repository')).getByRole('button', { name: 'Change path' })
 
-test('049 FE16 (042 FE26): Repository opens with a Name and Test command form with Save, then path, remote, and default branch as text', async () => {
+test('049 FE16 (042 FE26), 119 AC16, AC18: Repository opens with a Name and Test command form with Save, a Path form, then remote and default branch as text', async () => {
   const { unmount } = await open(board())
   const repo = within(section('Repository'))
   const facts = () => {
@@ -79,23 +81,51 @@ test('049 FE16 (042 FE26): Repository opens with a Name and Test command form wi
   expect(save.closest('form')).toBe(nameBox().closest('form'))
   expect(testBox().closest('form')).toBe(nameBox().closest('form'))
   expect(facts()).toEqual([
-    ['Path', '/home/me/api'],
     ['Remote', 'git@github.com:me/api.git'],
     ['Default branch', 'main'],
   ])
-  // Q15: the form comes first, above the read-only rows; those have no field
+  // 119 AC16: the path form, its own, between the Name form and the read-only rows
+  expect(pathBox().value).toBe('/home/me/api')
+  expect(changePath().closest('form')).toBe(pathBox().closest('form'))
+  expect(pathBox().closest('form')).not.toBe(nameBox().closest('form'))
+  // Q15: the forms come first, above the read-only rows; those have no field
   const dl = section('Repository').querySelector('dl')
-  expect(save.compareDocumentPosition(dl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(save.compareDocumentPosition(pathBox()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(pathBox().compareDocumentPosition(dl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(dl.querySelectorAll('input, textarea, select')).toHaveLength(0)
   expect(repo.getByText(fullText(Q5)).querySelector('code').textContent).toBe('fctl connect')
   unmount()
   await open(board({ project: { ...PROJECT, remote_url: null, test_cmd: null } }))
   expect(testBox().value).toBe('')
   expect(facts()).toEqual([
-    ['Path', '/home/me/api'],
     ['Remote', 'none'],
     ['Default branch', 'main'],
   ])
+})
+
+test('119 AC16: Change path sends PATCH {path} as typed; on 200 the page reloads and the input shows the stored path', async () => {
+  const { fetch, responses } = await open(board(), {
+    'PATCH /api/projects/3': [200, { id: 3, workspace_id: 2, name: 'api', path: '/srv/api', test_cmd: 'pytest -q' }],
+  })
+  fireEvent.change(pathBox(), { target: { value: '/srv/link/api' } })
+  responses[`GET ${BOARD}`] = [200, board({ project: { ...PROJECT, path: '/srv/api' } })]
+  fireEvent.click(changePath())
+  await waitFor(() => expect(pathBox().value).toBe('/srv/api'))
+  expect(sent(fetch, 'PATCH', '/api/projects/3')).toEqual({ path: '/srv/link/api' })
+  expect(loads(fetch)).toBe(2)
+  expect(within(section('Repository')).queryByRole('alert')).toBeNull()
+})
+
+test('119 AC17: a refused path change shows its detail in the path form, which keeps what was typed', async () => {
+  const detail = '/srv/api/src is not a main checkout; use /srv/api'
+  const { fetch } = await open(board(), { 'PATCH /api/projects/3': [422, { detail }] })
+  fireEvent.change(pathBox(), { target: { value: '/srv/api/src' } })
+  fireEvent.click(changePath())
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toBe(detail)
+  expect(alert.closest('form')).toBe(pathBox().closest('form'))
+  expect(pathBox().value).toBe('/srv/api/src')
+  expect(loads(fetch)).toBe(1)
 })
 
 test('049 FE17: Save sends PATCH {name, test_cmd} as typed; on 200 the page reloads, the header follows, and the sidebar is fetched again', async () => {

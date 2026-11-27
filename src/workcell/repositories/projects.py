@@ -43,9 +43,30 @@ class ProjectsRepo:
         project."""
         sets = ", ".join(f"{column} = :{column}" for column in fields)
         return self.conn.execute(
-            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, test_cmd, github_label, {PLANE}",
+            f"UPDATE projects SET {sets} WHERE id = :id RETURNING id, workspace_id, name, path, test_cmd, github_label,"
+            f" {PLANE}",
             fields | {"id": project_id},
         ).fetchone()
+
+    def path(self, project_id: int) -> str | None:
+        """119: the stored main checkout; None if there is no such project."""
+        row = self.conn.execute("SELECT path FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return None if row is None else row[0]
+
+    def move_paths(self, project_id: int, old: str, new: str) -> None:
+        """119 AC3–AC6: the project's stored absolute paths that are `old` or under `old/` now sit under `new`: its
+        tasks' worktree_path, its automations' runs' worktree_path, and its context items' source_path (Q1). A plain
+        string compare on a `/` boundary, not LIKE, so `/old/repo2` stays when `old` is `/old/repo`. Q2: a run whose
+        automation was deleted (factory_id NULL) can't be tied to the project and keeps its path."""
+        args = {"old": old, "new": new, "project": project_id}
+        for table, column, mine in (
+            ("tasks", "worktree_path", "project_id = :project"),
+            ("runs", "worktree_path", "factory_id IN (SELECT id FROM factories WHERE project_id = :project)"),
+            ("context_items", "source_path", "project_id = :project"),
+        ):
+            self.conn.execute(
+                f"UPDATE {table} SET {column} = :new || substr({column}, length(:old) + 1) WHERE {mine}"
+                f" AND ({column} = :old OR substr({column}, 1, length(:old) + 1) = :old || '/')", args)
 
     def delete(self, project_id: int) -> None:
         """049: the projects row only; its tasks go first, through TasksRepo.delete."""

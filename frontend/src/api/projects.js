@@ -1,8 +1,8 @@
 import { api } from './client.js'
 
 /**
- * 049: any of workspace_id, name, test_cmd, (108) github_label, and (109) the plane_* settings, sent as given; the reply
- * is the project after the update, with plane_key_set but never the key.
+ * 049: any of workspace_id, name, (119) path, test_cmd, (108) github_label, and (109) the plane_* settings, sent as
+ * given; the reply is the project after the update, with plane_key_set but never the key.
  */
 export const patchProject = (id, fields) =>
   api(`/api/projects/${encodeURIComponent(id)}`, { method: 'PATCH', body: fields })
