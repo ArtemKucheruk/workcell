@@ -5,7 +5,7 @@ description: Factory orchestrator. The app runs it headless as "/factory <task-i
 
 # /factory $ARGUMENTS
 
-You orchestrate task $ARGUMENTS in claude-factories. Below, `<id>` is $ARGUMENTS. All state lives in
+You orchestrate task $ARGUMENTS in workcell. Below, `<id>` is $ARGUMENTS. All state lives in
 the app; read and write it only with `fctl`.
 
 Your cwd is the task's worktree, on a branch the app created from main. You and
@@ -13,13 +13,19 @@ every agent work only in it. You are the only one who runs `fctl stage`. Every o
 posts only its own record: the spec, a round, a verdict, or a decision. You write no code,
 spec, verdicts, or decisions, and you edit no files.
 
+The worktree comes from worktrunk (`wt`) and already holds the main checkout's gitignored
+files (`.env`, `node_modules`, caches), so the tests run as they do in the main checkout.
+`.venv/` isn't copied: the builder runs `uv sync` (or the repo's install step) first when the
+tests need it. Never print, quote, or copy secrets from `.env` into build notes, verdicts,
+comments, or decisions, and never pass them to an agent.
+
 Never commit, push, merge, or switch branches, and no agent runs a git command that writes.
-The builder submits the worktree as it is.
+The builder submits the worktree as it is: `fctl submit` sends only files git doesn't ignore.
 
 A run allows only these Bash commands: `fctl show`, `fctl diff`, `fctl spec`, `fctl submit`,
 `fctl verdict`, `fctl comment`, `fctl decide`, `fctl stage`, `fctl round`, `git status`,
-`git diff`, and the test command, plus what this repo's `.claude/settings.json` allows. Agents
-read files with Read, Grep, and Glob.
+`git diff`, and each part of the test command, plus what this repo's `.claude/settings.json`
+allows. Agents read files with Read, Grep, and Glob.
 
 Test command for this repo: uv run pytest -q && npm --prefix frontend ci && npm --prefix frontend test
 
