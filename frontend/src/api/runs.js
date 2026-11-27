@@ -7,7 +7,12 @@ export const runTask = (id, accountId) =>
     ...(accountId == null ? {} : { body: { account_id: accountId } }),
   })
 
-export const runNext = (projectId) => api(`/api/projects/${encodeURIComponent(projectId)}/run-next`, { method: 'POST' })
+/** 113 AC11: `{module_id}` only when a module was given; none is the whole project's Backlog. */
+export const runNext = (projectId, moduleId) =>
+  api(`/api/projects/${encodeURIComponent(projectId)}/run-next`, {
+    method: 'POST',
+    ...(moduleId == null ? {} : { body: { module_id: moduleId } }),
+  })
 
 export const stopRun = (id) => api(`/api/runs/${encodeURIComponent(id)}/stop`, { method: 'POST' })
 

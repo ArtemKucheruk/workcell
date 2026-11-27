@@ -213,17 +213,18 @@ class TasksRepo:
             (now, task_id),
         ).rowcount > 0
 
-    def top_backlog(self, project_id: int) -> sqlite3.Row | None:
+    def top_backlog(self, project_id: int, module_id: int | None = None) -> sqlite3.Row | None:
         """012 Q13, 094: the top ready backlog card (lowest position, then lowest id) as id and ready 1; with every
         card blocked, the top card with ready 0 (Q5); None for an empty backlog. 096 Q10: a card that already has
-        a running run is skipped."""
+        a running run is skipped. 113 AC1: with `module_id`, only that module's cards."""
+        only, params = (" AND module_id = ?", (project_id, module_id)) if module_id is not None else ("", (project_id,))
         return self.conn.execute(
             "SELECT id, NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks b ON b.id = d.blocked_by_id"
             " WHERE d.task_id = t.id AND b.status != 'done') AS ready FROM tasks t"
-            " WHERE project_id = ? AND status = 'backlog'"
+            " WHERE project_id = ? AND status = 'backlog'" + only +
             " AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.id AND r.status = 'running')"
             " ORDER BY ready DESC, position, id LIMIT 1",
-            (project_id,),
+            params,
         ).fetchone()
 
     def blockers(self, task_id: int) -> list[sqlite3.Row]:

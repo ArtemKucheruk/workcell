@@ -18,12 +18,18 @@ def account_id(value: str) -> int:
 def run(args):
     """docs/claude-code.md §7.2: `fctl run <id>` needs no repo; `fctl run next` takes the top of the
     current repo's Backlog (Q10). 097: `--account` picks the run's account (AC30); without it, Auto and no body
-    (AC31). Run next is always Auto."""
+    (AC31). Run next is always Auto. 113 AC8 to AC10: `--module` limits next to that module's backlog, and only next."""
     if args.target == "next":
         if args.account is not None:
             args.usage_error("--account can't be used with next; Run next always uses Auto")
-        r = api("POST", f"/api/projects/{project_at(main_checkout())['id']}/run-next")
+        from .tasks import module_id  # tasks imports account_id from here
+
+        project = project_at(main_checkout())
+        body = {"module_id": module_id(project, args.module)} if args.module is not None else None
+        r = api("POST", f"/api/projects/{project['id']}/run-next", body)
         print_run(r["task_id"], r)
+    elif args.module is not None:
+        args.usage_error("--module only works with next")
     elif args.target.isdecimal():
         task_id = int(args.target)
         body = {"account_id": account_id(args.account)} if args.account is not None else None

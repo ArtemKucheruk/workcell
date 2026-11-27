@@ -852,9 +852,14 @@ POST /api/factories/7/run                                         (Run now on th
   #   snapshot, failed-run error, Stop, and the startup sweep work as for a task run; a spawn that raises is
   #   500 {"detail":"can't start claude: …"} with the row failed. The worktree and branch stay after the run
 
-POST /api/projects/3/run-next                                     (Run next, fctl run next)
+POST /api/projects/3/run-next                                     (Run next, fctl run next [--module])
+→ {"module_id":7}                                                 # optional (113); no body, {}, or null: whole project
 ← 202 {"task_id":14,"run_id":42,"account_id":1,"account":"a@x"}  # 404 if backlog empty; 409 as run
-  # always Auto, no body read (097); Retry (run with no body) and rework's run are Auto too
+  # always Auto, no body read for the account: an account_id is ignored (097); Retry (run with no body) and rework's run are Auto too
+  # with module_id, only that module's backlog cards, by the same rules below. Its refusals name the module:
+  #   404 {"detail":"module frontend has no backlog tasks"},
+  #   409 {"detail":"all backlog tasks in frontend are blocked: #15 waits on #12, #14"},
+  #   422 {"detail":"module #7 is in another project; pick one of this project's modules"}, 422 {"detail":"no module #99"}
   # the top ready backlog card (lowest position, then id) that has no running run, skipping blocked ones; at the
   #   run cap, run's cap 409 and no run row; with every card blocked,
   #   409 {"detail":"all backlog tasks are blocked: #15 waits on #12, #14"}: the top card and its open blockers

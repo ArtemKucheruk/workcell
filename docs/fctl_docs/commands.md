@@ -316,7 +316,7 @@ no board task. `POST /api/factories/{id}/run`. Works anywhere.
 
 ```
 fctl run <id> [--account <id|email>]
-fctl run next
+fctl run next [--module <name>]
 ```
 
 Starts a factory run: headless `/factory <id>` in the task's worktree. `POST /api/tasks/{id}/run`
@@ -325,6 +325,12 @@ Starts a factory run: headless `/factory <id>` in the task's worktree. `POST /ap
 
 - `--account`: an account id, or an email matched exactly ignoring case. The run uses it even
   when near its limits. Not with `next` (exit `2`).
+- `--module`: with `next` only, the top ready task of that module's Backlog, body
+  `{"module_id": N}`. The name is matched trimmed, in any case. Not with an id (exit `2`).
+
+**Work on a module.** When the user says "work on frontend", run `fctl run next --module frontend`
+in the repo. To see a project's modules, open its Modules page (`/projects/{id}/modules`), or guess:
+an unknown name fails with `no module nope in api; known: backend, frontend` and starts nothing.
 - Output: `Run #41 on #12 as b@y → http://127.0.0.1:4545/tasks/12`
 - The first run makes the worktree `.claude/worktrees/<id>-<slug>` on `factory/<id>-<slug>` with
   worktrunk; every run copies the main checkout's ignored files in.
@@ -347,6 +353,10 @@ Starts a factory run: headless `/factory <id>` in the task's worktree. `POST /ap
   - `500 can't start claude: <reason>`
   - `next` only: `404 backlog is empty`, `409 all backlog tasks are blocked: #15 waits on #12, #14`,
     `404 no project at <path>; …`
+  - `next --module` only: `404 module frontend has no backlog tasks`,
+    `409 all backlog tasks in frontend are blocked: #15 waits on #12, #14`,
+    `fctl: no module nope in api; known: backend, frontend` (nothing posted)
+  - `--module` without `next`: `fctl run: error: --module only works with next` (exit `2`)
   - not a number or `next`: `fctl run: error: target must be a task id or next, not 'abc'` (exit `2`)
 
 ### fctl rework

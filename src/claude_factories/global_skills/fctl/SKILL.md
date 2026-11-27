@@ -144,10 +144,16 @@ fctl task unblock 15 --by 12    # → #15 has no blockers
 fctl run 12                     # Auto picks the account → Run #41 on #12 as b@y → …/tasks/12
 fctl run 12 --account b@y       # this account (id or email), even near its limits
 fctl run next                   # top ready Backlog task of this repo (always Auto)
+fctl run next --module frontend # top ready Backlog task of module frontend
 fctl show 12                    # where it is: status, stage, spec, rounds
 fctl round 12                   # round 2: security=PASS ux=PASS ui=pending code=PASS (3/4)
 fctl diff 12                    # latest round's patch; --round N for another
 ```
+
+**"Work on <module>"** (e.g. "work on frontend") means `fctl run next --module frontend` in the repo:
+it starts that module's top ready Backlog task. The project's modules are on its Modules page
+(`/projects/{id}/modules`); an unknown name fails with `no module nope in api; known: backend, frontend`
+and starts nothing, so that error also lists them.
 
 `fctl run <id>` on a task already in progress continues from its stage. Before re-running a
 stalled task, make sure no other run or terminal session still drives it: two orchestrators on one
@@ -239,7 +245,7 @@ With Docker (`docker compose up`), the backend is already on `127.0.0.1:4545`; d
 | `fctl connect --workspace W [--test-cmd C]` | | needs the repo |
 | `fctl task add "title" [--description TEXT\|-] [--blocked-by IDS] [--run]` | with `-`: description | needs the repo |
 | `fctl task block\|unblock <id> --by <id>` | | |
-| `fctl run <id> [--account <id\|email>]` / `fctl run next` | | `next` needs the repo |
+| `fctl run <id> [--account <id\|email>]` / `fctl run next [--module <name>]` | | `next` needs the repo |
 | `fctl rework <id> "note"` / `fctl approve <id>` | | task must be in `review` |
 | `fctl submit --new --title T` / `fctl submit <id>` | description / build notes | diffs the current tree |
 | `fctl export <id> [-o FILE] [--transcripts]` / `fctl import FILE` | | import needs the repo |

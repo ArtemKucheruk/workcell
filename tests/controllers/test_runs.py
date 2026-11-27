@@ -702,6 +702,110 @@ def test_run_next_all_blocked(client, project, fake):  # 094 AC14, Q5
     assert (r.status_code, r.json()) == (404, {"detail": "backlog is empty"})
 
 
+# --- 113: run next by module -------------------------------------------------------
+
+
+def add_module(project_id, name):
+    return sql("INSERT INTO modules (project_id, name, description_md, created_at) VALUES (?, ?, '', ?) RETURNING id",
+               (project_id, name, OLD))[0][0]
+
+
+def in_module(task_id, module_id):
+    sql("UPDATE tasks SET module_id = ? WHERE id = ?", (module_id, task_id))
+    return task_id
+
+
+def run_next_in(client, project_id, body):
+    return client.post(f"/api/projects/{project_id}/run-next", json=body, headers=H)
+
+
+def test_run_next_module_takes_its_top(client, project, fake):  # 113 AC1
+    front, back = add_module(project, "frontend"), add_module(project, "backend")
+    loose = add_task(project, "loose", position=0.5)
+    other = in_module(add_task(project, "other", position=0.6), back)
+    later = in_module(add_task(project, "later", position=2.0), front)
+    top = in_module(add_task(project, "top", position=1.0), front)
+    r = run_next_in(client, project, {"module_id": front})
+    assert r.status_code == 202, r.text
+    assert r.json() == {"task_id": top, "run_id": sql("SELECT id FROM runs")[0][0], "account_id": 1,
+                        "account": "claude-config"}
+    wait(r.json()["run_id"])
+    assert [task_row(t)["status"] for t in (loose, other, later, top)] == ["backlog"] * 3 + ["in_progress"]
+
+
+def test_run_next_module_keeps_rules(client, project, fake):  # 113 AC2
+    front = add_module(project, "frontend")
+    working = add_task(project, status="in_progress", position=0.1)
+    blocked = in_module(add_task(project, "blocked", position=1.0), front)
+    running = in_module(add_task(project, "running", position=1.5), front)
+    ready = in_module(add_task(project, "ready", position=2.0), front)
+    waits(blocked, working)
+    add_running_run(running)
+    r = run_next_in(client, project, {"module_id": front, "account_id": 99})  # account_id ignored: Auto
+    assert r.status_code == 202, r.text
+    assert (r.json()["task_id"], r.json()["account_id"]) == (ready, 1)
+    wait(r.json()["run_id"])
+
+
+def test_run_next_module_empty(client, project, fake):  # 113 AC3
+    front = add_module(project, "frontend")
+    add_task(project, "loose")
+    in_module(add_task(project, "doing", status="in_progress"), front)
+    add_running_run(in_module(add_task(project, "running"), front))
+    r = run_next_in(client, project, {"module_id": front})
+    assert (r.status_code, r.json()) == (404, {"detail": "module frontend has no backlog tasks"})
+    assert sql("SELECT COUNT(*) FROM runs")[0][0] == 1 and not fake.invoked()
+
+
+def test_run_next_module_all_blocked(client, project, fake):  # 113 AC4
+    front = add_module(project, "frontend")
+    first, second = add_task(project, status="in_progress"), add_task(project, status="review", stage="human_review")
+    add_task(project, "ready elsewhere", position=0.5)
+    top = in_module(add_task(project, "top", position=1.0), front)
+    later = in_module(add_task(project, "later", position=2.0), front)
+    waits(top, second, first)
+    waits(later, first)
+    r = run_next_in(client, project, {"module_id": front})
+    assert (r.status_code, r.json()) == (
+        409, {"detail": f"all backlog tasks in frontend are blocked: #{top} waits on #{first}, #{second}"})
+    assert no_runs() and not fake.invoked()
+
+
+def test_run_next_module_refused(client, project, repo, tmp_path, fake):  # 113 AC5
+    other = tmp_path / "other"
+    git(tmp_path, "init", "-q", "-b", "main", str(other))
+    theirs = add_module(connect(client, other), "frontend")
+    add_task(project)
+    r = run_next_in(client, project, {"module_id": theirs})
+    assert (r.status_code, r.json()) == (
+        422, {"detail": f"module #{theirs} is in another project; pick one of this project's modules"})
+    r = run_next_in(client, project, {"module_id": 99})
+    assert (r.status_code, r.json()) == (422, {"detail": "no module #99"})
+    assert no_runs() and not fake.invoked()
+
+
+@pytest.mark.parametrize("body", [None, {}, {"module_id": None}])
+def test_run_next_no_module(client, project, fake, body):  # 113 AC6
+    front = add_module(project, "frontend")
+    in_module(add_task(project, "moduled", position=2.0), front)
+    top = add_task(project, "loose", position=1.0)
+    r = client.post(f"/api/projects/{project}/run-next", headers=H, **({} if body is None else {"json": body}))
+    assert r.status_code == 202, r.text
+    assert r.json()["task_id"] == top
+    wait(r.json()["run_id"])
+
+
+def test_run_next_module_at_cap(client, project, fake):  # 113 AC7
+    front = add_module(project, "frontend")
+    task = in_module(add_task(project), front)
+    other = add_task(project, status="in_progress")
+    running = add_running_run(other)
+    cap(1)
+    r = run_next_in(client, project, {"module_id": front})
+    assert (r.status_code, r.json()) == (409, {"detail": cap_detail((running, other))})
+    assert task_row(task)["status"] == "backlog" and not fake.invoked()
+
+
 # --- 036: the adapters come from Depends ------------------------------------------
 
 

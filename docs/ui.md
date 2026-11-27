@@ -722,6 +722,13 @@ Loading, failures, times, and motion are the same on every page:
       leaves it unchanged. **Delete** (`Delete <name>`) opens the shared delete dialog, `Delete module <name>?`,
       saying its tasks stay, without a module; Delete sends `DELETE /api/modules/{id}` and reloads, so the
       counts move to **No module**.
+    - Each module row's **Run next ▶** (`Run next in <name>`, 113) sends
+      `POST /api/projects/{id}/run-next` with `{"module_id"}` and reloads: the module's top ready backlog task
+      starts, as the board's Run next does. The No module row has none. When the board's `can_run` is false every
+      Run next is disabled; at the run cap its title and one muted line under the header read
+      `N of M runs active`, as on the board. A refusal (404 empty module, 409 all blocked or the cap, 422) shows
+      its detail in one page alert, which the next Run next clears; a success says `Started #<task_id>.` in a
+      polite status line.
 
 ### 8.1 Board
 ```

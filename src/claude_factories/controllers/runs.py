@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Query, Request
 
-from ..dto.runs import LogOut, RunBody, RunNextOut, RunStarted, StopOut
+from ..dto.runs import LogOut, RunBody, RunNextBody, RunNextOut, RunStarted, StopOut
 from ..handlers import runs as handler
 from ..server.deps import ClaudeAdapter, GitAdapter, get_claude, transaction
 
@@ -43,8 +43,10 @@ def run_automation(factory_id: int, request: Request, git: GitAdapter, claude: C
 
 
 @router.post("/api/projects/{project_id}/run-next", status_code=202)
-def run_next(project_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter) -> RunNextOut:
-    return handler.run_next(transaction, git, claude, project_id, agent_url(request))
+def run_next(project_id: int, request: Request, git: GitAdapter, claude: ClaudeAdapter,
+             body: RunNextBody | None = None) -> RunNextOut:
+    """113 AC6: no body, {}, or a null module_id is the whole project's top task."""
+    return handler.run_next(transaction, git, claude, project_id, agent_url(request), body and body.module_id)
 
 
 @router.post("/api/runs/{run_id}/stop")

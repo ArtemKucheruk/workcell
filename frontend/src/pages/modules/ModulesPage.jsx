@@ -2,6 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import { addModule, deleteModule, listModules, saveModule } from '../../api/modules.js'
 import { boardPage } from '../../api/pages.js'
+import { runNext } from '../../api/runs.js'
+import { ActionButton } from '../../components/ActionButton.jsx'
 import { DeleteDialog } from '../../components/DeleteDialog.jsx'
 import { ErrorMessage } from '../../components/ErrorMessage.jsx'
 import { NotFound } from '../../components/NotFound.jsx'
@@ -116,8 +118,11 @@ function NewModule({ projectId, onCreated }) {
   )
 }
 
-/** AC16, AC18, AC19: a module's row, or its Edit form in its place; after a save or Cancel, focus is back on Edit. */
-function ModuleRow({ module, onReload, onDelete }) {
+/**
+ * AC16, AC18, AC19: a module's row, or its Edit form in its place; after a save or Cancel, focus is back on Edit.
+ * 113 AC12, AC13: its Run next, disabled as the board's is, with the cap hint as its title.
+ */
+function ModuleRow({ module, onReload, onDelete, onRunNext, canRun, runTitle }) {
   const [editing, setEditing] = useState(false)
   const edit = useRef(null)
   const refocus = useRef(false)
@@ -155,6 +160,15 @@ function ModuleRow({ module, onReload, onDelete }) {
         <p className="text-sm tabular-nums">{countsText(module.counts)}</p>
       </div>
       <div className="flex gap-2">
+        <ActionButton
+          action={() => onRunNext(module)}
+          disabled={!canRun}
+          title={runTitle}
+          aria-label={`Run next in ${module.name}`}
+          className={smallButton}
+        >
+          Run next ▶
+        </ActionButton>
         <button
           ref={edit}
           type="button"
@@ -203,6 +217,8 @@ function Modules({ id }) {
   const { data: page, error: pageError } = usePoll(useCallback(() => boardPage(id), [id, tick]))
   const { data: list, error } = usePoll(useCallback(() => listModules(id), [id, tick]))
   const [deleting, setDeleting] = useState(null) // {module, opener}
+  const [runError, setRunError] = useState(null)
+  const [said, setSaid] = useState('')
   const name = page?.project.name
   useEffect(() => {
     if (name) document.title = `${name} · Modules · Claude Factories`
@@ -214,12 +230,36 @@ function Modules({ id }) {
     const failed = pageError ?? error
     return failed ? <ErrorMessage error={failed} /> : <ModulesSkeleton />
   }
+  // 113 AC13: the board's cap hint (096 Q9), as the header line and every disabled Run next's title
+  const capHint =
+    page.runs_active >= page.max_concurrent_runs ? `${page.runs_active} of ${page.max_concurrent_runs} runs active` : undefined
+
+  /** 113 AC14, Q3: as the board's Run next; starting one clears the alert and the status, a refusal fills the alert. */
+  async function runNextIn(module) {
+    setRunError(null)
+    setSaid('')
+    let started
+    try {
+      started = await runNext(page.project.id, module.id)
+    } catch (err) {
+      setRunError(err)
+      return
+    }
+    setSaid(`Started #${started.task_id}.`)
+    reload()
+  }
+
   return (
     <>
       <ProjectHeader project={page.project} factory={page.factory}>
         <NewModule projectId={page.project.id} onCreated={reload} />
+        {capHint && <p className={`basis-full text-sm ${muted}`}>{capHint}</p>}
       </ProjectHeader>
       {error && <ErrorMessage error={error} />}
+      {runError && <ErrorMessage error={runError} />}
+      <p role="status" className={`mb-2 text-sm empty:hidden ${muted}`}>
+        {said}
+      </p>
       <section aria-labelledby="modules-heading">
         <h2 id="modules-heading">Modules</h2>
         {list.modules.length === 0 && <p className={`mb-3 ${muted}`}>No modules yet.</p>}
@@ -230,6 +270,9 @@ function Modules({ id }) {
               module={module}
               onReload={reload}
               onDelete={(m, opener) => setDeleting({ module: m, opener })}
+              onRunNext={runNextIn}
+              canRun={page.can_run}
+              runTitle={capHint}
             />
           ))}
           <li aria-label="No module" className="grid gap-1 rounded-md border border-dashed border-line p-3">
