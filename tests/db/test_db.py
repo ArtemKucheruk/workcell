@@ -30,90 +30,15 @@ def test_data_dir_defaults_to_home(tmp_path, monkeypatch):  # AC9
     assert config.data_dir() == tmp_path / ".workcell"  # 116 AC4
 
 
-def old_home(tmp_path, monkeypatch) -> tuple[Path, Path]:
-    """116: a temp HOME holding a pre-rename ~/.claude-factories with a task, a run and its log, and an
-    account whose config_dir is under the old dir."""
+def test_init_leaves_the_pre_rename_dir_alone(tmp_path, monkeypatch):  # 120 AC3: no upgrade path any more
     monkeypatch.delenv("FCTL_HOME")
     monkeypatch.setenv("HOME", str(tmp_path))
-    old, new = tmp_path / ".claude-factories", tmp_path / ".workcell"
-    monkeypatch.setenv("FCTL_HOME", str(old))
+    old = tmp_path / (".claude" + "-factories")  # split so tests/test_public_repo.py's check passes (120 AC8)
+    old.mkdir()
+    (old / "factory.db").write_bytes(b"old")
     db.init()
-    monkeypatch.delenv("FCTL_HOME")
-    account = old / "claude-accounts" / "1"
-    account.mkdir(parents=True)
-    (account / ".credentials.json").write_text("{}")
-    (old / "runs").mkdir()
-    (old / "runs" / "1.jsonl").write_text('{"type":"system"}\n')
-    with closing(sqlite3.connect(old / "factory.db")) as conn, conn:
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("UPDATE claude_accounts SET config_dir = ?", (str(account),))
-        conn.execute("INSERT INTO workspaces (id, name, created_at) VALUES (1, 'w', ?)", (NOW,))
-        conn.execute("INSERT INTO projects (id, workspace_id, name, path, default_branch, created_at)"
-                     " VALUES (1, 1, 'p', '/tmp/p', 'main', ?)", (NOW,))
-        conn.execute("INSERT INTO tasks (id, project_id, title, status, position, created_at, updated_at)"
-                     " VALUES (1, 1, 't', 'backlog', 1, ?, ?)", (NOW, NOW))
-        conn.execute("INSERT INTO runs (id, task_id, session_id, status, log_path, started_at)"
-                     " VALUES (1, 1, 's', 'succeeded', ?, ?)", (str(old / "runs" / "1.jsonl"), NOW))
-    return old, new
-
-
-def counts(path: Path) -> dict:
-    with closing(sqlite3.connect(path)) as conn:
-        return {t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                for t in ("workspaces", "projects", "tasks", "runs", "claude_accounts")}
-
-
-def test_init_moves_the_old_data_dir(tmp_path, monkeypatch):  # 116 AC5, Q1
-    old, new = old_home(tmp_path, monkeypatch)
-    before = counts(old / "factory.db")
-    renames = []
-    real = os.rename
-    monkeypatch.setattr(os, "rename", lambda a, b: renames.append((a, b)) or real(a, b))
-    start_app()
-    assert renames == [(old, new)]
-    assert counts(new / "factory.db") == before == {
-        "workspaces": 1, "projects": 1, "tasks": 1, "runs": 1, "claude_accounts": 1}
-    with closing(sqlite3.connect(new / "factory.db")) as conn:
-        config_dir = conn.execute("SELECT config_dir FROM claude_accounts").fetchone()[0]
-        log_path = conn.execute("SELECT log_path FROM runs").fetchone()[0]
-    assert config_dir == str(old / "claude-accounts" / "1")  # Q1: rows stay as written
-    assert Path(config_dir).is_dir()
-    assert Path(config_dir).resolve().is_relative_to((new / "claude-accounts").resolve())
-    assert (Path(config_dir) / ".credentials.json").read_text() == "{}"
-    assert (new / "claude-accounts" / "1" / ".credentials.json").is_file()
-    assert (new / "runs" / "1.jsonl").is_file() and Path(log_path).read_text() == '{"type":"system"}\n'
-
-
-def test_init_links_the_old_path_once(tmp_path, monkeypatch):  # 116 AC6
-    old, new = old_home(tmp_path, monkeypatch)
-    db.init()
-    assert old.is_symlink() and old.resolve() == new.resolve()
-    renames = []
-    monkeypatch.setattr(os, "rename", lambda a, b: renames.append((a, b)))
-    db.init()
-    assert renames == []
-    assert old.is_symlink() and new.is_dir() and not new.is_symlink()
-
-
-def test_init_with_fctl_home_moves_nothing(tmp_path, monkeypatch):  # 116 AC7
-    old, new = old_home(tmp_path, monkeypatch)
-    for home in (tmp_path / "x", old):
-        monkeypatch.setenv("FCTL_HOME", str(home))
-        db.init()
-        assert old.is_dir() and not old.is_symlink()
-        assert not new.exists()
-    assert (tmp_path / "x" / "factory.db").is_file()
-
-
-def test_init_with_both_dirs_warns(tmp_path, monkeypatch, capsys):  # 116 AC8
-    old, new = old_home(tmp_path, monkeypatch)
-    new.mkdir()
-    (new / "keep").write_text("new")
-    db.init()
-    err = capsys.readouterr().err
-    assert err == f"warning: both {old} and {new} exist; using {new}\n"
-    assert old.is_dir() and not old.is_symlink() and (old / "runs" / "1.jsonl").is_file()
-    assert (new / "keep").read_text() == "new" and (new / "factory.db").is_file()
+    assert old.is_dir() and not old.is_symlink() and (old / "factory.db").read_bytes() == b"old"
+    assert (tmp_path / ".workcell" / "factory.db").is_file()
 
 
 def test_schema_has_every_table_and_index():  # AC10

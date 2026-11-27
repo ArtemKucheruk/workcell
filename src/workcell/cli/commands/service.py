@@ -134,8 +134,6 @@ def install(args):
     """AC10-AC12: capture the binaries and env, build the frontend if needed, write and load both services."""
     plat = services.platform()
     repo = services.repo_path()
-    services.remove_old_units(plat)  # 116 AC11, Q2: stop the old backend, then move the data it held,
-    services.migrate_home()  # before service.json or a log creates the new dir (AC9)
     bins = {}
     for name in REQUIRED + OPTIONAL:
         found = shutil.which(name)
@@ -229,7 +227,6 @@ def restart(args):
 def reload(args):
     """AC22-AC24: after a pull or merge: npm ci if the lockfile changed, build, restart both."""
     plat = services.platform()
-    services.remove_old_units(plat)  # 116 AC11; Q2: no data move, load_state needs an installed service.json
     state = services.load_state()
     repo = services.repo_path()
     guard(state, args.force, list(services.NAMES))

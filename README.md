@@ -48,21 +48,6 @@ to update. If the dependencies in `pyproject.toml` change, run
 
 If `fctl` isn't found, run `uv tool update-shell` and open a new terminal.
 
-### Upgrading from claude-factories
-
-The app used to be called Claude Factories. In your checkout, after pulling:
-
-```sh
-uv tool uninstall claude-factories
-uv tool install --editable .
-fctl service install      # removes the old com.claude-factories / claude-factories-* services first
-```
-
-The old backend keeps running on port 4545 until that last command stops it, so run all three.
-
-On the first start, the data in `~/.claude-factories` moves to `~/.workcell`, and the old
-path stays as a symlink to it, so signed-in accounts and every task's history carry over.
-
 ## Run the app
 
 Install the backend and the frontend once as background services (launchd on macOS,
