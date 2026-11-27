@@ -217,6 +217,24 @@ Loading, failures, times, and motion are the same on every page:
      and moves: the next of these empties it as it starts, and polls leave it alone.
    - From `md` up each column's card list scrolls on its own under its heading. Below `md` the
      columns stack and the page scrolls.
+   - A filter bar sits under the header and alerts, above the columns (117): a search field
+     labelled `Filter by #id or title`, and a **Module** select (the shared Select: **All modules**,
+     **No module**, then the project's modules from `GET /api/projects/{id}/modules`, loaded once),
+     shown only when the project has modules. The text ignores case and surrounding spaces: `#12`
+     matches only #12; `12` matches #12 or any title containing `12`; other text matches titles. A card
+     must match both the text and the module. It runs client-side over the polled view-model, with no
+     API change. Its state is the URL query, `?q=` and `?module=<id>` or `?module=none`, written with
+     `replace` (typing adds no history; an empty value drops its param), so it survives the 3 s poll, a
+     reload, and a shared link. A `module` that names no known module counts as All modules. Esc in the
+     field clears it and `?q=`, and the module stays.
+   - While a filter is on, each column's count is the number of matching cards. When nothing matches,
+     `No tasks match.` and **Clear filter** show above the columns, and every column says `No tasks`.
+     **Clear filter** drops `q` and `module` and focuses the field. A filter change (not a poll) is
+     announced in the status region (`3 tasks match.`, `1 task matches.`); clearing it empties the region.
+   - Reordering while filtered: hidden cards sit between the shown ones, so **Up** and **Down** are
+     disabled, titled `Clear the filter to reorder`, and a drop into the card's own column shows no
+     line and sends nothing. A move to another column, by menu or drop, puts the card at the bottom of
+     the whole column (the line shows after its last shown card), so hidden cards keep their places.
    - A blocked card (one waiting on a task that isn't done, §5.1) in Backlog, In progress, or
      Review looks muted: the column's `raised` background with no shadow, its text in the usual
      tokens, so nothing drops below 4.5:1. It shows a lock icon and the text `Blocked by #12, #14`,
@@ -414,6 +432,14 @@ Loading, failures, times, and motion are the same on every page:
       **Closed** is the Done column. The tabs show counts, and each tab has an empty state.
     - Each row has `#id title` linking to `/tasks/{id}/review`, its state pill (Open rows
       only), branch, round, verdict chips, and +/−.
+    - The Board's filter bar (item 3, 117) sits under the project header, above the tabs, with
+      the same matching, Module select (modules loaded once), `?q=` and `?module=` params, and Esc.
+      `?tab=closed` stays alongside, and both tab links carry `q` and `module`
+      (`?tab=closed&q=login`, Open as `?q=login`), so switching tabs keeps the filter. While a filter is
+      on, the tab counts are the matching rows, and a tab with none says `No reviews match.` with
+      **Clear filter**, which drops `q` and `module`, keeps `tab`, and focuses the field. A filter
+      change is announced in a visually hidden status region for the current tab (`2 reviews match.`,
+      `1 review matches.`); clearing it empties the region.
 11. **Project context** (`/projects/{id}/context`; wireframe §8.9)
     - A grid of context cards, loaded once, not polled: `GET /api/projects/{id}/context` for the
       pinned card and `GET /api/projects/{id}/context/items` for the rest (§6.1). Agents get all of
@@ -726,6 +752,8 @@ Loading, failures, times, and motion are the same on every page:
 ### 8.1 Board
 ```
 api-server · personal              Factory: ready ✓   [+ New task]  [Run next ▶]
+Filter by #id or title   Module
+[login               ]   [All modules ▾]      ← ?q=login&module=<id|none>; Module only with modules
 ┌ Backlog 3 ──────────┐ ┌ In progress 1 ─────────────┐ ┌ Review 2 ──────────────────┐ ┌ Done 5 ─────────┐
 │ #14 Export CSV      │ │ #13 Audit log              │ │ #12 Rate-limit login       │ │ #9 Health       │
 │[Delete] [Move] [Run]│ │ (● running) agent_review   │ │ (waiting on you)           │ │ 1 round         │
@@ -764,6 +792,10 @@ Delete dialog (modal; Esc or Cancel closes it and returns focus to the card's [D
 while dragging: the card dims, the column under the pointer gets an accent ring, and an
   accent line marks the gap the drop takes (none where the card would stay put)
 columns: from md up each card list scrolls on its own under its heading
+filter on: counts are the matching cards; none matching shows "No tasks match. [Clear filter]"
+  above the columns and "No tasks" in each. Up/Down are disabled ("Clear the filter to reorder"),
+  a drop in the card's own column does nothing, another column takes it at its full bottom.
+  Esc in the field clears the text; a filter change is announced ("3 tasks match.").
 ```
 
 ### 8.2 Review — Conversation
@@ -892,12 +924,17 @@ Rename in place (Enter saves, Esc or blur cancels)
 ### 8.5 Reviews
 ```
 api-server · personal                                         Factory: ready ✓
+Filter by #id or title   Module
+[                    ]   [All modules ▾]      ← as on the Board: ?q=, ?module=, Esc clears
 ─ Open 2 ─┬─ Closed 5 ────────────────────────────────────────────────────────
 ▌#11 Webhooks                         (escalated)
 ▌factory/11-webhooks   round 2   sec ✗  ux ✓  ui ✓  code ✓   +88 −4
  #12 Rate-limit login endpoint        (waiting on you)
  factory/12-rate-limit-login   round 2   sec ✓  ux ✓  ui ✓  code ✓   +126 −9
 each row links to /tasks/{id}/review · Closed: the Done column, rows without the state pill
+filter on: tab counts are the matching rows; the tab links keep q and module (?tab=closed&q=login);
+  a tab with none says "No reviews match. [Clear filter]" (keeps the tab); changes are announced
+  ("2 reviews match.")
 ```
 
 ### 8.6 Code

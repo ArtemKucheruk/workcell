@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { expectOfflineBanner, fetched, mockFetch, renderAt } from '../../test/render.jsx'
+import { optionLabels, pick as pickOption } from '../../test/select.js'
 
 const PROJECT = {
   id: 3, name: 'api', path: '/home/me/api', default_branch: 'main', workspace_id: 2, workspace: 'personal',
@@ -187,4 +188,165 @@ test('FE15, 046 FE11, FE12, FE13: the title; a 404 is not-found; a failed first 
   await advance(0)
   expect(listed()).toEqual(['#12 Task 12'])
   await expectOfflineBanner(responses, `GET ${BOARD}`, () => expect(listed()).toEqual(['#12 Task 12']))
+})
+
+// --- 117: the filter bar --------------------------------------------------------------
+
+const MODULES = '/api/projects/3/modules'
+const LISTED = {
+  modules: [{ id: 5, name: 'backend', description_md: '', counts: {} }, { id: 7, name: 'frontend', description_md: '', counts: {} }],
+  no_module: {},
+}
+const BACKEND = { id: 5, name: 'backend' }
+/** Open: 11 (login, backend), 12 (no module), 13 (login, frontend). Closed: 8 (login, backend), 9 (no module). */
+const FILTERABLE = board({
+  review: [
+    waiting(11, { title: 'Rate-limit login', module: BACKEND }),
+    waiting(12, { title: 'Dark mode', module: null }),
+    escalated(13, { title: 'Login copy', module: { id: 7, name: 'frontend' } }),
+  ],
+  done: [card(8, 'done', { title: 'Login form', module: BACKEND }), card(9, 'done', { title: 'Health', module: null })],
+})
+
+/** Renders `at` over `page`, with the modules listed unless `modules` is false; waits for the h1. */
+async function openFiltered(at, page = FILTERABLE, modules = true) {
+  const responses = { [`GET ${BOARD}`]: [200, page], ...(modules && { [`GET ${MODULES}`]: [200, LISTED] }) }
+  const fetch = mockFetch(responses)
+  const view = renderAt(at)
+  await screen.findByRole('heading', { level: 1 })
+  if (modules) await waitFor(() => expect(moduleFilter()).not.toBeNull())
+  return { fetch, responses, ...view }
+}
+const search = () => screen.getByRole('searchbox', { name: 'Filter by #id or title' })
+const typeIn = (value) => fireEvent.change(search(), { target: { value } })
+const moduleFilter = () => document.getElementById('task-filter-module')
+const tabNames = () => within(tabs()).getAllByRole('link').map((a) => a.textContent)
+const said = () => screen.getAllByRole('status').find((el) => el.className.includes('sr-only'))
+
+test('117 AC1, Q6: a labelled search field above the tabs; the Module select only when the project has modules', async () => {
+  const { unmount } = await openFiltered('/projects/3/reviews', FILTERABLE, false)
+  expect(search().getAttribute('type')).toBe('search')
+  expect(search().compareDocumentPosition(tabs()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(moduleFilter()).toBeNull()
+  unmount()
+  const { fetch } = await openFiltered('/projects/3/reviews')
+  expect(screen.getByRole('combobox', { name: 'Module' })).toBe(moduleFilter())
+  expect(optionLabels(moduleFilter())).toEqual(['All modules', 'No module', 'backend', 'frontend'])
+  expect(fetched(fetch).filter((u) => u === MODULES)).toHaveLength(1)
+})
+
+test('117 AC2: the text filter matches #id exactly, digits by id or title, and other text by title, ignoring case', async () => {
+  await openFiltered('/projects/3/reviews', FILTERABLE, false)
+  for (const [q, rows] of [
+    ['LOGIN', ['#13 Login copy', '#11 Rate-limit login']], ['#12', ['#12 Dark mode']], ['13', ['#13 Login copy']], ['#1', []],
+    ['  dark ', ['#12 Dark mode']], ['', ['#13 Login copy', '#11 Rate-limit login', '#12 Dark mode']],
+  ]) {
+    typeIn(q)
+    expect(listed()).toEqual(rows)
+  }
+})
+
+test('117 AC3: No module and a module filter the rows; text and module must both match', async () => {
+  await openFiltered('/projects/3/reviews')
+  pickOption(moduleFilter(), 'none')
+  expect(listed()).toEqual(['#12 Dark mode'])
+  pickOption(moduleFilter(), '5')
+  expect(listed()).toEqual(['#11 Rate-limit login'])
+  typeIn('login')
+  expect(listed()).toEqual(['#11 Rate-limit login'])
+  pickOption(moduleFilter(), '7')
+  expect(listed()).toEqual(['#13 Login copy'])
+})
+
+test('117 AC4: the filter replaces ?q= and ?module=, keeps ?tab=, and a loaded URL fills and applies it', async () => {
+  const { router, unmount } = await openFiltered('/projects/3/reviews?tab=closed')
+  typeIn('login')
+  expect(router.state.location.search).toBe('?tab=closed&q=login')
+  expect(router.state.historyAction).toBe('REPLACE')
+  pickOption(moduleFilter(), 'none')
+  expect(router.state.location.search).toBe('?tab=closed&q=login&module=none')
+  typeIn('')
+  pickOption(moduleFilter(), '')
+  expect(router.state.location.search).toBe('?tab=closed')
+  unmount()
+  await openFiltered('/projects/3/reviews?tab=closed&q=login&module=5')
+  expect(search().value).toBe('login')
+  expect(moduleFilter().textContent).toBe('backend')
+  expect(listed()).toEqual(['#8 Login form'])
+})
+
+test('117 AC5: the filter survives a poll', async () => {
+  vi.useFakeTimers()
+  const responses = { [`GET ${BOARD}`]: [200, FILTERABLE] }
+  const fetch = mockFetch(responses)
+  renderAt('/projects/3/reviews')
+  await advance(0)
+  typeIn('login')
+  expect(listed()).toEqual(['#13 Login copy', '#11 Rate-limit login'])
+  responses[`GET ${BOARD}`] = [200, { ...FILTERABLE, columns: { ...FILTERABLE.columns, review: [...FILTERABLE.columns.review, waiting(14, { title: 'Login audit' })] } }]
+  await advance(3000)
+  expect(loads(fetch)).toBe(2)
+  expect(search().value).toBe('login')
+  expect(listed()).toEqual(['#13 Login copy', '#11 Rate-limit login', '#14 Login audit'])
+})
+
+test('117 AC6: the Open and Closed tab counts show the matching rows while filtered', async () => {
+  await openFiltered('/projects/3/reviews')
+  expect(tabNames()).toEqual(['Open 3', 'Closed 2'])
+  typeIn('login')
+  expect(tabNames()).toEqual(['Open 2', 'Closed 1'])
+  pickOption(moduleFilter(), 'none')
+  expect(tabNames()).toEqual(['Open 0', 'Closed 0'])
+  typeIn('')
+  expect(tabNames()).toEqual(['Open 1', 'Closed 1'])
+})
+
+test('117 AC7: the tab links carry the filter, so switching tabs keeps it and the field', async () => {
+  const { router } = await openFiltered('/projects/3/reviews?q=login&module=5')
+  const nav = within(tabs())
+  expect(nav.getByRole('link', { name: /^Open/ }).getAttribute('href')).toBe('/projects/3/reviews?q=login&module=5')
+  expect(nav.getByRole('link', { name: /^Closed/ }).getAttribute('href')).toBe('/projects/3/reviews?tab=closed&q=login&module=5')
+  fireEvent.click(nav.getByRole('link', { name: /^Closed/ }))
+  await waitFor(() => expect(router.state.location.search).toBe('?tab=closed&q=login&module=5'))
+  expect(search().value).toBe('login')
+  expect(listed()).toEqual(['#8 Login form'])
+  typeIn('form')
+  fireEvent.click(nav.getByRole('link', { name: /^Open/ }))
+  await waitFor(() => expect(router.state.location.search).toBe('?q=form&module=5'))
+  expect(search().value).toBe('form')
+  expect(listed()).toEqual([])
+})
+
+test('117 AC8: no matching row says No reviews match. with Clear filter, which keeps the tab and focuses the field', async () => {
+  const { router } = await openFiltered('/projects/3/reviews?tab=closed&q=zzz&module=5')
+  expect(document.querySelector('main ul')).toBeNull()
+  expect(screen.getByText('No reviews match.')).toBeTruthy()
+  expect(screen.queryByText('No closed reviews yet.')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }))
+  expect(router.state.location.search).toBe('?tab=closed')
+  expect(search().value).toBe('')
+  expect(document.activeElement).toBe(search())
+  expect(listed()).toEqual(['#8 Login form', '#9 Health'])
+})
+
+test('117 AC9: Esc in the field clears it and ?q=, and the module filter stays', async () => {
+  const { router } = await openFiltered('/projects/3/reviews?q=login&module=5')
+  fireEvent.keyDown(search(), { key: 'Escape' })
+  expect(search().value).toBe('')
+  expect(router.state.location.search).toBe('?module=5')
+  expect(listed()).toEqual(['#11 Rate-limit login'])
+})
+
+test("117 AC10, Q4: a filter change announces the current tab's match count in a hidden status region; clearing empties it", async () => {
+  await openFiltered('/projects/3/reviews?tab=closed&q=log')
+  expect(said().textContent).toBe('')
+  typeIn('login')
+  await waitFor(() => expect(said().textContent).toBe('1 review matches.'))
+  typeIn('')
+  await waitFor(() => expect(said().textContent).toBe(''))
+  fireEvent.click(within(tabs()).getByRole('link', { name: /^Open/ }))
+  await waitFor(() => expect(tabNames()).toEqual(['Open 3', 'Closed 2']))
+  expect(said().textContent).toBe('')
+  typeIn('o')
+  await waitFor(() => expect(said().textContent).toBe('3 reviews match.'))
 })

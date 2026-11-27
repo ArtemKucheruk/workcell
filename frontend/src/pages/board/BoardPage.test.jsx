@@ -1275,3 +1275,199 @@ test('112 AC21: + New task has a Module select, No module then the modules; the 
   expect(select.textContent).toBe('No module') // reset for the next task
   expect(fetched(fetch).filter((u) => u === MODULES)).toHaveLength(1) // loaded once, never polled
 })
+
+// --- 117: the filter bar --------------------------------------------------------------
+
+const BACKEND = { id: 5, name: 'backend' }
+/** Backlog 1, 2, 12; In progress 7; Review 20; Done empty. Two cards say login, #20's title holds 12. */
+const FILTERABLE = {
+  backlog: [
+    card(1, 'backlog', { title: 'Login form', module: BACKEND }),
+    card(2, 'backlog', { title: 'Dark mode', module: null }),
+    card(12, 'backlog', { title: 'Export CSV', module: { id: 7, name: 'frontend' } }),
+  ],
+  in_progress: [card(7, 'in_progress', { title: 'Fix LOGIN redirect', position: 5, module: BACKEND })],
+  review: [card(20, 'review', { title: 'Task 120 cleanup', module: null })],
+}
+const WITH_MODULES = { [`GET ${MODULES}`]: [200, LISTED] }
+
+/** Renders `path` over `page`, with `more` responses; waits for the h1. */
+async function openAt(path, page, more = {}) {
+  const responses = { [`GET ${BOARD}`]: [200, page], ...more }
+  const fetch = mockFetch(responses)
+  const view = renderAt(path)
+  await screen.findByRole('heading', { level: 1 })
+  return { fetch, responses, ...view }
+}
+const search = () => screen.getByRole('searchbox', { name: 'Filter by #id or title' })
+const typeIn = (value) => fireEvent.change(search(), { target: { value } })
+const moduleFilter = () => document.getElementById('task-filter-module')
+/** The shown cards' ids, column by column. */
+const shownIds = () => [...document.querySelectorAll('main section li')].map((li) => Number(/^#(\d+)/.exec(li.querySelector('a').textContent)[1]))
+const headings = () => [...document.querySelectorAll('main section h2')].map((h) => h.textContent)
+
+test('117 AC1: a labelled search field under the header; the Module select only when the project has modules', async () => {
+  const { unmount } = await open(board(FILTERABLE))
+  expect(search().getAttribute('type')).toBe('search')
+  expect(header().contains(search())).toBe(false)
+  expect(moduleFilter()).toBeNull()
+  unmount()
+  await open(board(FILTERABLE), WITH_MODULES)
+  await waitFor(() => expect(moduleFilter()).not.toBeNull())
+  expect(screen.getByRole('combobox', { name: 'Module' })).toBe(moduleFilter())
+  expect(optionLabels(moduleFilter())).toEqual(['All modules', 'No module', 'backend', 'frontend'])
+  expect(moduleFilter().textContent).toBe('All modules')
+})
+
+test('117 AC2: the text filter matches #id exactly, digits by id or title, and other text by title, ignoring case and spaces', async () => {
+  await open(board(FILTERABLE))
+  for (const [q, ids] of [
+    ['login', [1, 7]], ['  LOGIN ', [1, 7]], ['12', [12, 20]], ['#12', [12]], ['1', [1, 20]], ['csv', [12]], ['', [1, 2, 12, 7, 20]],
+  ]) {
+    typeIn(q)
+    expect(shownIds()).toEqual(ids)
+  }
+})
+
+test('117 AC3: No module keeps cards without one, a module its own cards; text and module must both match', async () => {
+  const { router } = await open(board(FILTERABLE), WITH_MODULES)
+  await waitFor(() => expect(moduleFilter()).not.toBeNull())
+  pickOption(moduleFilter(), 'none')
+  expect(shownIds()).toEqual([2, 20])
+  pickOption(moduleFilter(), '5')
+  expect(shownIds()).toEqual([1, 7])
+  typeIn('form')
+  expect(shownIds()).toEqual([1])
+  pickOption(moduleFilter(), '7')
+  expect(shownIds()).toEqual([])
+  pickOption(moduleFilter(), '')
+  expect(shownIds()).toEqual([1])
+  expect(router.state.location.search).toBe('?q=form')
+})
+
+test('117 AC4: typing and picking replace ?q= and ?module=; empty values drop them; a loaded URL fills and applies both', async () => {
+  const { router, unmount } = await open(board(FILTERABLE), WITH_MODULES)
+  await waitFor(() => expect(moduleFilter()).not.toBeNull())
+  typeIn('login')
+  expect(router.state.location.search).toBe('?q=login')
+  expect(router.state.historyAction).toBe('REPLACE')
+  pickOption(moduleFilter(), 'none')
+  expect(router.state.location.search).toBe('?q=login&module=none')
+  pickOption(moduleFilter(), '5')
+  expect(router.state.location.search).toBe('?q=login&module=5')
+  typeIn('')
+  expect(router.state.location.search).toBe('?module=5')
+  expect(router.state.historyAction).toBe('REPLACE')
+  unmount()
+  await openAt('/projects/3?q=login&module=5', board(FILTERABLE), WITH_MODULES)
+  expect(search().value).toBe('login')
+  await waitFor(() => expect(moduleFilter().textContent).toBe('backend'))
+  expect(shownIds()).toEqual([1, 7])
+})
+
+test('117 AC5: the filter survives a poll: the field keeps its text and hidden cards stay hidden', async () => {
+  vi.useFakeTimers()
+  const responses = { [`GET ${BOARD}`]: [200, board(FILTERABLE)] }
+  const fetch = mockFetch(responses)
+  renderAt('/projects/3')
+  const advance = (ms) => act(() => vi.advanceTimersByTimeAsync(ms))
+  await advance(0)
+  typeIn('login')
+  expect(shownIds()).toEqual([1, 7])
+  responses[`GET ${BOARD}`] = [200, board({ ...FILTERABLE, review: [card(21, 'review', { title: 'Login copy' })] })]
+  await advance(3000)
+  expect(loads(fetch)).toBe(2)
+  expect(search().value).toBe('login')
+  expect(shownIds()).toEqual([1, 7, 21])
+})
+
+test('117 AC6: column counts show the matching cards while filtered, the full counts otherwise', async () => {
+  await open(board(FILTERABLE))
+  expect(headings()).toEqual(['Backlog 3', 'In progress 1', 'Review 1', 'Done 0'])
+  typeIn('login')
+  expect(headings()).toEqual(['Backlog 1', 'In progress 1', 'Review 0', 'Done 0'])
+  typeIn('')
+  expect(headings()).toEqual(['Backlog 3', 'In progress 1', 'Review 1', 'Done 0'])
+})
+
+test('117 AC8: nothing matching says No tasks match. with Clear filter, which drops q and module and focuses the field', async () => {
+  const { router } = await openAt('/projects/3?q=zzz&module=5', board(FILTERABLE), WITH_MODULES)
+  await waitFor(() => expect(moduleFilter()).not.toBeNull())
+  const line = screen.getByText('No tasks match.')
+  expect(line.compareDocumentPosition(column('Backlog')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  for (const label of ['Backlog', 'In progress', 'Review', 'Done']) expect(shown(column(label))).toBe(`${label} 0No tasks`)
+  fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }))
+  expect(router.state.location.search).toBe('')
+  expect(search().value).toBe('')
+  expect(document.activeElement).toBe(search())
+  expect(screen.queryByText('No tasks match.')).toBeNull()
+  expect(shownIds()).toEqual([1, 2, 12, 7, 20])
+  expect(column('Done').textContent).toBe('Done 0No tasks')
+})
+
+test('117 AC9: Esc in the field clears it and ?q=, and the module filter stays', async () => {
+  const { router } = await openAt('/projects/3?q=login&module=5', board(FILTERABLE), WITH_MODULES)
+  await waitFor(() => expect(moduleFilter().textContent).toBe('backend'))
+  fireEvent.keyDown(search(), { key: 'Escape' })
+  expect(search().value).toBe('')
+  expect(router.state.location.search).toBe('?module=5')
+  expect(shownIds()).toEqual([1, 7])
+})
+
+test('117 AC10: a filter change announces the match count in the status region; a load with a filter and clearing say nothing', async () => {
+  await openAt('/projects/3?q=login', board(FILTERABLE))
+  expect(screen.getAllByRole('status')).toHaveLength(1)
+  expect(status().textContent).toBe('')
+  typeIn('logi')
+  await waitFor(() => expect(status().textContent).toBe('2 tasks match.'))
+  typeIn('#12')
+  await waitFor(() => expect(status().textContent).toBe('1 task matches.'))
+  typeIn('zzz')
+  await waitFor(() => expect(status().textContent).toBe('0 tasks match.'))
+  typeIn('')
+  await waitFor(() => expect(status().textContent).toBe(''))
+})
+
+test('117 AC11: while filtered, Up and Down are disabled, a same-column drop does nothing, and other columns get the card at their full bottom', async () => {
+  const { fetch } = await openAt('/projects/3?q=login', board(FILTERABLE), {
+    'PATCH /api/tasks/7': OK(7, 'backlog'), 'PATCH /api/tasks/1': OK(1, 'review'),
+  })
+  for (const name of ['Up', 'Down']) {
+    const b = within(menuOf(1)).getByRole('button', { name, hidden: true })
+    expect(b.disabled).toBe(true)
+    expect(b.title).toBe('Clear the filter to reorder')
+  }
+  // a drop within Backlog: no line, no request
+  let source = start(1)
+  fireDrag('dragOver', column('Backlog'), { clientY: 0 })
+  expect(marked()).toEqual([])
+  fireDrag('drop', column('Backlog'), { clientY: 0 })
+  fireDrag('dragEnd', source)
+  await act(() => new Promise((resolve) => setTimeout(resolve, 20)))
+  expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0)
+  // a drop into Backlog from In progress, above the one shown card: the bottom of all three, after hidden #12 at 12
+  source = start(7)
+  fireDrag('dragOver', column('Backlog'), { clientY: 0 })
+  expect(marked()).toEqual([['#1 Login form', 'after']])
+  fireDrag('drop', column('Backlog'), { clientY: 0 })
+  fireDrag('dragEnd', source)
+  await waitFor(() => expect(loads(fetch)).toBe(2))
+  expect(sent(fetch, 'PATCH', '/api/tasks/7')).toEqual({ status: 'backlog', position: 13 })
+  // the menu's column items: the bottom of the full Review column, past hidden #20
+  pick(1, 'Review')
+  await waitFor(() => expect(loads(fetch)).toBe(3))
+  expect(sent(fetch, 'PATCH', '/api/tasks/1')).toEqual({ status: 'review', position: 21 })
+})
+
+test('117 AC12: with no filter, Up and Down stay enabled, Backlog keeps its add hint, and nothing says No tasks match.', async () => {
+  const { unmount } = await open(board({ backlog: BACKLOG }))
+  for (const name of ['Up', 'Down']) {
+    const b = within(menuOf(2)).getByRole('button', { name, hidden: true })
+    expect(b.disabled).toBe(false)
+    expect(b.title).toBe('')
+  }
+  expect(screen.queryByText('No tasks match.')).toBeNull()
+  unmount()
+  await open(board())
+  expect(column('Backlog').textContent).toContain('Add one with + New task')
+})

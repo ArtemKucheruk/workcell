@@ -1,5 +1,6 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
+import { listModules } from '../../api/modules.js'
 import { boardPage } from '../../api/pages.js'
 import { EscalatedPill, WaitingPill } from '../../components/Badge.jsx'
 import { Chip } from '../../components/Chip.jsx'
@@ -8,6 +9,7 @@ import { NotFound } from '../../components/NotFound.jsx'
 import { ProjectHeader } from '../../components/ProjectHeader.jsx'
 import { Block, ProjectHeaderSkeleton, Skeleton, TabsSkeleton } from '../../components/Skeleton.jsx'
 import { muted, tab } from '../../components/styles.js'
+import { NoMatch, TaskFilter, useTaskFilter } from '../../components/TaskFilter.jsx'
 import { usePoll } from '../../hooks/usePoll.js'
 
 /** Q3: escalated, then waiting on me, then the rest (a manual move has no stage); sort is stable, so each group keeps the column's order. */
@@ -78,6 +80,14 @@ export function ReviewsPage() {
   // Q6: the board's data, polled like the board; `tab` isn't a dep, so switching tabs fetches nothing
   const load = useCallback(() => boardPage(id), [id])
   const { data: page, error } = usePoll(load, 3000)
+  // 117 Q1: the Module filter's options, loaded once as on the board; a failure hides the select
+  const { data: modules } = usePoll(useCallback(() => listModules(id), [id]))
+  // 117 AC10, Q4: a change of the filter, not a poll or a tab switch, says how many rows of the tab match
+  const [said, setSaid] = useState('')
+  const filter = useTaskFilter(modules?.modules ?? [], (on, keep) => {
+    const n = (page?.columns[closed ? 'done' : 'review'] ?? []).filter(keep).length
+    setSaid(on ? `${n} review${n === 1 ? ' matches' : 's match'}.` : '')
+  })
   const name = page?.project.name
   useEffect(() => {
     if (name) document.title = `${name} · Reviews · Claude Factories`
@@ -86,26 +96,40 @@ export function ReviewsPage() {
   if (error?.status === 404) return <NotFound detail={error.message} />
   if (!page) return error ? <ErrorMessage error={error} /> : <ReviewsSkeleton />
   const { project, columns } = page
-  const open = [...(columns.review ?? [])].sort((a, b) => rank(a) - rank(b))
-  const done = columns.done ?? []
+  // 117 AC6: the tabs count, and list, only the matching rows
+  const open = (columns.review ?? []).filter(filter.keep).sort((a, b) => rank(a) - rank(b))
+  const done = (columns.done ?? []).filter(filter.keep)
   const rows = closed ? done : open
   const base = `/projects/${project.id}/reviews`
+  // 117 AC7: each tab's link carries the filter, so switching tabs keeps it
+  const keepFilter = new URLSearchParams()
+  for (const key of ['q', 'module']) if (params.get(key)) keepFilter.set(key, params.get(key))
+  const link = (more) => {
+    const query = new URLSearchParams([...more, ...keepFilter]).toString()
+    return query ? `${base}?${query}` : base
+  }
 
   return (
     <>
       <ProjectHeader project={project} factory={page.factory} />
       {error && <OfflineBanner />}
+      <p role="status" className="sr-only">
+        {said}
+      </p>
+      <TaskFilter filter={filter} modules={modules?.modules ?? []} />
       <nav aria-label="Reviews tabs" className="mb-4 flex gap-4 border-b border-line">
-        <Link to={base} aria-current={closed ? undefined : 'page'} className={tab}>
+        <Link to={link([])} aria-current={closed ? undefined : 'page'} className={tab}>
           {'Open '}
           <span className="tabular-nums">{open.length}</span>
         </Link>
-        <Link to={`${base}?tab=closed`} aria-current={closed ? 'page' : undefined} className={tab}>
+        <Link to={link([['tab', 'closed']])} aria-current={closed ? 'page' : undefined} className={tab}>
           {'Closed '}
           <span className="tabular-nums">{done.length}</span>
         </Link>
       </nav>
-      {rows.length ? (
+      {filter.on && !rows.length ? (
+        <NoMatch text="No reviews match." filter={filter} className="rounded-md border border-line px-4 py-8 justify-center" />
+      ) : rows.length ? (
         // the 1px gaps show the list's `line` background as dividers, which a row's border colors can't touch
         <ul className="grid gap-px overflow-hidden rounded-md border border-line bg-line">
           {rows.map((card) => (
