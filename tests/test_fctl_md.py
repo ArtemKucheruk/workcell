@@ -1,4 +1,4 @@
-"""029: the shipped src/claude_factories/fctl.md against the real CLI. A section is the markdown from a `##`
+"""029: the shipped src/workcell/fctl.md against the real CLI. A section is the markdown from a `##`
 heading to the next one, found from markdown-it's tokens, since heredoc examples can hold `##` lines."""
 
 import argparse
@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from claude_factories.cli.main import build_parser
-from claude_factories.lib.markdown import MD, render_with_headings
+from workcell.cli.main import build_parser
+from workcell.lib.markdown import MD, render_with_headings
 
 REPO = Path(__file__).resolve().parents[1]
-FCTL_MD = REPO / "src" / "claude_factories" / "fctl.md"
+FCTL_MD = REPO / "src" / "workcell" / "fctl.md"
 LABELS = ("**Synopsis**", "**Arguments and flags**", "**Stdin**", "**Output**", "**Exit codes and errors**",
           "**Called by**", "**Example**")
 STDIN = ("context set", "submit", "spec", "verdict", "comment", "decide", "task add")  # 060 BE7: task add
@@ -102,7 +102,7 @@ def test_stdin_commands_show_heredocs():  # AC11
 def test_install_and_environment():  # AC12, Q3
     install, env = SECTIONS["install"], SECTIONS["fctl-url-and-fctl-home"]
     assert "uv tool install" in install and "fctl setup" in install
-    for text in ("FCTL_URL", "http://127.0.0.1:4545", "FCTL_HOME", "~/.claude-factories"):
+    for text in ("FCTL_URL", "http://127.0.0.1:4545", "FCTL_HOME", "~/.workcell"):
         assert text in env, text
 
 
@@ -123,7 +123,7 @@ def test_claude_code_links_the_page():  # AC15
     start = doc.index("### 7.2 Commands")
     commands = doc[start:doc.index("### 7.3", start)]
     assert "/docs/fctl" in commands
-    assert "](../src/claude_factories/fctl.md)" in commands
+    assert "](../src/workcell/fctl.md)" in commands
 
 
 def test_claude_code_task_add_row():  # 060 BE8, 094 AC21, 112 AC26
@@ -203,7 +203,7 @@ def test_task_retry_docs(client):  # 106 AC10, AC11
 
 
 def test_task_retry_not_allowed_to_agents():  # 106 AC12
-    from claude_factories.handlers.runs import ALLOWED_TOOLS
+    from workcell.handlers.runs import ALLOWED_TOOLS
     assert not any("retry" in rule or "task" in rule for rule in ALLOWED_TOOLS)
 
 

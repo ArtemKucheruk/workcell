@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "src"
-CLI = SRC / "claude_factories" / "cli"
+CLI = SRC / "workcell" / "cli"
 
 
 def inside_cli(name: str) -> bool:
-    return name == "claude_factories.cli" or name.startswith("claude_factories.cli.")
+    return name == "workcell.cli" or name.startswith("workcell.cli.")
 
 
 def module_level_imports(node):
@@ -25,7 +25,7 @@ def module_level_imports(node):
 
 def violations(source: str, path: Path) -> list[str]:
     """`source`'s module-level imports, as if it lived at `path`, that are neither stdlib nor inside
-    claude_factories.cli, as `file:line name`."""
+    workcell.cli, as `file:line name`."""
     package = ".".join(path.relative_to(SRC).parent.parts)  # also right for __init__.py
     bad = []
     for node in module_level_imports(ast.parse(source)):
@@ -38,18 +38,18 @@ def violations(source: str, path: Path) -> list[str]:
     return bad
 
 
-def test_cli_imports_only_stdlib():  # AC12 (001 AC3, tightened to claude_factories.cli.*)
+def test_cli_imports_only_stdlib():  # AC12 (001 AC3, tightened to workcell.cli.*)
     code = (
-        "import sys; before = set(sys.modules); import claude_factories.cli.main; "
+        "import sys; before = set(sys.modules); import workcell.cli.main; "
         "print('\\n'.join(sorted(set(sys.modules) - before)))"
     )
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     added = r.stdout.split()
-    assert "claude_factories.cli.main" in added
+    assert "workcell.cli.main" in added
     bad = [
         m
         for m in added
-        if m.split(".")[0] not in sys.stdlib_module_names and m != "claude_factories" and not inside_cli(m)
+        if m.split(".")[0] not in sys.stdlib_module_names and m != "workcell" and not inside_cli(m)
     ]
     assert bad == []
 
@@ -63,7 +63,7 @@ def test_cli_modules_import_only_stdlib_or_cli():  # AC13
 @pytest.mark.parametrize("source, flagged", [
     ("import fastapi\n", True),
     ("from .. import app\n", True),
-    ("from claude_factories import db\n", True),
+    ("from workcell import db\n", True),
     ("def serve():\n    import uvicorn\n", False),
     ("import os.path\nfrom urllib import parse\n", False),
     ("from .commands.agent import REVIEWERS\nfrom . import client\n", False),

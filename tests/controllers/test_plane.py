@@ -9,7 +9,7 @@ import pytest
 from conftest import PLANE_KEY, plane_item, sql
 from controllers.test_reviews import task_with_rounds
 
-from claude_factories.handlers import plane as handler
+from workcell.handlers import plane as handler
 
 H = {"X-Requested-By": "fctl"}
 BASE = "/api/v1/workspaces/acme/projects/p-1/"
@@ -136,7 +136,7 @@ def test_sync_holds_no_lock_during_http(client, project, plane, monkeypatch):  #
     real = handler.Plane.items
 
     def items(self, *args):
-        from claude_factories import db
+        from workcell import db
         conn = db.connect()
         conn.execute("PRAGMA busy_timeout = 100")
         conn.execute("BEGIN IMMEDIATE")  # "database is locked" if sync held the write lock now
@@ -265,7 +265,7 @@ def test_docs():  # AC21
     assert "**Plane** (109)" in ui and "`plane_warning`" in ui
     mvp = (root / "docs/MVP.md").read_text()
     assert "Plane sync (109) is the one outbound call" in mvp and "- Plane sync (109): project Settings'" in mvp
-    assert "Approved, but Plane wasn't updated" in (root / "src/claude_factories/fctl.md").read_text()
+    assert "Approved, but Plane wasn't updated" in (root / "src/workcell/fctl.md").read_text()
 
 
 # --- The key is a secret (AC16) ------------------------------------------------------------------

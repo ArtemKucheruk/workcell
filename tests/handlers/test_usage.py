@@ -8,13 +8,13 @@ from types import SimpleNamespace
 import pytest
 from conftest import sql
 
-from claude_factories import db
-from claude_factories.domain.errors import Invalid
-from claude_factories.handlers import runs
-from claude_factories.handlers.usage import accounts_usage, label, stats, usage
-from claude_factories.repositories.claude_accounts import ClaudeAccountsRepo
-from claude_factories.repositories.usage import UsageRepo
-from claude_factories.server.deps import transaction
+from workcell import db
+from workcell.domain.errors import Invalid
+from workcell.handlers import runs
+from workcell.handlers.usage import accounts_usage, label, stats, usage
+from workcell.repositories.claude_accounts import ClaudeAccountsRepo
+from workcell.repositories.usage import UsageRepo
+from workcell.server.deps import transaction
 
 OLD = "2026-01-01T00:00:00Z"
 TODAY = date(2026, 11, 13)

@@ -5,8 +5,8 @@ from contextlib import closing
 
 import pytest
 
-from claude_factories import config, db
-from claude_factories.repositories.tasks import TasksRepo
+from workcell import config, db
+from workcell.repositories.tasks import TasksRepo
 
 H = {"X-Requested-By": "fctl"}
 ROUND = {"base_sha": "abc1234", "patch": "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"}

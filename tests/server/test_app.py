@@ -8,8 +8,8 @@ from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from claude_factories.domain.errors import Conflict, Failed, Invalid, NotFound, TooLarge
-from claude_factories.server.app import create_app
+from workcell.domain.errors import Conflict, Failed, Invalid, NotFound, TooLarge
+from workcell.server.app import create_app
 
 HOST_ERROR = {"detail": "Host must be 127.0.0.1 or localhost"}
 HEADER_ERROR = {"detail": "X-Requested-By: fctl header required"}
@@ -84,7 +84,7 @@ def test_moved_routes_served_from_controllers():  # 034 AC7, 035 AC1
                for r in routes(create_app().routes) for m in getattr(r, "methods", ())}
     for key in [("GET", "/api/workspaces"), ("POST", "/api/projects/connect"), ("GET", "/api/projects"),
                 ("POST", "/api/projects/{project_id}/factory"), *MOVED_035]:
-        assert modules[key].startswith("claude_factories.controllers."), key
+        assert modules[key].startswith("workcell.controllers."), key
 
 
 @pytest.mark.parametrize("error, status, detail", [
@@ -132,7 +132,7 @@ def test_035_response_models_from_dto():  # 035 AC2
         assert model is not None, key
         classes = re.findall(r"[\w.]+\.[A-Z]\w*", repr(model))  # list[…], unions, and <class '…'> alike
         assert classes, (key, model)
-        assert all(c.startswith("claude_factories.dto.") for c in classes), (key, model)
+        assert all(c.startswith("workcell.dto.") for c in classes), (key, model)
     for key in TEXT_035:  # Q6: text, no model
         assert found[key].response_model is None, key
 
@@ -144,11 +144,11 @@ def test_every_route_from_controllers():  # 036 AC3, 026 AC2
     found = [r for r in routes(create_app().routes) if isinstance(r, APIRoute)]
     assert found
     for r in found:
-        assert r.endpoint.__module__.startswith("claude_factories.controllers."), (r.path, r.endpoint.__module__)
+        assert r.endpoint.__module__.startswith("workcell.controllers."), (r.path, r.endpoint.__module__)
         assert r.path.startswith("/api/"), r.path
     modules = {(m, r.path): r.endpoint.__module__ for r in found for m in r.methods}
     for key in [*RUN_ROUTES, ("POST", "/api/tasks/{task_id}/request-changes")]:
-        assert modules[key].startswith("claude_factories.controllers."), key
+        assert modules[key].startswith("workcell.controllers."), key
 
 
 # --- 026: the Jinja pages and their form posts are gone ---------------------------------

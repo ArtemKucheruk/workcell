@@ -51,7 +51,7 @@ test('030 AC25: fetches the transcript once and shows its header: label, run, st
   )
   await act(() => vi.advanceTimersByTimeAsync(10000))
   expect(fetched(fetch).filter((url) => url.startsWith('/api/transcripts'))).toEqual([URL])
-  await waitFor(() => expect(document.title).toBe('builder-12 · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('builder-12 · Workcell'))
 })
 
 test('047 FE5: the breadcrumb reads personal › api › #12 › builder-12, #12 links to the task, and no Task #12 link is left', async () => {

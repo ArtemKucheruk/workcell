@@ -72,15 +72,15 @@ test('FE1 (AC17, 029 AC21): the sidebar holds the app name, the workspace area, 
     const badge = await sidebar().findByRole('link', { name: 'Claude: Pro ✓' })
     const workspace = await sidebar().findByRole('combobox', { name: 'Workspace' })
     const link = (name) => sidebar().getByRole('link', { name })
-    expect(link('Claude Factories').getAttribute('href')).toBe('/')
+    expect(link('Workcell').getAttribute('href')).toBe('/')
     expect(link('Dashboard').getAttribute('href')).toBe('/')
     expect(link('fctl reference').getAttribute('href')).toBe('/docs/fctl')
-    const order = [link('Claude Factories'), workspace, link('Dashboard'), link('fctl reference'), badge]
+    const order = [link('Workcell'), workspace, link('Dashboard'), link('fctl reference'), badge]
     for (let i = 1; i < order.length; i++) {
       expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     }
     // the old top header is gone: these links are only in the sidebar
-    for (const name of ['Claude Factories', 'Dashboard', 'fctl reference']) {
+    for (const name of ['Workcell', 'Dashboard', 'fctl reference']) {
       expect(screen.getAllByRole('link', { name })).toEqual([link(name)])
     }
     expect(screen.queryByRole('banner')).toBeNull()
@@ -230,7 +230,7 @@ test('FE17: Menu opens a <dialog> drawer through showModal, holding the sidebar;
   expect(dialog.tagName).toBe('DIALOG')
   const drawer = within(within(dialog).getByRole('navigation', { name: 'Sidebar' }))
   expect(await drawer.findByRole('combobox', { name: 'Workspace' })).toBeTruthy()
-  expect(drawer.getByRole('link', { name: 'Claude Factories' }).getAttribute('href')).toBe('/')
+  expect(drawer.getByRole('link', { name: 'Workcell' }).getAttribute('href')).toBe('/')
   expect(drawer.getByRole('link', { name: 'fctl reference' }).getAttribute('href')).toBe('/docs/fctl')
 })
 

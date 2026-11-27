@@ -1,4 +1,4 @@
-# Claude Factories — Data model & API
+# Workcell — Data model & API
 
 Part of the [MVP design](MVP.md). Section numbers continue from it.
 
@@ -1046,7 +1046,7 @@ POST /api/auth/login/code                                         (Settings: Sub
 GET  /api/auth/accounts                                           (Settings: the list, loaded once)
 ← 200 [{"id":1,"config_dir":"/home/me/.claude","active":true,"signed_in":true,
         "auth_method":"claude.ai","plan":"pro","email":"artem@example.com"},
-       {"id":3,"config_dir":"/home/me/.claude-factories/claude-accounts/k3j2h1x9","active":false,
+       {"id":3,"config_dir":"/home/me/.workcell/claude-accounts/k3j2h1x9","active":false,
         "signed_in":false,"auth_method":null,"plan":null,"email":null}]
   # every account by id, [] with none; each checked afresh with `claude auth status` in its own
   #   config dir, uncached; signed_in, auth_method, plan, and email follow GET /api/auth's rules for

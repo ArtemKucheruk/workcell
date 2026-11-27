@@ -9,7 +9,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SRC = REPO / "src"
-PKG = SRC / "claude_factories"
+PKG = SRC / "workcell"
 ALLOWED = {  # §4.7's table: what each layer may import besides itself
     "server": {"controllers", "repositories", "adapters", "db", "config", "domain"},
     "controllers": {"handlers", "dto", "domain", "lib", "server.deps"},  # 036 Q3: lib for the markdown filter
@@ -36,7 +36,7 @@ def layer(path: Path) -> str:
 
 def imported(tree: ast.AST, path: Path) -> list[tuple[int, str]]:
     """(line, absolute name) of every import anywhere in the module, function bodies included (Q3).
-    `from .. import db` is claude_factories.db."""
+    `from .. import db` is workcell.db."""
     package = ".".join(path.relative_to(SRC).parent.parts)  # also right for __init__.py
     found = []
     for node in ast.walk(tree):
@@ -51,8 +51,8 @@ def imported(tree: ast.AST, path: Path) -> list[tuple[int, str]]:
 def wrong_edges(tree: ast.AST, path: Path) -> list[str]:
     allowed = ALLOWED.get(layer(path), set()) | {layer(path)}
     return [f"{path.relative_to(PKG)}:{line} imports {name}" for line, name in imported(tree, path)
-            if name.startswith("claude_factories.")
-            and not any(f"{name}.".startswith(f"claude_factories.{a}.") for a in allowed)]
+            if name.startswith("workcell.")
+            and not any(f"{name}.".startswith(f"workcell.{a}.") for a in allowed)]
 
 
 def fastapi_outside(tree: ast.AST, path: Path) -> list[str]:
@@ -157,7 +157,7 @@ def test_jinja_pages_gone():  # 026 AC1
 
 def test_app_py_gone():  # 036 AC1
     assert not (PKG / "app.py").exists()
-    assert importlib.util.find_spec("claude_factories.app") is None
+    assert importlib.util.find_spec("workcell.app") is None
 
 
 # --- The checks, on samples ----------------------------------------------------------
@@ -171,7 +171,7 @@ def check(checker, where: str, source: str) -> bool:
 @pytest.mark.parametrize("where, source, flagged", [
     ("handlers", "from ..controllers import projects\n", True),
     ("repositories", "from ..handlers import factory\n", True),
-    ("domain", "from claude_factories.repositories import projects\n", True),
+    ("domain", "from workcell.repositories import projects\n", True),
     ("lib", "from .. import db\n", True),
     ("controllers", "from ..server import app\n", True),
     ("handlers", "from ..repositories.projects import ProjectsRepo\n", False),

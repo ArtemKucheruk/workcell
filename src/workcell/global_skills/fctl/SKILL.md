@@ -1,11 +1,11 @@
 ---
 name: fctl
-description: How to work with Claude Factories through its fctl CLI. Use whenever the user mentions fctl, Claude Factories, the factory, the board, the backlog, a factory task or run (e.g. "#12", "run 12", "what's in review"), or asks to connect a repo, add/list/inspect tasks, start or follow a run, read a round's diff or verdicts, approve or request changes, block/unblock tasks, set project context, export/import a task, or run the app (fctl serve, fctl service).
+description: How to work with Workcell through its fctl CLI. Use whenever the user mentions fctl, Workcell, the factory, the board, the backlog, a factory task or run (e.g. "#12", "run 12", "what's in review"), or asks to connect a repo, add/list/inspect tasks, start or follow a run, read a round's diff or verdicts, approve or request changes, block/unblock tasks, set project context, export/import a task, or run the app (fctl serve, fctl service).
 ---
 
-# fctl: working with Claude Factories
+# fctl: working with Workcell
 
-Claude Factories is a local app that runs a software factory on a repo's tasks: spec → build →
+Workcell is a local app that runs a software factory on a repo's tasks: spec → build →
 four agent reviews → approver → the user's review. All of its state (workspaces, projects, tasks,
 specs, rounds, verdicts, decisions, runs) lives in the app's database behind its backend. `fctl` is
 the command line for it: most commands are a small HTTP client of the backend at `FCTL_URL`
@@ -296,5 +296,5 @@ new round, so submit once per round. Only the orchestrator runs `fctl stage`. Ed
 `.claude/` are denied in a run. If you start a server, use `$FCTL_BACKEND_PORT` /
 `$FCTL_FRONTEND_PORT` and a temp `FCTL_HOME`, never the user's.
 
-Inside the claude-factories checkout itself, `docs/fctl_docs/` has the full agent docs and
-`src/claude_factories/fctl.md` the full reference.
+Inside the workcell checkout itself, `docs/fctl_docs/` has the full agent docs and
+`src/workcell/fctl.md` the full reference.

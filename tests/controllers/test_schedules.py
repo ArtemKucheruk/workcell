@@ -8,8 +8,8 @@ from conftest import sql
 from controllers.test_automation_runs import add_factory, auto, automation_running  # noqa: F401
 from controllers.test_runs import H, OLD, fake, project  # noqa: F401
 
-from claude_factories.lib.cron import next_after
-from claude_factories.handlers.schedules import iso
+from workcell.lib.cron import next_after
+from workcell.handlers.schedules import iso
 
 REPO = Path(__file__).resolve().parents[2]
 

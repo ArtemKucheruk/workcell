@@ -104,7 +104,7 @@ export function CodePage() {
   const { data: board } = usePoll(useCallback(() => boardPage(id), [id]))
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${path ? `${path} · ` : ''}${name} · Code · Claude Factories`
+    if (name) document.title = `${path ? `${path} · ` : ''}${name} · Code · Workcell`
   }, [name, path])
 
   // Q8: a 404 (unknown project, or a path the backend refuses) is not-found; other errors replace the page

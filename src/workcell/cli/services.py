@@ -17,8 +17,13 @@ from .output import fail
 
 NAMES = ("backend", "frontend")
 HOST = "127.0.0.1"  # 098: never 0.0.0.0 (AC9)
-LABELS = {name: f"com.claude-factories.{name}" for name in NAMES}
-UNITS = {name: f"claude-factories-{name}.service" for name in NAMES}
+LABELS = {name: f"com.workcell.{name}" for name in NAMES}
+UNITS = {name: f"workcell-{name}.service" for name in NAMES}
+# 116 Q4: the names before the rename, read only to remove the old services (AC11) and move the data dir (Q2)
+OLD_LABELS = {name: f"com.claude-factories.{name}" for name in NAMES}
+OLD_UNITS = {name: f"claude-factories-{name}.service" for name in NAMES}
+HOME = ".workcell"
+OLD_HOME = ".claude-factories"
 UNSUPPORTED = ("fctl service runs on macOS (launchd) or Linux (systemd --user); in Docker use docker compose up -d"
                " / docker compose restart")
 EDITABLE = "fctl service needs an editable install: uv tool install --editable <your checkout>"
@@ -53,7 +58,7 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 UNIT = """[Unit]
-Description=Claude Factories {name}
+Description=Workcell {name}
 
 [Service]
 ExecStart={exec_start}
@@ -78,7 +83,7 @@ def platform() -> str:
 def repo_path() -> Path:
     """AC4: the checkout the editable install runs, from its PEP 610 direct_url.json, so any cwd works."""
     try:
-        info = json.loads(metadata.distribution("claude-factories").read_text("direct_url.json") or "")
+        info = json.loads(metadata.distribution("workcell").read_text("direct_url.json") or "")
     except (metadata.PackageNotFoundError, ValueError):
         fail(EDITABLE)
     url = info.get("url", "") if isinstance(info, dict) else ""
@@ -89,7 +94,27 @@ def repo_path() -> Path:
 
 def home() -> Path:
     """config.data_dir's rule, repeated: cli/ can't import config (tests/cli/test_architecture.py)."""
-    return Path(os.environ.get("FCTL_HOME") or Path.home() / ".claude-factories")
+    return Path(os.environ.get("FCTL_HOME") or Path.home() / HOME)
+
+
+def migrate_home():
+    """116 Q2: config.migrate_home, repeated for `fctl service install`, which writes service.json and logs
+    before the backend ever starts. FCTL_HOME set → nothing; a real old dir and no new one → rename, then
+    link the old path to the new one (Q1); both → warn and use the new one (AC8)."""
+    if os.environ.get("FCTL_HOME"):
+        return
+    old, new = Path.home() / OLD_HOME, Path.home() / HOME
+    if old.is_symlink() or not old.is_dir():
+        return
+    if os.path.lexists(new):
+        print(f"warning: both {old} and {new} exist; using {new}", file=sys.stderr)
+        return
+    os.rename(old, new)
+    try:
+        old.symlink_to(new)
+    except OSError as e:
+        print(f"warning: moved {old} to {new}, but can't link the old path to it: {e.strerror}", file=sys.stderr)
+    print(f"Moved {old} to {new}")
 
 
 def log_path(name: str) -> Path:
@@ -250,6 +275,28 @@ def remove_units(plat: str, names: tuple):
             systemctl("disable", "--now", UNITS[name], check=False)
         service_file(plat, name).unlink(missing_ok=True)
     if plat == "linux":
+        systemctl("daemon-reload")
+
+
+def remove_old_units(plat: str):
+    """116 AC11: stop and delete the services installed under the old names, so two backends never fight
+    over the port. Only where the old file exists; none → no old-name command runs. lexists, so a dangling
+    symlinked unit is removed too."""
+    removed = False
+    for name in NAMES:
+        if plat == "darwin":
+            path = Path.home() / "Library" / "LaunchAgents" / f"{OLD_LABELS[name]}.plist"
+            if os.path.lexists(path):
+                call("launchctl", "bootout", f"{domain()}/{OLD_LABELS[name]}", check=False)
+        else:
+            path = Path.home() / ".config" / "systemd" / "user" / OLD_UNITS[name]
+            if os.path.lexists(path):
+                systemctl("disable", "--now", OLD_UNITS[name], check=False)
+        if os.path.lexists(path):
+            path.unlink()
+            removed = True
+            print(f"Removed the old service {path}")
+    if removed and plat == "linux":
         systemctl("daemon-reload")
 
 

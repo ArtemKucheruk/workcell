@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 from conftest import ORIGINAL_PATH, commit, git, sql, write, wt_calls
 
-from claude_factories.adapters import git as git_adapter
-from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.adapters.git import WT_MISSING, SubprocessGit
-from claude_factories.lib.slug import slug
-from claude_factories.server.deps import get_claude, get_git
+from workcell.adapters import git as git_adapter
+from workcell.adapters.claude import SubprocessClaude
+from workcell.adapters.git import WT_MISSING, SubprocessGit
+from workcell.lib.slug import slug
+from workcell.server.deps import get_claude, get_git
 
 H = {"X-Requested-By": "fctl"}
 OLD = "2026-01-01T00:00:00Z"

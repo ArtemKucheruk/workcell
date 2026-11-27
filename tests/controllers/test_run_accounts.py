@@ -15,12 +15,12 @@ from controllers.test_run_control import NOTE
 from controllers.test_runs import H, OLD, add_task, fake, project, task_row, wait  # noqa: F401
 from handlers.test_transcripts import MAIN, SID
 
-from claude_factories.adapters.claude import SubprocessClaude
-from claude_factories.handlers import runs as runs_handler
-from claude_factories.handlers.transcripts import collect
-from claude_factories.lib.transcript import folder_name
-from claude_factories.repositories.usage import UsageRepo
-from claude_factories.server.deps import get_claude, transaction
+from workcell.adapters.claude import SubprocessClaude
+from workcell.handlers import runs as runs_handler
+from workcell.handlers.transcripts import collect
+from workcell.lib.transcript import folder_name
+from workcell.repositories.usage import UsageRepo
+from workcell.server.deps import get_claude, transaction
 
 
 class ByDir(SubprocessClaude):

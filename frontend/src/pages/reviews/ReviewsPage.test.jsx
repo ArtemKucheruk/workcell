@@ -165,7 +165,7 @@ test('FE14: an empty Open and an empty Closed say so', async () => {
 
 test('FE15, 046 FE11, FE12, FE13: the title; a 404 is not-found; a failed first load is the alert alone; a failed poll keeps the list under the offline banner', async () => {
   const { unmount } = await open(board())
-  await waitFor(() => expect(document.title).toBe('api · Reviews · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('api · Reviews · Workcell'))
   unmount()
 
   mockFetch({ 'GET /api/pages/projects/99': [404, { detail: 'Project #99 not found' }] })

@@ -3,7 +3,7 @@
 Every `fctl` command, grouped by who uses it. Each entry: synopsis, what it calls, stdin, output,
 the errors you will meet, and who runs it. Errors every command can print (`can't reach`, `403`,
 `not inside a git repository`) are in [troubleshooting.md](troubleshooting.md). The exhaustive
-reference is [`src/claude_factories/fctl.md`](../../src/claude_factories/fctl.md).
+reference is [`src/workcell/fctl.md`](../../src/workcell/fctl.md).
 
 Exit codes for all commands: `0` success; `1` failure, one `fctl: <reason>` line on stderr
 (`fctl: <status> <detail>` when the app refused the call); `2` usage error from argparse (unknown
@@ -488,11 +488,11 @@ it made. `POST /api/projects/{id}/import`.
 
 Operator commands. No agent in a run uses them, and an interactive session doesn't start or stop
 the user's app on its own: ask first. Full details in
-[`fctl.md`](../../src/claude_factories/fctl.md).
+[`fctl.md`](../../src/workcell/fctl.md).
 
 | Command | What it does | Notes |
 |---|---|---|
-| `fctl serve [--host 127.0.0.1] [--port 4545]` | Runs the backend in the foreground. Prints `Claude Factories → http://127.0.0.1:4545 (data: …)`. | Exit `3` if it can't bind. Stopping it stops every run. `--host 0.0.0.0` is only for the container. |
+| `fctl serve [--host 127.0.0.1] [--port 4545]` | Runs the backend in the foreground. Prints `Workcell → http://127.0.0.1:4545 (data: …)`. | Exit `3` if it can't bind. Stopping it stops every run. `--host 0.0.0.0` is only for the container. |
 | `fctl setup` | Writes `~/.claude/skills/factory-connect/SKILL.md`, `factory-submit/SKILL.md`, and `fctl/SKILL.md`. No HTTP. | Always `~/.claude`, even with `CLAUDE_CONFIG_DIR`. |
 | `fctl seed` | Fills an **empty** `FCTL_HOME` with demo workspaces, projects, tasks, and runs. No HTTP. | `FCTL_HOME has data; seed an empty one`. Always with a temp `FCTL_HOME`. |
 | `fctl service install [--backend-port 4545] [--frontend-port 3000]` | Installs the backend and frontend as launchd / `systemd --user` services. | Needs an editable install. |

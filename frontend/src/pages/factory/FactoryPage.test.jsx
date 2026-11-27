@@ -108,7 +108,7 @@ test('FE8: a wide route that fetches GET /api/factories/7 once, never polled, be
   expect(screen.getByRole('heading', { level: 1, name: 'default' })).toBeTruthy()
   await act(() => vi.advanceTimersByTimeAsync(10_000))
   expect(fetched(fetch).filter((url) => url === URL)).toHaveLength(1)
-  expect(document.title).toBe('default · api-server · Claude Factories')
+  expect(document.title).toBe('default · api-server · Workcell')
   expect(container.querySelector('main').className).not.toContain('max-w-6xl')
 })
 
@@ -121,7 +121,7 @@ test('FE8: a 404, or a factory of another project (Q13), is the not-found page; 
     const { unmount } = renderAt('/projects/3/factories/7')
     expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeTruthy()
     expect(document.querySelector('.react-flow')).toBeNull()
-    expect(document.title).toBe('Not found · Claude Factories')
+    expect(document.title).toBe('Not found · Workcell')
     unmount()
   }
   mockFetch({ [`GET ${URL}`]: [500, { detail: 'boom' }] })

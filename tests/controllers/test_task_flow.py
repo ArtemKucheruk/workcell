@@ -9,7 +9,7 @@ from controllers.test_pages_api import (add_comment, add_decision, add_event, ad
 from controllers.test_runs import H, add_task, fake, project  # noqa: F401
 from controllers.test_transcripts import add_transcript
 
-from claude_factories.handlers.factories import default_graph
+from workcell.handlers.factories import default_graph
 
 LATER = "2026-01-05T00:00:00Z"
 DEFAULT = json.loads(default_graph().model_dump_json())

@@ -55,7 +55,7 @@ test('FE1: /agents fetches the agents view-model and shows h1 Agents, h2s Runnin
   expect(screen.getAllByRole('heading').filter((h) => h.closest('main')).map((h) => [h.tagName, h.textContent])).toEqual([
     ['H1', 'Agents'], ['H2', 'Running'], ['H2', 'Recent'],
   ])
-  await waitFor(() => expect(document.title).toBe('Agents · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('Agents · Workcell'))
   expect(screen.getByRole('main').className).toMatch(cls('max-w-6xl'))
 })
 

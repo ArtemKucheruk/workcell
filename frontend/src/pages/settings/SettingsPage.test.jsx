@@ -15,7 +15,7 @@ const ONE = {
 }
 const TWO = {
   id: 2,
-  config_dir: '/home/me/.claude-factories/claude-accounts/k3j2h1x9',
+  config_dir: '/home/me/.workcell/claude-accounts/k3j2h1x9',
   active: false,
   signed_in: false,
   auth_method: null,
@@ -24,7 +24,7 @@ const TWO = {
 }
 const THREE = {
   id: 3,
-  config_dir: '/home/me/.claude-factories/claude-accounts/p9q8r7s6',
+  config_dir: '/home/me/.workcell/claude-accounts/p9q8r7s6',
   active: false,
   signed_in: true,
   auth_method: 'claude.ai',
@@ -85,7 +85,7 @@ async function startLogin(button) {
 test('FE1: the list loads once, one item per account in order, with its email, pill, plan, method, and folder', async () => {
   const { fetch, section } = await open([ONE, TWO])
   expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeTruthy()
-  expect(document.title).toBe('Settings · Claude Factories')
+  expect(document.title).toBe('Settings · Workcell')
   expect(calls(fetch, ACCOUNTS)).toHaveLength(1)
   const [one, two] = items(section)
   expect(items(section)).toHaveLength(2)

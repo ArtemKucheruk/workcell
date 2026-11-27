@@ -1,4 +1,4 @@
-from claude_factories.domain.enums import STAGE_STATUS, Reviewer, Stage, Status
+from workcell.domain.enums import STAGE_STATUS, Reviewer, Stage, Status
 
 
 def test_enums():  # 034 AC15

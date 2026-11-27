@@ -101,7 +101,7 @@ export function TranscriptPage() {
   const showAll = useCallback(() => setFull(true), [])
   const label = t && agentLabel(t)
   useEffect(() => {
-    if (label) document.title = `${label} · Claude Factories`
+    if (label) document.title = `${label} · Workcell`
   }, [label])
 
   if (error?.status === 404) return <NotFound detail={error.message} />

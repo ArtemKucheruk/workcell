@@ -1,7 +1,7 @@
 from controllers.test_agents_page import AGENTS, AGENTS_LOG, MALFORMED_LOG
 from controllers.test_run_control import FIXTURE_ITEMS, FIXTURE_LOG
 
-from claude_factories.lib.run_log import log_items, run_agents
+from workcell.lib.run_log import log_items, run_agents
 
 
 def test_log_items_without_the_app():  # 036 AC7

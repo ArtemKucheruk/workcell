@@ -175,7 +175,7 @@ export function AgentsPage() {
   const { data: page, error } = usePoll(load, 3000)
   const [stopError, setStopError] = useState(null)
   useEffect(() => {
-    document.title = 'Agents · Claude Factories'
+    document.title = 'Agents · Workcell'
   }, [])
 
   if (error?.status === 404) return <NotFound detail={error.message} />

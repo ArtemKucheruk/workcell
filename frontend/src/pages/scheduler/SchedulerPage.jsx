@@ -280,7 +280,7 @@ function Scheduler({ id }) {
   const pop = useRef(null)
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Scheduler · Claude Factories`
+    if (name) document.title = `${name} · Scheduler · Workcell`
   }, [name])
 
   const missing = [pageError, factoriesError, error].find((e) => e?.status === 404)

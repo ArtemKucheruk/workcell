@@ -89,7 +89,7 @@ test('AC1, FE33: the landing fetches once with no query; the header is the proje
   // FE12: the Branch select, not the old `Branch main` text, follows the factory state
   const branch = within(header).getByRole('combobox', { name: 'Branch' })
   expect(within(header).getByText('Factory: ready ✓').compareDocumentPosition(branch) & FOLLOWING).toBeTruthy()
-  await waitFor(() => expect(document.title).toBe('api · Code · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('api · Code · Workcell'))
   await new Promise((r) => setTimeout(r, 50)) // Q1: no polling, so nothing more arrives
   expect(loads(fetch)).toEqual([API])
   expect(fetched(fetch).filter((url) => url === BOARD)).toHaveLength(1)
@@ -273,7 +273,7 @@ test('FE10: an empty ?branch= fetches the code view-model with no query', async 
 test('AC3: ?path= is sent encoded and titles the page; an empty ?path= is the landing with no query', async () => {
   const { fetch, unmount } = await openFile('src/a.py', file('src/a.py', text('x = 1\n'), 'py'))
   expect(loads(fetch)).toEqual(['/api/pages/projects/3/code?path=src%2Fa.py'])
-  await waitFor(() => expect(document.title).toBe('src/a.py · api · Code · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('src/a.py · api · Code · Workcell'))
   unmount()
   const empty = await open({ [`GET ${API}`]: [200, landing()] }, '/projects/3/code?path=')
   expect(loads(empty.fetch)).toEqual([API])

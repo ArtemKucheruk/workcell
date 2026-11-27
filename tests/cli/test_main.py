@@ -11,10 +11,10 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from claude_factories import config, db
-from claude_factories.cli.main import main
-from claude_factories.repositories.workspaces import WorkspacesRepo
-from claude_factories.server.app import create_app
+from workcell import config, db
+from workcell.cli.main import main
+from workcell.repositories.workspaces import WorkspacesRepo
+from workcell.server.app import create_app
 
 FCTL = Path(sys.executable).parent / "fctl"
 
@@ -64,7 +64,7 @@ def test_serve_port_option(uvicorn_calls):  # AC5
 def test_serve_prints_banner_before_run(uvicorn_calls):  # AC7
     main(["serve", "--port", "5000"])
     assert uvicorn_calls[0]["stdout"] == (
-        f"Claude Factories → http://127.0.0.1:5000 (data: {config.data_dir()})\n"
+        f"Workcell → http://127.0.0.1:5000 (data: {config.data_dir()})\n"
     )
 
 
@@ -77,7 +77,7 @@ def test_serve_host_option(uvicorn_calls):  # 027 AC1
 
 def test_serve_banner_shows_host(uvicorn_calls):  # 027 AC3
     main(["serve", "--host", "0.0.0.0", "--port", "5000"])
-    assert uvicorn_calls[0]["stdout"] == f"Claude Factories → http://0.0.0.0:5000 (data: {config.data_dir()})\n"
+    assert uvicorn_calls[0]["stdout"] == f"Workcell → http://0.0.0.0:5000 (data: {config.data_dir()})\n"
 
 
 def test_serve_help_lists_host():  # 027 AC4

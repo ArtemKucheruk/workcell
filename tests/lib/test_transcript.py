@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from claude_factories.lib.transcript import events, first_round, folder_name, summary
+from workcell.lib.transcript import events, first_round, folder_name, summary
 
 
 def line(**fields) -> str:

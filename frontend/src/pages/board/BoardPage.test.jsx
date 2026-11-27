@@ -113,14 +113,14 @@ test('AC1: /projects/3 shows the project, its workspace, and the title', async (
   const h1 = screen.getByRole('heading', { level: 1 })
   expect(h1.textContent).toBe('api · personal')
   expect(within(h1).getByRole('link', { name: 'personal' }).getAttribute('href')).toBe('/workspaces/2')
-  await waitFor(() => expect(document.title).toBe('api · Claude Factories')) // the title is set in an effect, after the heading renders
+  await waitFor(() => expect(document.title).toBe('api · Workcell')) // the title is set in an effect, after the heading renders
 })
 
-test('FE20: main has no Breadcrumb nav and no Claude Factories link', async () => {
+test('FE20: main has no Breadcrumb nav and no Workcell link', async () => {
   await open(board())
   const main = within(screen.getByRole('main'))
   expect(main.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
-  expect(main.queryByRole('link', { name: 'Claude Factories' })).toBeNull()
+  expect(main.queryByRole('link', { name: 'Workcell' })).toBeNull()
 })
 
 test('AC2: the header shows Factory: ready ✓, or the uncommitted or none state', async () => {

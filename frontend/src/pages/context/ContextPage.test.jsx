@@ -88,7 +88,7 @@ test('FE1: the page fetches the board view-model, the context, and the items onc
   expect([count(fetch, BOARD), count(fetch, CONTEXT), count(fetch, ITEMS)]).toEqual([1, 1, 1])
   await advance(10_000)
   expect([count(fetch, BOARD), count(fetch, CONTEXT), count(fetch, ITEMS)]).toEqual([1, 1, 1])
-  expect(document.title).toBe('api · Context · Claude Factories')
+  expect(document.title).toBe('api · Context · Workcell')
 })
 
 test("FE2: the pinned card, then the top-level cards in order, each a title button and description; counts, paths, no group's cards", async () => {

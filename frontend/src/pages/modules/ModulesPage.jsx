@@ -221,7 +221,7 @@ function Modules({ id }) {
   const [said, setSaid] = useState('')
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Modules · Claude Factories`
+    if (name) document.title = `${name} · Modules · Workcell`
   }, [name])
 
   const missing = [pageError, error].find((e) => e?.status === 404)

@@ -6,9 +6,9 @@ import socket
 import pytest
 from conftest import PLANE_KEY, plane_item
 
-from claude_factories.adapters import plane as adapter
-from claude_factories.adapters.plane import Plane
-from claude_factories.domain.errors import Conflict, Failed
+from workcell.adapters import plane as adapter
+from workcell.adapters.plane import Plane
+from workcell.domain.errors import Conflict, Failed
 
 BASE = "/api/v1/workspaces/acme/projects/p-1/"
 

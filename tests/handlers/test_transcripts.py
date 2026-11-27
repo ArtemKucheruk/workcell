@@ -6,11 +6,11 @@ from types import SimpleNamespace
 import pytest
 from conftest import sql
 
-from claude_factories import config, db
-from claude_factories.handlers import runs
-from claude_factories.handlers.transcripts import collect
-from claude_factories.lib.transcript import folder_name
-from claude_factories.server.deps import transaction
+from workcell import config, db
+from workcell.handlers import runs
+from workcell.handlers.transcripts import collect
+from workcell.lib.transcript import folder_name
+from workcell.server.deps import transaction
 
 SID = "6f1c2e0a-1111-2222-3333-444455556666"
 OLD = "2026-01-01T00:00:00Z"

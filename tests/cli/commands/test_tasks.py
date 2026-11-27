@@ -6,7 +6,7 @@ import urllib.parse
 import pytest
 from conftest import git
 
-from claude_factories.cli.main import main
+from workcell.cli.main import main
 
 from ..conftest import PROJECT, RUN, Terminal, fctl, reply, requests
 

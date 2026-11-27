@@ -2,8 +2,8 @@
 
 import pytest
 
-from claude_factories.domain.errors import Invalid
-from claude_factories.lib.patch import split_patch
+from workcell.domain.errors import Invalid
+from workcell.lib.patch import split_patch
 
 PATCH = (
     "diff --git a/a.py b/a.py\n"

@@ -1,6 +1,6 @@
 import pytest
 
-from claude_factories.cli.main import main
+from workcell.cli.main import main
 
 from ..conftest import reply, requests
 

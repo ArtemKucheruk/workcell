@@ -51,7 +51,7 @@ test('AC20, FE7: / shows the tiles in the Attention and Throughput groups with c
   expect(screen.getByText('Attention').tagName).not.toMatch(/^H/) // Q7: a small label, not a heading
   expect([...group('Attention'), ...group('Throughput')].some((a) => a.hasAttribute('aria-current'))).toBe(false)
   expect(fetched(fetch)).toContain('/api/pages/dashboard')
-  await waitFor(() => expect(document.title).toBe('Claude Factories')) // the title is set in an effect, after the heading renders
+  await waitFor(() => expect(document.title).toBe('Workcell')) // the title is set in an effect, after the heading renders
   unmount()
 
   mockFetch({ 'GET /api/pages/dashboard?show=done_week': [200, page({ show: 'done_week', listed: [] })] })

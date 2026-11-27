@@ -2,7 +2,7 @@
 
 import pytest
 
-from claude_factories.lib.context_file import allowed, derive
+from workcell.lib.context_file import allowed, derive
 
 
 @pytest.mark.parametrize("name, ok", [

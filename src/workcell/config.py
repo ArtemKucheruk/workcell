@@ -1,6 +1,7 @@
 """Env and limits (docs/MVP.md §4.7)."""
 
 import os
+import sys
 from pathlib import Path
 
 MAX_PATCH = 5 * 1024 * 1024  # 005 Q5: UTF-8 bytes of the patch alone
@@ -13,8 +14,32 @@ MAX_UNPACKED = 500 * 1024 * 1024  # 032 Q7: the sum of a bundle's declared file 
 MAX_GRAPH = 256 * 1024  # 051 rule 1: UTF-8 bytes of a factory graph's compact JSON as stored
 
 
+HOME = ".workcell"
+OLD_HOME = ".claude-factories"  # 116 Q4: the data dir before the rename, read only by migrate_home
+
+
 def data_dir() -> Path:
-    return Path(os.environ.get("FCTL_HOME") or Path.home() / ".claude-factories")
+    return Path(os.environ.get("FCTL_HOME") or Path.home() / HOME)
+
+
+def migrate_home() -> None:
+    """116 AC5-AC8: with FCTL_HOME unset, move a real ~/.claude-factories to a missing ~/.workcell once.
+    Q1: the old path becomes a symlink to the new one, so every stored absolute path (an account's
+    config_dir, a run's log_path, worktrees) still resolves, and no row is rewritten.
+    cli/services.py repeats this for `fctl service install` (Q2)."""
+    if os.environ.get("FCTL_HOME"):
+        return
+    old, new = Path.home() / OLD_HOME, Path.home() / HOME
+    if old.is_symlink() or not old.is_dir():
+        return
+    if os.path.lexists(new):
+        print(f"warning: both {old} and {new} exist; using {new}", file=sys.stderr)
+        return
+    os.rename(old, new)
+    try:
+        old.symlink_to(new)
+    except OSError as e:
+        print(f"warning: moved {old} to {new}, but can't link the old path to it: {e.strerror}", file=sys.stderr)
 
 
 def claude_config_dir() -> Path:

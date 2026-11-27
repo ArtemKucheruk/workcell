@@ -26,6 +26,7 @@ def connect() -> sqlite3.Connection:
 
 def init() -> None:
     """Create the data dir and apply schema.sql in WAL mode. Safe to run on every startup."""
+    config.migrate_home()  # 116 AC5: before mkdir, or a new empty ~/.workcell would block the move
     config.data_dir().mkdir(parents=True, exist_ok=True)
     with closing(connect()) as conn:
         conn.execute("PRAGMA journal_mode = WAL")

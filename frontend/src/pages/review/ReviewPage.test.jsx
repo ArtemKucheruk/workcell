@@ -112,7 +112,7 @@ test('AC1, 047 FE3: /tasks/12/review fetches the view-model with no query and sh
   ])
   const current = within(crumbs).getByText('Review')
   expect([current.getAttribute('aria-current'), current.closest('a')]).toEqual(['page', null])
-  await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Review · Claude Factories'))
+  await waitFor(() => expect(document.title).toBe('#12 Rate-limit login · Review · Workcell'))
 })
 
 const cls = (name) => new RegExp(`(^|\\s)${name}(\\s|$)`)

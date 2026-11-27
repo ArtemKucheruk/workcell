@@ -20,11 +20,11 @@ from controllers.test_transcripts import add_transcript
 from fastapi.testclient import TestClient
 from test_architecture import PKG, REPO, checked, fastapi_outside, sql_outside, wrong_edges
 
-from claude_factories import config, db
-from claude_factories.adapters.git import SubprocessGit
-from claude_factories.handlers import factory_import, pages
-from claude_factories.server.app import create_app
-from claude_factories.server.deps import get_git
+from workcell import config, db
+from workcell.adapters.git import SubprocessGit
+from workcell.handlers import factory_import, pages
+from workcell.server.app import create_app
+from workcell.server.deps import get_git
 
 PRO = '{"authMethod":"claude.ai","subscriptionType":"pro"}'
 PRO_EMAIL = '{"authMethod":"claude.ai","subscriptionType":"pro","email":"artem@example.com"}'

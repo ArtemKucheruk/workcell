@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 from handlers.test_transcripts import (MAIN, SID, add_run, add_task, assistant, copy, jsonl, line, plant, rows,
                                        user)
 
-from claude_factories.server.app import create_app
-from claude_factories.server.deps import get_claude
+from workcell.server.app import create_app
+from workcell.server.deps import get_claude
 
 LISTED = ("id", "run_id", "round", "agent_type", "name", "model", "turns", "input_tokens", "cache_read_tokens",
           "output_tokens", "started_at", "ended_at")

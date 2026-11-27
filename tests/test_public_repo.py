@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 
 
-from claude_factories.cli.main import build_parser
+from workcell.cli.main import build_parser
 
 REPO = Path(__file__).resolve().parents[1]
 README = (REPO / "README.md").read_text(encoding="utf-8")

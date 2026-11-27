@@ -2,7 +2,7 @@
 
 import pytest
 
-from claude_factories.lib.pull_request import checks, pr_body, pr_number
+from workcell.lib.pull_request import checks, pr_body, pr_number
 
 URL = "http://127.0.0.1:4545/tasks/12"
 

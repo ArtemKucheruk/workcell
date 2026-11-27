@@ -3,7 +3,7 @@
 services:
   backend:
     build: .
-    image: claude-factories-backend   # what a custom image builds FROM (compose.override.example.yaml)
+    image: workcell-backend   # what a custom image builds FROM (compose.override.example.yaml)
     init: true   # Docker's init is PID 1: it reaps what a stopped run leaves and forwards SIGTERM (028 Q8)
     volumes:
       - fctl-home:/data

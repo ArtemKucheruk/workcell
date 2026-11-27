@@ -295,7 +295,7 @@ test("FE15: a failed load keeps the sidebar, says Projects didn't load with no a
     expect(message.closest('[role="alert"]')).toBeNull()
     expect(sidebar().queryByRole('alert')).toBeNull()
     expect(await sidebar().findByRole('link', { name: 'Claude: Pro ✓' })).toBeTruthy()
-    for (const name of ['Claude Factories', 'Dashboard', 'fctl reference']) {
+    for (const name of ['Workcell', 'Dashboard', 'fctl reference']) {
       expect(sidebar().getByRole('link', { name })).toBeTruthy()
     }
     expect(await screen.findByRole('heading', { level: 1, name: 'fctl reference' })).toBeTruthy()

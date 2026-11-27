@@ -109,7 +109,7 @@ the tests and submit, instead of spawning a second builder.
 The global `fctl` (or the running backend) serves older code than the checkout.
 
 - Check the install is editable: in
-  `~/.local/share/uv/tools/claude-factories/lib/python3.*/site-packages/claude_factories-*.dist-info/direct_url.json`,
+  `~/.local/share/uv/tools/workcell/lib/python3.*/site-packages/workcell-*.dist-info/direct_url.json`,
   `"editable": true`. Fix: `uv tool install --editable --reinstall <checkout>`.
 - `fctl service status` shows `stale` when a service runs another commit than the default branch:
   `fctl service reload`.
@@ -120,7 +120,7 @@ The global `fctl` (or the running backend) serves older code than the checkout.
 If a test or review started a backend or `fctl seed` without a temp `FCTL_HOME`, or with the
 inherited `CLAUDE_CONFIG_DIR`, say so in your report:
 
-- `FCTL_HOME`: the user's `~/.claude-factories/factory.db` may have gained the branch's tables
+- `FCTL_HOME`: the user's `~/.workcell/factory.db` may have gained the branch's tables
   (schema init runs on open, before any check refuses). Name the tables.
 - `CLAUDE_CONFIG_DIR`: `claude auth status` may have run against the user's real login.
 

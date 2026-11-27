@@ -24,7 +24,7 @@ not by `fctl`.
 | Variable | Default | Who reads it | What it is |
 |---|---|---|---|
 | `FCTL_URL` | `http://127.0.0.1:4545` | every command that calls the app | The backend's address; a trailing `/` is dropped. The backend accepts only `Host` `127.0.0.1` or `localhost` (else `403 Host must be 127.0.0.1 or localhost`). A run gets it set to the port the backend listens on. |
-| `FCTL_HOME` | `~/.claude-factories` | `fctl serve`, `fctl seed`, `fctl service` | The data dir: `factory.db`, `runs/<id>.jsonl`, and for `fctl service` its `logs/` and `service.json`. Every other command works through the API and never opens it. |
+| `FCTL_HOME` | `~/.workcell` | `fctl serve`, `fctl seed`, `fctl service` | The data dir: `factory.db`, `runs/<id>.jsonl`, and for `fctl service` its `logs/` and `service.json`. Every other command works through the API and never opens it. |
 | `FCTL_BACKEND_PORT`, `FCTL_FRONTEND_PORT` | set per run | agents in a run | Two free loopback ports for this run. If you start the app or any server to try a change, listen on these, never on 4545 or 3000. |
 | `CLAUDE_CONFIG_DIR` | unset (`~/.claude`) | Claude Code, the backend | A run gets its Claude account's config dir. Unset it before starting a test backend ([below](#testing-the-app-without-touching-real-data)). |
 | `FCTL_IN_DOCKER` | unset | `fctl service` | `1` in the container image; `fctl service` refuses there. |
@@ -137,11 +137,11 @@ values into anything you post. Cite a secret as `file:line`, never its value.
 
 ## Testing the app without touching real data
 
-This applies when the repo **is** Claude Factories (or any task makes you start its backend,
+This applies when the repo **is** Workcell (or any task makes you start its backend,
 `fctl serve`, or `fctl seed`).
 
 - **Use a temp `FCTL_HOME`.** Opening the database runs the schema init before any command's own
-  checks, so even a refused `fctl seed` against the default `~/.claude-factories` applies the
+  checks, so even a refused `fctl seed` against the default `~/.workcell` applies the
   worktree's (unmerged) schema to the user's real `factory.db`.
 - **Use your run's ports.** `--port $FCTL_BACKEND_PORT`, and point `FCTL_URL` at it. Port 4545 is
   the user's own backend; never bind it, and never bind `0.0.0.0`.
@@ -155,7 +155,7 @@ This applies when the repo **is** Claude Factories (or any task makes you start 
 - **Stop it before you finish.**
 
 ```sh
-home="$(mktemp -d)"                                   # never the default ~/.claude-factories
+home="$(mktemp -d)"                                   # never the default ~/.workcell
 FCTL_HOME="$home" uv run fctl seed                    # optional demo data; no HTTP, writes only $home
 FCTL_HOME="$home" env -u CLAUDE_CONFIG_DIR PATH="<dir with a fake claude>:$PATH" \
     uv run fctl serve --port "$FCTL_BACKEND_PORT" &

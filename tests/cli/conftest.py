@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 from conftest import commit, write
 
-from claude_factories.cli.main import main
+from workcell.cli.main import main
 
 PROJECT = {"id": 3, "name": "api", "default_branch": "main", "factory": "none"}
 RUN = {"run_id": 41, "session_id": "s", "worktree": ".claude/worktrees/12-x", "account_id": 2, "account": "b@y"}

@@ -524,7 +524,7 @@ function ProjectSettings({ id }) {
   const [importOut, setImportOut] = useState(null)
   const name = page?.project.name
   useEffect(() => {
-    if (name) document.title = `${name} · Settings · Claude Factories`
+    if (name) document.title = `${name} · Settings · Workcell`
   }, [name])
 
   if (error?.status === 404) return <NotFound detail={error.message} />
